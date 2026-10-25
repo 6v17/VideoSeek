@@ -23,6 +23,8 @@ class PreviewController:
         self._warmup_started = False
         self._warmup_done = False
         self._warmup_done_callbacks: list = []
+        self._prepare_worker = None
+        self._prepare_token = 0
 
     def resolve_clip_window(self, video_path, start_sec, end_sec=None):
         from src.media.export_clip import resolve_base_clip_window as _resolve_base_clip_window
@@ -51,13 +53,14 @@ class PreviewController:
         clip_start, clip_duration = self.resolve_clip_window(video_path, start_sec, end_sec=end_sec)
         clip_end = clip_start + clip_duration
         self.cleanup_previous_preview()
+        self._cancel_prepare_worker()
 
-        from src.media.export_clip import ensure_seekable_preview_proxy
+        from src.media.export_clip import get_seekable_preview_proxy_if_ready
 
-        playback_path = ensure_seekable_preview_proxy(video_path)
+        ready_path = get_seekable_preview_proxy_if_ready(video_path)
         self.current_preview_context = {
             "video_path": video_path,
-            "playback_path": playback_path,
+            "playback_path": ready_path if ready_path is not None else video_path,
             "start_sec": clip_start,
             "end_sec": clip_end,
             "suggested_sec": float(start_sec),
@@ -74,6 +77,28 @@ class PreviewController:
         except Exception as exc:
             logger.debug("Playback telemetry session start skipped: %s", exc)
 
+        if ready_path is None:
+            # mpg/mpeg remux would block the UI thread; prepare off-thread.
+            return self._start_proxy_prepare(
+                video_path,
+                start_sec=float(start_sec),
+                clip_start=clip_start,
+                clip_end=clip_end,
+                clip_duration=clip_duration,
+            )
+
+        return self._play_ready_path(
+            video_path,
+            ready_path,
+            clip_start=clip_start,
+            clip_end=clip_end,
+            clip_duration=clip_duration,
+        )
+
+    def _play_ready_path(self, video_path, playback_path, *, clip_start, clip_end, clip_duration):
+        if self.current_preview_context is not None:
+            self.current_preview_context["playback_path"] = playback_path
+
         vlc_player = self._ensure_vlc_player()
         host = self._vlc_embed_host()
         # Keep main preview on the search-page surface (floating dialog uses another MediaPlayer).
@@ -89,20 +114,111 @@ class PreviewController:
         if is_http_media_url(video_path):
             return False
 
-        from src.media.export_clip import build_preview_cache_path, create_preview_clip
+        from src.media.export_clip import build_preview_cache_path
 
         cache_path = build_preview_cache_path(video_path, clip_start)
-        result = create_preview_clip(playback_path, clip_start, cache_path, duration_sec=clip_duration)
-        if result.returncode == 0:
-            self.current_preview_path = cache_path
-            self._set_preview_surface_idle(False)
-            media_player.setSource(QUrl.fromLocalFile(cache_path))
-            media_player.play()
-            return True
+        return self._start_clip_prepare(
+            video_path,
+            playback_path=playback_path,
+            clip_start=clip_start,
+            clip_duration=clip_duration,
+            cache_path=cache_path,
+        )
 
-        if os.path.exists(cache_path):
-            os.remove(cache_path)
-        return False
+    def _start_proxy_prepare(self, video_path, *, start_sec, clip_start, clip_end, clip_duration):
+        from ui.playback.preview_prepare_worker import PreviewPrepareWorker
+
+        token = self._next_prepare_token()
+        worker = PreviewPrepareWorker(mode="proxy", video_path=video_path)
+        self._prepare_worker = worker
+        worker.finished_prepare.connect(
+            lambda result, t=token, vp=video_path, cs=clip_start, ce=clip_end, cd=clip_duration: self._on_proxy_prepared(
+                t, vp, cs, ce, cd, result
+            )
+        )
+        worker.start()
+        return True
+
+    def _start_clip_prepare(self, video_path, *, playback_path, clip_start, clip_duration, cache_path):
+        from ui.playback.preview_prepare_worker import PreviewPrepareWorker
+
+        token = self._next_prepare_token()
+        worker = PreviewPrepareWorker(
+            mode="clip",
+            video_path=video_path,
+            playback_path=playback_path,
+            clip_start=clip_start,
+            clip_duration=clip_duration,
+            cache_path=cache_path,
+        )
+        self._prepare_worker = worker
+        worker.finished_prepare.connect(
+            lambda result, t=token, cp=cache_path: self._on_clip_prepared(t, cp, result)
+        )
+        worker.start()
+        return True
+
+    def _next_prepare_token(self) -> int:
+        self._prepare_token += 1
+        return self._prepare_token
+
+    def _cancel_prepare_worker(self) -> None:
+        self._prepare_token += 1
+        worker = self._prepare_worker
+        self._prepare_worker = None
+        if worker is None:
+            return
+        try:
+            worker.cancel()
+        except Exception as exc:
+            logger.debug("Preview prepare cancel skipped: %s", exc)
+        try:
+            worker.finished_prepare.disconnect()
+        except Exception:
+            pass
+        if worker.isRunning():
+            worker.wait(100)
+        worker.deleteLater()
+
+    def _on_proxy_prepared(self, token, video_path, clip_start, clip_end, clip_duration, result):
+        if token != self._prepare_token:
+            return
+        self._prepare_worker = None
+        if not isinstance(result, dict) or result.get("cancelled") or result.get("error"):
+            return
+        playback_path = result.get("playback_path") or video_path
+        self._play_ready_path(
+            video_path,
+            playback_path,
+            clip_start=clip_start,
+            clip_end=clip_end,
+            clip_duration=clip_duration,
+        )
+
+    def _on_clip_prepared(self, token, cache_path, result):
+        if token != self._prepare_token:
+            return
+        self._prepare_worker = None
+        if not isinstance(result, dict) or result.get("cancelled") or result.get("error"):
+            if os.path.exists(cache_path):
+                try:
+                    os.remove(cache_path)
+                except OSError:
+                    pass
+            return
+        clip_result = result.get("result")
+        if clip_result is None or getattr(clip_result, "returncode", 1) != 0:
+            if os.path.exists(cache_path):
+                try:
+                    os.remove(cache_path)
+                except OSError:
+                    pass
+            return
+        self.current_preview_path = cache_path
+        self._set_preview_surface_idle(False)
+        media_player = self.parent_window.media_player
+        media_player.setSource(QUrl.fromLocalFile(cache_path))
+        media_player.play()
 
     def start_warmup(self, on_done=None):
         """Warm libvlc on the UI thread (libvlc is not thread-safe for Instance create)."""
@@ -175,6 +291,7 @@ class PreviewController:
             logger.debug("QMediaPlayer pause for dialog skipped: %s", exc)
 
     def stop_preview(self, *, skip_telemetry: bool = False):
+        self._cancel_prepare_worker()
         if skip_telemetry:
             try:
                 from src.services.search_telemetry import cancel_playback_session
@@ -328,6 +445,7 @@ class PreviewController:
         self.current_preview_path = None
 
     def shutdown(self):
+        self._cancel_prepare_worker()
         if self.vlc_player is not None:
             self.vlc_player.shutdown(fast=True)
             self.vlc_player = None

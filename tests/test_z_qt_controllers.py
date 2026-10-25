@@ -904,7 +904,6 @@ class PreviewControllerTests(unittest.TestCase):
         self.assertTrue(result)
         vlc_player.play.assert_called_once_with(url, 27.0, stop_sec=33.0)
 
-    @patch("src.media.export_clip.create_preview_clip")
     @patch("src.media.export_clip.build_preview_cache_path", return_value="D:/cache/preview.mp4")
     @patch("src.media.export_clip.resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
@@ -913,25 +912,27 @@ class PreviewControllerTests(unittest.TestCase):
         mock_vlc_cls,
         _mock_window,
         _mock_cache_path,
-        mock_create_preview,
     ):
         parent = _make_parent_window()
         vlc_player = MagicMock()
         vlc_player.play.return_value = False
         mock_vlc_cls.return_value = vlc_player
-        mock_create_preview.return_value = MagicMock(returncode=0)
         controller = PreviewController(parent)
+        fake_worker = MagicMock()
+        fake_worker.isRunning.return_value = False
 
-        result = controller.play("D:/videos/clip.mp4", 30.0)
+        with patch(
+            "ui.playback.preview_prepare_worker.PreviewPrepareWorker",
+            return_value=fake_worker,
+        ) as worker_cls:
+            result = controller.play("D:/videos/clip.mp4", 30.0)
 
         self.assertTrue(result)
-        mock_create_preview.assert_called_once_with(
-            "D:/videos/clip.mp4",
-            27.0,
-            "D:/cache/preview.mp4",
-            duration_sec=6.0,
-        )
-        parent.media_player.play.assert_called_once()
+        worker_cls.assert_called_once()
+        kwargs = worker_cls.call_args.kwargs
+        self.assertEqual(kwargs.get("mode"), "clip")
+        self.assertEqual(kwargs.get("cache_path"), "D:/cache/preview.mp4")
+        fake_worker.start.assert_called_once()
 
     def test_stop_preview_clears_current_preview_context(self):
         parent = _make_parent_window()

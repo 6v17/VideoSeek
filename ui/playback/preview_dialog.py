@@ -446,6 +446,7 @@ class PreviewDialog(QDialog):
         self._closing = True
         self._close_requested = True
         self._play_token += 1  # cancel any deferred play()
+        self._cancel_prepare_worker()
         self.update_timer.stop()
         self.play_button.setEnabled(False)
         self.slider.setEnabled(False)
@@ -543,9 +544,17 @@ class PreviewDialog(QDialog):
             return
         self.update_timer.stop()
         player = self._ensure_player()
-        from src.media.export_clip import ensure_seekable_preview_proxy
+        from src.media.export_clip import get_seekable_preview_proxy_if_ready
 
-        playback_path = ensure_seekable_preview_proxy(self.video_path)
+        ready_path = get_seekable_preview_proxy_if_ready(self.video_path)
+        if ready_path is None:
+            self._start_proxy_prepare(player)
+            return
+        self._finish_playback_with_path(player, ready_path)
+
+    def _finish_playback_with_path(self, player, playback_path):
+        if self._closing or self._close_requested:
+            return
         if not player.play(playback_path, self.start_sec, stop_sec=self.end_sec):
             self._detail_error = self.texts.get("preview_failed", "Preview failed")
             self._apply_detail_label()
@@ -564,6 +573,51 @@ class PreviewDialog(QDialog):
         self.update_timer.start()
         self._update_segment_ui()
         self._sync_ui()
+
+    def _start_proxy_prepare(self, player):
+        from ui.playback.preview_prepare_worker import PreviewPrepareWorker
+
+        self._cancel_prepare_worker()
+        token = self._prepare_token + 1
+        self._prepare_token = token
+        worker = PreviewPrepareWorker(mode="proxy", video_path=self.video_path)
+        self._prepare_worker = worker
+        worker.finished_prepare.connect(
+            lambda result, t=token, p=player: self._on_proxy_prepared(t, p, result)
+        )
+        worker.start()
+
+    def _on_proxy_prepared(self, token, player, result):
+        if token != self._prepare_token or self._closing or self._close_requested:
+            return
+        self._prepare_worker = None
+        if not isinstance(result, dict) or result.get("cancelled") or result.get("error"):
+            self._detail_error = self.texts.get("preview_failed", "Preview failed")
+            self._apply_detail_label()
+            return
+        playback_path = result.get("playback_path") or self.video_path
+        self._finish_playback_with_path(player, playback_path)
+
+    def _cancel_prepare_worker(self):
+        self._prepare_token += 1
+        worker = self._prepare_worker
+        self._prepare_worker = None
+        if worker is None:
+            return
+        try:
+            worker.cancel()
+        except Exception as exc:
+            logger.debug("Preview dialog prepare cancel skipped: %s", exc)
+        try:
+            worker.finished_prepare.disconnect()
+        except Exception:
+            pass
+        if worker.isRunning():
+            worker.wait(100)
+        try:
+            worker.deleteLater()
+        except Exception as exc:
+            logger.debug("Preview dialog prepare worker deleteLater failed: %s", exc)
 
     def _on_slider_released(self):
         if self._closing:
