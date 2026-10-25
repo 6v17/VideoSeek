@@ -48,7 +48,7 @@ class TimelineNormalizeTests(unittest.TestCase):
 
     def test_missing_path_skipped(self):
         items = [
-            AgentTimelineClipItem(video_path="D:/no_such_clip_xyz.mp4", time_sec=1.0),
+            AgentTimelineClipItem(video_path="no_such_clip_xyz.mp4", time_sec=1.0),
         ]
         shots, skipped = normalize_timeline_items(items)
         self.assertEqual(shots, [])
@@ -67,46 +67,57 @@ class TimelineNormalizeTests(unittest.TestCase):
 
 
 class TimelineExecuteTests(unittest.TestCase):
+    def _video(self, directory: str, name: str) -> str:
+        path = os.path.join(directory, name)
+        with open(path, "wb") as handle:
+            handle.write(b"fake")
+        return path
+
     def test_empty_items_400(self):
-        body = AgentTimelineExportRequest(format="fcpxml", items=[], write_path="D:/out.fcpxml")
+        body = AgentTimelineExportRequest(format="fcpxml", items=[], write_path="out.fcpxml")
         with self.assertRaises(ValueError):
             execute_agent_timeline_export(body)
 
     def test_invalid_format(self):
         body = AgentTimelineExportRequest(
             format="edl",
-            items=[AgentTimelineClipItem(video_path="D:/a.mp4", time_sec=1.0)],
+            items=[AgentTimelineClipItem(video_path="a.mp4", time_sec=1.0)],
         )
         with self.assertRaises(ValueError):
             execute_agent_timeline_export(body)
 
-    @patch("src.web.agent_api.timeline_export.os.path.isfile", return_value=True)
     @patch("src.services.fcpxml_export_service.export_shot_list_nle_xml")
     @patch("src.services.clip_export_service.output_path_allowed", return_value=True)
-    def test_fcpxml_dispatch(self, _allowed, mock_export, _isfile):
-        mock_export.return_value = {
-            "ok": True,
-            "write_path": "D:/Exports/out.fcpxml",
-            "format": "fcpxml",
-            "clip_count": 1,
-            "exported_count": 1,
-            "skipped_remote": 0,
-            "skipped_missing": 0,
-            "fcpxml_version": "1.9",
-        }
-        body = AgentTimelineExportRequest(
-            format="fcpxml",
-            write_path="D:/Exports/out",
-            items=[
-                AgentTimelineClipItem(video_path="D:/lib/a.mp4", time_sec=10.0),
-                AgentTimelineClipItem(video_path="D:/lib/b.mp4", start_sec=1.0, end_sec=3.0),
-            ],
-        )
-        payload = execute_agent_timeline_export(body)
+    def test_fcpxml_dispatch(self, _allowed, mock_export):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "out.fcpxml")
+            mock_export.return_value = {
+                "ok": True,
+                "write_path": out,
+                "format": "fcpxml",
+                "clip_count": 1,
+                "exported_count": 1,
+                "skipped_remote": 0,
+                "skipped_missing": 0,
+                "fcpxml_version": "1.9",
+            }
+            body = AgentTimelineExportRequest(
+                format="fcpxml",
+                write_path=os.path.join(tmp, "out"),
+                items=[
+                    AgentTimelineClipItem(video_path=self._video(tmp, "a.mp4"), time_sec=10.0),
+                    AgentTimelineClipItem(
+                        video_path=self._video(tmp, "b.mp4"),
+                        start_sec=1.0,
+                        end_sec=3.0,
+                    ),
+                ],
+            )
+            payload = execute_agent_timeline_export(body)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["format"], "fcpxml")
         self.assertEqual(payload["clip_count"], 1)
-        self.assertEqual(payload["export_path"], "D:/Exports/out.fcpxml")
+        self.assertEqual(payload["export_path"], out)
         mock_export.assert_called_once()
         write_path = mock_export.call_args.kwargs["write_path"]
         self.assertTrue(str(write_path).lower().endswith(".fcpxml"))
@@ -115,41 +126,58 @@ class TimelineExecuteTests(unittest.TestCase):
         self.assertEqual(shots[0].match_kind, "frame")
         self.assertEqual(shots[1].match_kind, "segment")
 
-    @patch("src.web.agent_api.timeline_export.os.path.isfile", return_value=True)
     @patch("src.services.fcpxml_export_service.export_shot_list_nle_xml")
     @patch("src.services.clip_export_service.output_path_allowed", return_value=True)
-    def test_fcpxml_output_dir_auto_name(self, _allowed, mock_export, _isfile):
-        mock_export.return_value = {
-            "ok": True,
-            "write_path": "D:/Exports/RoughCut.fcpxml",
-            "format": "fcpxml",
-            "clip_count": 1,
-            "exported_count": 1,
-            "skipped_remote": 0,
-            "skipped_missing": 0,
-        }
-        body = AgentTimelineExportRequest(
-            format="fcpxml",
-            project="RoughCut",
-            output_dir="D:/Exports",
-            items=[AgentTimelineClipItem(video_path="D:/lib/a.mp4", time_sec=2.0)],
-        )
-        payload = execute_agent_timeline_export(body)
-        write_path = mock_export.call_args.kwargs["write_path"]
+    def test_fcpxml_output_dir_auto_name(self, _allowed, mock_export):
+        with tempfile.TemporaryDirectory() as tmp:
+            exports = os.path.join(tmp, "Exports")
+            expected = os.path.join(exports, "RoughCut.fcpxml")
+            mock_export.return_value = {
+                "ok": True,
+                "write_path": expected,
+                "format": "fcpxml",
+                "clip_count": 1,
+                "exported_count": 1,
+                "skipped_remote": 0,
+                "skipped_missing": 0,
+            }
+            body = AgentTimelineExportRequest(
+                format="fcpxml",
+                project="RoughCut",
+                output_dir=exports,
+                items=[AgentTimelineClipItem(video_path=self._video(tmp, "a.mp4"), time_sec=2.0)],
+            )
+            payload = execute_agent_timeline_export(body)
+            write_path = mock_export.call_args.kwargs["write_path"]
         self.assertTrue(str(write_path).replace("\\", "/").endswith("/RoughCut.fcpxml"))
-        self.assertEqual(payload["export_path"], "D:/Exports/RoughCut.fcpxml")
+        self.assertEqual(payload["export_path"], expected)
+
+    @patch("src.services.clip_export_service.output_path_allowed", return_value=True)
+    def test_output_dir_not_writable(self, _allowed):
+        with tempfile.TemporaryDirectory() as tmp:
+            body = AgentTimelineExportRequest(
+                format="fcpxml",
+                output_dir=os.path.join(tmp, "missing-drive"),
+                items=[AgentTimelineClipItem(video_path=self._video(tmp, "a.mp4"), time_sec=1.0)],
+            )
+            with patch(
+                "src.web.agent_api.timeline_export.os.makedirs",
+                side_effect=FileNotFoundError("missing drive"),
+            ):
+                with self.assertRaises(ValueError) as ctx:
+                    execute_agent_timeline_export(body)
+        self.assertIn("not writable", str(ctx.exception))
 
     def test_xml_requires_path(self):
-        body = AgentTimelineExportRequest(
-            format="fcp7_xml",
-            items=[AgentTimelineClipItem(video_path="D:/lib/a.mp4", time_sec=1.0)],
-        )
-        with patch("src.web.agent_api.timeline_export.os.path.isfile", return_value=True):
+        with tempfile.TemporaryDirectory() as tmp:
+            body = AgentTimelineExportRequest(
+                format="fcp7_xml",
+                items=[AgentTimelineClipItem(video_path=self._video(tmp, "a.mp4"), time_sec=1.0)],
+            )
             with self.assertRaises(ValueError) as ctx:
                 execute_agent_timeline_export(body)
         self.assertIn("output_dir", str(ctx.exception))
 
-    @patch("src.web.agent_api.timeline_export.os.path.isfile", return_value=True)
     @patch(
         "src.services.jianying_draft_service.export_shot_list_to_jianying_draft",
     )
@@ -157,25 +185,28 @@ class TimelineExecuteTests(unittest.TestCase):
         "src.services.jianying_draft_service.is_jianying_draft_support_available",
         return_value=True,
     )
-    def test_jianying_dispatch(self, _avail, mock_export, _isfile):
-        mock_export.return_value = {
-            "draft_name": "VideoSeek导入-1",
-            "drafts_dir": "D:/Drafts",
-            "draft_path": "D:/Drafts/VideoSeek导入-1",
-            "exported_count": 1,
-            "skipped_count": 0,
-            "skipped": [],
-        }
-        body = AgentTimelineExportRequest(
-            format="jianying",
-            drafts_dir="D:/Drafts",
-            items=[AgentTimelineClipItem(video_path="D:/lib/a.mp4", time_sec=5.0)],
-        )
-        payload = execute_agent_timeline_export(body)
+    def test_jianying_dispatch(self, _avail, mock_export):
+        with tempfile.TemporaryDirectory() as tmp:
+            drafts = os.path.join(tmp, "Drafts")
+            draft_path = os.path.join(drafts, "VideoSeek导入-1")
+            mock_export.return_value = {
+                "draft_name": "VideoSeek导入-1",
+                "drafts_dir": drafts,
+                "draft_path": draft_path,
+                "exported_count": 1,
+                "skipped_count": 0,
+                "skipped": [],
+            }
+            body = AgentTimelineExportRequest(
+                format="jianying",
+                drafts_dir=drafts,
+                items=[AgentTimelineClipItem(video_path=self._video(tmp, "a.mp4"), time_sec=5.0)],
+            )
+            payload = execute_agent_timeline_export(body)
         self.assertEqual(payload["format"], "jianying")
         self.assertEqual(payload["draft_name"], "VideoSeek导入-1")
         self.assertEqual(payload["clip_count"], 1)
-        self.assertEqual(payload["export_path"], "D:/Drafts/VideoSeek导入-1")
+        self.assertEqual(payload["export_path"], draft_path)
         mock_export.assert_called_once()
 
 

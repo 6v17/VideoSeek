@@ -103,6 +103,14 @@ def normalize_timeline_items(
     return shots, skipped
 
 
+def _mkdir_export_dir(directory: str, *, label: str) -> None:
+    """Create an export folder. A missing drive or denied USB must not become a 500."""
+    try:
+        os.makedirs(directory, exist_ok=True)
+    except OSError as exc:
+        raise ValueError(f"{label} is not writable: {directory}") from exc
+
+
 def _sanitize_export_stem(stem: str) -> str:
     import re
 
@@ -128,14 +136,14 @@ def _resolve_xml_write_path(
     if not directory:
         raise ValueError(
             "fcpxml / fcp7_xml require write_path or output_dir "
-            "(e.g. output_dir=\"D:/Exports\")."
+            '(e.g. output_dir="Exports").'
         )
     root = os.path.normpath(os.path.abspath(os.path.expanduser(directory)))
     if not root:
         raise ValueError("output_dir is empty.")
     if not output_path_allowed(root):
         raise ValueError("output_dir must not be inside an indexed library root.")
-    os.makedirs(root, exist_ok=True)
+    _mkdir_export_dir(root, label="output_dir")
     ext = ".fcpxml" if format_key == "fcpxml" else ".xml"
     stem = _sanitize_export_stem(project)
     candidate = os.path.join(root, f"{stem}{ext}")
@@ -165,7 +173,7 @@ def _ensure_write_path(write_path: str, *, format_key: str) -> str:
     if parent and not output_path_allowed(parent):
         raise ValueError("write_path must not be inside an indexed library root.")
     if parent:
-        os.makedirs(parent, exist_ok=True)
+        _mkdir_export_dir(parent, label="write_path")
     return target
 
 
