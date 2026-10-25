@@ -166,6 +166,29 @@ def populate_result_table(
     highlight_query: str = "",
     dialogue_match_mode: str = "",
 ):
+    """Fill the local-search result table.
+
+    Prefer the virtualized ``ResultTable.populate_results`` path (model + delegates).
+    The QTableWidget ``setCellWidget`` path remains only as a legacy fallback.
+    """
+    populate = getattr(table, "populate_results", None)
+    if callable(populate):
+        populate(
+            results,
+            on_preview,
+            on_locate,
+            on_export,
+            texts,
+            on_deep_locate=on_deep_locate,
+            on_add_to_shot_list=on_add_to_shot_list,
+            clip_score_mode=clip_score_mode,
+            low_confidence_score=low_confidence_score,
+            rank_offset=rank_offset,
+            highlight_query=highlight_query,
+            dialogue_match_mode=dialogue_match_mode,
+        )
+        return
+
     table.setRowCount(0)
     display_texts = texts
     if clip_score_mode:
@@ -211,6 +234,24 @@ def append_result_table_rows(
     highlight_query: str = "",
     dialogue_match_mode: str = "",
 ):
+    append = getattr(table, "append_results", None)
+    if callable(append):
+        append(
+            results,
+            on_preview,
+            on_locate,
+            on_export,
+            texts,
+            on_deep_locate=on_deep_locate,
+            on_add_to_shot_list=on_add_to_shot_list,
+            clip_score_mode=clip_score_mode,
+            low_confidence_score=low_confidence_score,
+            rank_offset=rank_offset,
+            highlight_query=highlight_query,
+            dialogue_match_mode=dialogue_match_mode,
+        )
+        return
+
     _fill_result_table_rows(
         table,
         results,

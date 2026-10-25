@@ -188,6 +188,8 @@ class ResultGridCard(QFrame):
         overlay_root.addWidget(self.action_buttons, 0, 0, Qt.AlignmentFlag.AlignCenter)
         self.action_buttons.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         self._overlay_buttons: list[QPushButton] = []
+        self._actions_ready = False
+        self._pending_action_texts: dict | None = None
 
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
@@ -279,6 +281,11 @@ class ResultGridCard(QFrame):
 
     def _show_overlay_now(self) -> None:
         self._overlay_wanted = True
+        # Defer QPushButton creation until the first hover so populate stays cheap.
+        if not self._actions_ready and self._pending_action_texts is not None:
+            self._rebuild_action_buttons(self._pending_action_texts)
+            self._pending_action_texts = None
+            self._fit_overlay_actions()
         self._layout_thumb_chrome()
         self.action_overlay.show()
         self.action_overlay.raise_()
@@ -466,6 +473,7 @@ class ResultGridCard(QFrame):
         self._overlay_buttons = []
         for index, button in enumerate(buttons):
             self._place_action_button(button, index)
+        self._actions_ready = True
         self._fit_overlay_actions()
 
     def bind(
@@ -523,7 +531,11 @@ class ResultGridCard(QFrame):
         self.meta_label.setToolTip(meta)
         self._refresh_meta_elide()
 
-        self._rebuild_action_buttons(texts or {})
+        # Build overlay buttons lazily on first hover (table virtualization companion).
+        self._clear_action_buttons()
+        self._overlay_buttons = []
+        self._actions_ready = False
+        self._pending_action_texts = dict(texts or {})
         self._hide_timer.stop()
         self._overlay_wanted = False
         self.action_overlay.hide()
