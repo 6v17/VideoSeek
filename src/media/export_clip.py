@@ -398,11 +398,12 @@ def build_seekable_preview_proxy_path(video_path: str) -> str:
     return os.path.join(proxy_dir, f"proxy_{digest}.mp4")
 
 
-def ensure_seekable_preview_proxy(video_path: str) -> str:
-    """Return a seek-friendly local path for preview players.
+def get_seekable_preview_proxy_if_ready(video_path: str) -> str | None:
+    """Return a playable path without running ffmpeg, or None if remux is required.
 
-    ``.mpg`` / ``.mpeg`` often seek tens of seconds early under VLC ``:start-time``.
-    Stream-copy once into MP4 (faststart) so subsequent seeks land correctly.
+    Fast path for UI callers: mp4 / HTTP / missing file / already-cached mpg proxy
+    return immediately. ``None`` means ``ensure_seekable_preview_proxy`` must run
+    off the UI thread.
     """
     from src.media.formats import needs_seekable_preview_proxy
 
@@ -427,6 +428,22 @@ def ensure_seekable_preview_proxy(video_path: str) -> str:
                 return proxy_path
         except OSError:
             pass
+    return None
+
+
+def ensure_seekable_preview_proxy(video_path: str) -> str:
+    """Return a seek-friendly local path for preview players.
+
+    ``.mpg`` / ``.mpeg`` often seek tens of seconds early under VLC ``:start-time``.
+    Stream-copy once into MP4 (faststart) so subsequent seeks land correctly.
+    """
+    ready = get_seekable_preview_proxy_if_ready(video_path)
+    if ready is not None:
+        return ready
+
+    path = os.fspath(video_path)
+    proxy_path = build_seekable_preview_proxy_path(path)
+    if os.path.isfile(proxy_path):
         try:
             os.remove(proxy_path)
         except OSError:
