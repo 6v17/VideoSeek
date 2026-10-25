@@ -373,7 +373,7 @@ class MainWindow(
         self._sync_docked_native_surfaces()
 
         self.result_table = self.search_page.result_table
-        self.result_table.cellDoubleClicked.connect(self._open_result_table_preview)
+        self.result_table.doubleClicked.connect(self._open_result_table_preview)
 
         self.sidebar.btn_page_search.clicked.connect(lambda: self.switch_page("search"))
         self.sidebar.btn_page_link.clicked.connect(lambda: self.switch_page("link"))

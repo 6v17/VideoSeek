@@ -8,7 +8,6 @@ import time
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
     QFileDialog,
     QLabel,
@@ -303,9 +302,8 @@ class PreviewGuiMixin:
             return
         target = str(path or "").strip().replace("/", "\\").lower()
         for row in range(table.rowCount()):
-            item = table.item(row, 0)
-            payload = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-            if not isinstance(payload, dict):
+            payload = self._table_hit_payload(table, row)
+            if payload is None:
                 continue
             row_path = str(payload.get("video_path") or "").strip().replace("/", "\\").lower()
             if row_path != target:
@@ -317,7 +315,9 @@ class PreviewGuiMixin:
             if delta > 0.5:
                 continue
             table.selectRow(row)
-            table.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+            scroll = getattr(table, "scroll_to_row", None)
+            if callable(scroll):
+                scroll(row)
             return
 
     def _sync_docked_preview_button(self) -> None:
@@ -327,13 +327,16 @@ class PreviewGuiMixin:
         if callable(apply):
             apply()
 
-    def _open_result_table_preview(self, row: int, _column: int) -> None:
+    def _open_result_table_preview(self, row_or_index, _column: int = 0) -> None:
+        if hasattr(row_or_index, "isValid"):
+            if not row_or_index.isValid():
+                return
+            row = int(row_or_index.row())
+        else:
+            row = int(row_or_index)
         table = getattr(self, "result_table", None)
-        if table is None:
-            return
-        item = table.item(int(row), 0)
-        payload = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-        if not isinstance(payload, dict):
+        payload = self._table_hit_payload(table, row)
+        if payload is None:
             return
         path = str(payload.get("video_path") or "").strip()
         if not path:
@@ -1405,18 +1408,19 @@ class PreviewGuiMixin:
             return rows
         page_rows = []
         view = getattr(getattr(self, "search_page", None), "result_view", None)
-        cards = list(getattr(getattr(view, "grid", None), "_cards", []) or [])
-        for card in cards:
-            path = str(getattr(card, "_video_path", "") or "").strip()
+        grid = getattr(view, "grid", None) if view is not None and getattr(view, "view_mode", "") == "grid" else None
+        for item in list(getattr(grid, "_items", []) or []):
+            hit = coerce_search_hit(item.get("hit"))
+            path = str(hit.video_path or "").strip()
             if not path:
                 continue
             page_rows.append(
                 (
-                    float(card._start_sec),
-                    float(card._end_sec),
-                    0.0,
+                    float(hit.start_sec),
+                    float(hit.end_sec),
+                    float(hit.score),
                     path,
-                    "frame",
+                    str(getattr(hit, "match_kind", "frame") or "frame"),
                 )
             )
         if page_rows:
@@ -1425,9 +1429,8 @@ class PreviewGuiMixin:
         if table is None:
             return []
         for index in range(table.rowCount()):
-            item = table.item(index, 0)
-            payload = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-            if not isinstance(payload, dict):
+            payload = self._table_hit_payload(table, index)
+            if payload is None:
                 continue
             path = str(payload.get("video_path") or "").strip()
             if not path:
@@ -1446,20 +1449,24 @@ class PreviewGuiMixin:
     def _page_preview_pixmaps(self) -> dict:
         found = {}
         view = getattr(getattr(self, "search_page", None), "result_view", None)
-        cards = list(getattr(getattr(view, "grid", None), "_cards", []) or [])
-        for card in cards:
-            path = str(getattr(card, "_video_path", "") or "").strip()
-            thumb = getattr(card, "thumb_label", None)
-            pix = thumb.pixmap() if thumb is not None else None
-            if path and pix is not None and not pix.isNull():
-                found[(self._norm_media_path(path), round(float(card._start_sec), 3))] = pix
+        grid = getattr(view, "grid", None) if view is not None and getattr(view, "view_mode", "") == "grid" else None
+        if grid is not None:
+            for index in range(int(grid.count())):
+                card = grid.card_at(index) if hasattr(grid, "card_at") else None
+                if card is None:
+                    continue
+                path = str(getattr(card, "_video_path", "") or "").strip()
+                thumb = getattr(card, "thumb_label", None)
+                pix = thumb.pixmap() if thumb is not None else None
+                if path and pix is not None and not pix.isNull():
+                    found[(self._norm_media_path(path), round(float(card._start_sec), 3))] = pix
+            return found
         table = getattr(self, "result_table", None)
         if table is None:
             return found
         for index in range(table.rowCount()):
-            item = table.item(index, 0)
-            payload = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-            if not isinstance(payload, dict):
+            payload = self._table_hit_payload(table, index)
+            if payload is None:
                 continue
             path = str(payload.get("video_path") or "").strip()
             pix = self._table_result_thumb(table, index)
@@ -1476,20 +1483,39 @@ class PreviewGuiMixin:
                 return pix
         return None
 
+    def _table_hit_payload(self, table, row: int) -> dict | None:
+        if table is None or not hasattr(table, "hit_payload"):
+            return None
+        try:
+            count = int(table.rowCount())
+            index = int(row)
+        except (TypeError, ValueError):
+            return None
+        if index < 0 or index >= count:
+            return None
+        payload = table.hit_payload(index)
+        return payload if isinstance(payload, dict) else None
+
     def _page_hit_identity(self, row: int):
         view = getattr(getattr(self, "search_page", None), "result_view", None)
-        cards = list(getattr(getattr(view, "grid", None), "_cards", []) or [])
-        if cards and 0 <= int(row) < len(cards):
-            card = cards[int(row)]
-            path = str(getattr(card, "_video_path", "") or "").strip()
-            if path:
-                return path, float(card._start_sec)
-        table = getattr(self, "result_table", None)
-        if table is None or int(row) < 0 or int(row) >= table.rowCount():
+        if view is not None and getattr(view, "view_mode", "") == "grid":
+            grid = getattr(view, "grid", None)
+            if grid is None:
+                return None
+            card = grid.card_at(int(row)) if hasattr(grid, "card_at") else None
+            if card is not None:
+                path = str(getattr(card, "_video_path", "") or "").strip()
+                if path:
+                    return path, float(card._start_sec)
+            items = getattr(grid, "_items", None) or []
+            if 0 <= int(row) < len(items):
+                hit = coerce_search_hit(items[int(row)].get("hit"))
+                path = str(hit.video_path or "").strip()
+                if path:
+                    return path, float(hit.start_sec)
             return None
-        item = table.item(int(row), 0)
-        payload = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-        if not isinstance(payload, dict):
+        payload = self._table_hit_payload(getattr(self, "result_table", None), row)
+        if payload is None:
             return None
         path = str(payload.get("video_path") or "").strip()
         if not path:
@@ -1528,8 +1554,14 @@ class PreviewGuiMixin:
         return os.path.normcase(os.path.normpath(text))
 
     def _table_result_thumb(self, table, row: int):
+        getter = getattr(table, "thumbnail_pixmap", None)
+        if callable(getter):
+            return getter(int(row))
+        cell_widget = getattr(table, "cellWidget", None)
+        if not callable(cell_widget):
+            return None
         for column in range(table.columnCount()):
-            cell = table.cellWidget(row, column)
+            cell = cell_widget(row, column)
             pix = cell.pixmap() if cell is not None and hasattr(cell, "pixmap") else None
             if pix is not None and not pix.isNull():
                 return pix

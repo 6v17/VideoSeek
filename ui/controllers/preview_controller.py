@@ -176,14 +176,18 @@ class PreviewController:
             worker.finished_prepare.disconnect()
         except Exception:
             pass
-        if worker.isRunning():
-            worker.wait(100)
-        worker.deleteLater()
+        from ui.playback.preview_prepare_worker import release_prepare_worker
+
+        release_prepare_worker(worker)
 
     def _on_proxy_prepared(self, token, video_path, clip_start, clip_end, clip_duration, result):
         if token != self._prepare_token:
             return
+        worker = self._prepare_worker
         self._prepare_worker = None
+        from ui.playback.preview_prepare_worker import release_prepare_worker
+
+        release_prepare_worker(worker)
         if not isinstance(result, dict) or result.get("cancelled") or result.get("error"):
             return
         playback_path = result.get("playback_path") or video_path
@@ -198,7 +202,11 @@ class PreviewController:
     def _on_clip_prepared(self, token, cache_path, result):
         if token != self._prepare_token:
             return
+        worker = self._prepare_worker
         self._prepare_worker = None
+        from ui.playback.preview_prepare_worker import release_prepare_worker
+
+        release_prepare_worker(worker)
         if not isinstance(result, dict) or result.get("cancelled") or result.get("error"):
             if os.path.exists(cache_path):
                 try:

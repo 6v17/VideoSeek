@@ -244,6 +244,8 @@ class PreviewDialog(QDialog):
         self._segment_line_override = None
         self._caption_text = ""
         self._play_token = 0
+        self._prepare_token = 0
+        self._prepare_worker = None
         self._duration_cache = {}
         self._window_geometry_before_fullscreen = None
         # Prefer shared_instance + dedicated MediaPlayer (no HWND thrash with main preview).
@@ -590,7 +592,11 @@ class PreviewDialog(QDialog):
     def _on_proxy_prepared(self, token, player, result):
         if token != self._prepare_token or self._closing or self._close_requested:
             return
+        worker = self._prepare_worker
         self._prepare_worker = None
+        from ui.playback.preview_prepare_worker import release_prepare_worker
+
+        release_prepare_worker(worker)
         if not isinstance(result, dict) or result.get("cancelled") or result.get("error"):
             self._detail_error = self.texts.get("preview_failed", "Preview failed")
             self._apply_detail_label()
@@ -612,12 +618,12 @@ class PreviewDialog(QDialog):
             worker.finished_prepare.disconnect()
         except Exception:
             pass
-        if worker.isRunning():
-            worker.wait(100)
         try:
-            worker.deleteLater()
+            from ui.playback.preview_prepare_worker import release_prepare_worker
+
+            release_prepare_worker(worker)
         except Exception as exc:
-            logger.debug("Preview dialog prepare worker deleteLater failed: %s", exc)
+            logger.debug("Preview dialog prepare worker release failed: %s", exc)
 
     def _on_slider_released(self):
         if self._closing:

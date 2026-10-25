@@ -7,7 +7,7 @@ viewport (±1 row). Thumbnails are painted by SearchResultThumbDelegate.
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtGui import QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
@@ -22,7 +22,7 @@ from ui.widgets.search_result_delegates import (
     SearchResultThumbDelegate,
     SearchResultVideoDelegate,
 )
-from ui.widgets.search_result_table_model import SearchResultTableModel
+from ui.widgets.search_result_table_model import HitPayloadRole, SearchResultTableModel, ThumbRole
 from ui.widgets.table_scroll import table_wheel_pixel_delta
 from ui.widgets.table_specs import LOCAL_SEARCH_TABLE_SPEC, LocalSearchCol
 
@@ -109,6 +109,28 @@ class ResultTable(QTableView):
 
     def set_thumbnail(self, row: int, pixmap) -> None:
         self.result_model.set_thumbnail(int(row), pixmap)
+
+    def hit_payload(self, row: int) -> dict | None:
+        """Hit dict for one row. Replaces the old ``QTableWidgetItem`` UserRole payload."""
+        index = self.result_model.index(int(row), int(LocalSearchCol.ORDER))
+        if not index.isValid():
+            return None
+        payload = self.result_model.data(index, HitPayloadRole)
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def thumbnail_pixmap(self, row: int) -> QPixmap | None:
+        index = self.result_model.index(int(row), int(LocalSearchCol.PREVIEW))
+        if not index.isValid():
+            return None
+        thumb = self.result_model.data(index, ThumbRole)
+        if isinstance(thumb, QPixmap) and not thumb.isNull():
+            return thumb
+        return None
+
+    def scroll_to_row(self, row: int) -> None:
+        index = self.result_model.index(int(row), int(LocalSearchCol.ORDER))
+        if index.isValid():
+            self.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
 
     def populate_results(
         self,

@@ -122,6 +122,10 @@ class SearchResultTableModelTests(unittest.TestCase):
         pix.fill(Qt.GlobalColor.blue)
         table.set_thumbnail(0, pix)
         self.assertIsNotNone(table.result_model.data(table.result_model.index(0, LocalSearchCol.PREVIEW), ThumbRole))
+        payload = table.hit_payload(0)
+        self.assertEqual(payload["video_path"], r"D:\videos\clip_0.mp4")
+        self.assertTrue(hasattr(table, "doubleClicked"))
+        self.assertFalse(hasattr(table, "cellDoubleClicked"))
 
         table.hide()
 

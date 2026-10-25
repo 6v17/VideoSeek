@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from PySide6.QtCore import QThread, Signal
 
 
@@ -98,3 +96,20 @@ class PreviewPrepareWorker(QThread):
                     "error": exc,
                 }
             )
+
+
+def release_prepare_worker(worker: PreviewPrepareWorker | None) -> None:
+    """Drop a prepare thread without deleting it while ffmpeg is still running."""
+    if worker is None:
+        return
+    if worker.isRunning():
+        holder = {"worker": worker}
+
+        def _release(_holder=holder) -> None:
+            thread = _holder.pop("worker", None)
+            if thread is not None:
+                thread.deleteLater()
+
+        worker.finished.connect(_release)
+        return
+    worker.deleteLater()

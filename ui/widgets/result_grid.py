@@ -223,7 +223,8 @@ class ResultGridCard(QFrame):
         self._layout_thumb_chrome()
 
     def eventFilter(self, watched, event):
-        if watched is self.thumb_wrap:
+        thumb_wrap = getattr(self, "thumb_wrap", None)
+        if thumb_wrap is not None and watched is thumb_wrap:
             et = event.type()
             if et == QEvent.Type.Enter:
                 self._request_overlay(True)
