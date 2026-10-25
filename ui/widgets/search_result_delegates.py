@@ -14,7 +14,6 @@ from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from ui.views.table_views import _build_result_actions
 from ui.widgets.search_result_table_model import ThumbRole, VideoHtmlRole
-from ui.widgets.table_specs import LocalSearchCol
 from ui.widgets.thumb_cell import fit_thumb_pixmap
 
 

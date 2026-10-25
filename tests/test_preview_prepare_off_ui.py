@@ -1,6 +1,4 @@
-import os
 import unittest
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from src.media import export_clip as utils
