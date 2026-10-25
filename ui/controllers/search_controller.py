@@ -4,7 +4,11 @@ from dataclasses import replace
 from PySide6.QtCore import QObject
 
 from src.app.logging_utils import get_logger
-from src.app.search_results_paging import slice_search_results_page, visible_end_index
+from src.app.search_results_paging import (
+    SEARCH_RESULTS_PAGE_SIZE,
+    slice_search_results_page,
+    visible_end_index,
+)
 from src.domain.search_hit import coerce_search_hit
 from src.storage.config_store import (
     SEARCH_CANDIDATE_LIMIT,
@@ -230,8 +234,8 @@ class SearchController(QObject):
         self._sync_results_pager()
 
     def _results_page_size(self) -> int:
-        """Mount the whole hit list. The result view scrolls; a short fixed page looks empty on a large screen."""
-        return max(1, len(self._all_results))
+        """How many result rows to mount for the current pager page."""
+        return int(SEARCH_RESULTS_PAGE_SIZE)
 
     def go_to_results_page(self, page_index: int) -> None:
         if not self._all_results:
@@ -248,6 +252,8 @@ class SearchController(QObject):
             table = result_view.table
             if table.rowCount() > 0:
                 table.scrollToTop()
+        self._maybe_grow_window()
+        self._ensure_visible_thumbnails()
 
     def _sync_results_pager(self) -> None:
         pager = getattr(self.parent_window.search_page, "results_pager", None)
@@ -318,7 +324,7 @@ class SearchController(QObject):
             if int(_value) > 0:
                 self._reset_result_scroll()
             return
-        furthest = self._furthest_visible_index()
+        furthest = self._furthest_global_index()
         if self._prefetch_hold and furthest > int(getattr(self, "_prefetch_hold_index", -1)):
             self._prefetch_hold = False
         self._maybe_grow_window()
@@ -359,7 +365,15 @@ class SearchController(QObject):
             1,
         )
 
+    def _furthest_global_index(self) -> int:
+        """Map the viewport's last local row onto ``_all_results`` under paging."""
+        local = self._furthest_visible_index()
+        if local < 0:
+            return -1
+        return int(self._current_page) * int(self._results_page_size()) + int(local)
+
     def _arm_result_window(self) -> None:
+
         """Desktop searches start at 300 and grow. An explicit top_k stays fixed."""
         config = self._search_config
         if config is None or config.top_k is not None:
@@ -382,7 +396,7 @@ class SearchController(QObject):
             return
         nxt = next_result_window(
             self._window_limit,
-            self._furthest_visible_index(),
+            self._furthest_global_index(),
             exhausted=self._window_exhausted,
             loaded_count=len(self._all_results),
         )
@@ -435,7 +449,7 @@ class SearchController(QObject):
             return
         logger.warning("Search window prefetch failed")
         self._prefetch_hold = True
-        self._prefetch_hold_index = self._furthest_visible_index()
+        self._prefetch_hold_index = self._furthest_global_index()
 
     def _on_window_finished(self) -> None:
         worker = self.sender()
@@ -447,24 +461,18 @@ class SearchController(QObject):
     def _append_rendered(self, extra) -> None:
         if not extra:
             return
-        texts = self.parent_window.texts
         context = dict(self._result_display_context or {})
-        rank_offset = len(self._all_results) - len(extra)
-        self._result_view().append_local(
-            extra,
-            self.parent_window.handle_play,
-            self.parent_window.open_result_in_explorer,
-            self.parent_window.handle_export_clip,
-            texts,
-            on_deep_locate=getattr(self.parent_window, "start_in_video_deep_search", None),
-            on_add_to_shot_list=getattr(self.parent_window, "add_hit_to_shot_list", None),
-            clip_score_mode=bool(context.get("clip_score_mode")),
-            low_confidence_score=context.get("low_confidence_score"),
-            rank_offset=rank_offset,
-            highlight_query=str(context.get("highlight_query") or ""),
-            dialogue_match_mode=str(context.get("dialogue_match_mode") or ""),
-        )
         self._sync_results_pager()
+        # Prefetched hits land at the end; only remount when the current page includes them.
+        page_size = self._results_page_size()
+        start = int(self._current_page) * page_size
+        end = start + page_size
+        total = len(self._all_results)
+        new_start = total - len(extra)
+        if new_start < end and total > start:
+            self._paint_current_page(self._all_results)
+        else:
+            self._update_results_status_text(self._all_results, context)
 
     def _disconnect_search_worker(self, worker):
         if worker is None:
@@ -929,7 +937,13 @@ class SearchController(QObject):
         rows = list(self._all_results or [])
         if not rows:
             return
-        jobs = [(index, rows[index]) for index in self._visible_thumb_indices(len(rows))]
+        page_size = self._results_page_size()
+        offset = int(self._current_page) * page_size
+        page_rows = rows[offset : offset + page_size]
+        if not page_rows:
+            return
+        # Painted widgets are page-local; keep thumbnail indices on that same scale.
+        jobs = [(index, page_rows[index]) for index in self._visible_thumb_indices(len(page_rows))]
         self._start_page_thumbnails(jobs)
 
     def _start_page_thumbnails(self, page_results) -> None:
