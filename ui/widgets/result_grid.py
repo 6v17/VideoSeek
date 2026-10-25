@@ -140,6 +140,7 @@ class ResultGridCard(QFrame):
         self._on_select = None
         self._title_full = ""
         self._overlay_wanted = False
+        self._logical_index: int | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -544,7 +545,9 @@ class ResultGridCard(QFrame):
 
 
 class ResultGrid(QScrollArea):
-    """Wrapping card grid for local search hits."""
+    """Wrapping card grid for local search hits (viewport card pool / recycle)."""
+
+    _ROW_BUFFER = 2
 
     def __init__(self, parent=None, *, min_height: int | None = None):
         super().__init__(parent)
@@ -559,6 +562,8 @@ class ResultGrid(QScrollArea):
         self._host = QWidget()
         self._host.setObjectName("ResultGridHost")
         self._host.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        # Absolute card geometry (not QGridLayout rows) so off-screen logical rows
+        # still reserve scroll height without creating widgets.
         self._grid = QGridLayout(self._host)
         self._grid.setContentsMargins(8, 8, 8, _GRID_BOTTOM_PAD)
         self._grid.setHorizontalSpacing(_CARD_SPACING)
@@ -566,11 +571,22 @@ class ResultGrid(QScrollArea):
         self._grid.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         self.setWidget(self._host)
 
+        # Authoritative hit list. Each entry holds bind kwargs + optional pixmap.
+        self._items: list[dict] = []
+        # Recycled ResultGridCard pool (≈ visible rows × cols, not len(items)).
         self._cards: list[ResultGridCard] = []
+        self._bound: dict[int, ResultGridCard] = {}
+        self._selected_index: int | None = None
         self._selected: ResultGridCard | None = None
         self._cols = 1
-        self._side_pad = -1
+        self._side_pad = 8
+        self._card_w = _CARD_WIDTH
+        self._thumb_h = _THUMB_HEIGHT
+        self._row_pitch = 0
         self._scale_percent = RESULT_SCALE_DEFAULT
+        self._syncing = False
+
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
     def set_display_scale(self, scale_percent: int) -> None:
         """Resize every card. Existing thumbnails are refit from the source frame."""
@@ -582,22 +598,32 @@ class ResultGrid(QScrollArea):
         return card_w
 
     def count(self) -> int:
-        return len(self._cards)
+        return len(self._items)
 
     def clear(self) -> None:
-        while self._grid.count():
-            item = self._grid.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        self._cards = []
+        self._items = []
+        self._bound.clear()
+        self._selected_index = None
         self._selected = None
+        for card in self._cards:
+            if not isValid(card):
+                continue
+            card._logical_index = None
+            card.set_selected(False)
+            card.hide()
+            self._grid.removeWidget(card)
         self._host.setMinimumHeight(0)
 
     def set_thumbnail(self, row: int, pixmap) -> None:
-        if row < 0 or row >= len(self._cards):
+        if row < 0 or row >= len(self._items):
             return
-        self._cards[row].set_thumbnail(pixmap)
+        # Own a copy so callers can drop their temporary QPixmap.
+        if pixmap is not None and not (isinstance(pixmap, QPixmap) and pixmap.isNull()):
+            pixmap = QPixmap(pixmap)
+        self._items[row]["pixmap"] = pixmap
+        card = self._bound.get(row)
+        if card is not None and isValid(card):
+            card.set_thumbnail(pixmap)
 
     def populate(
         self,
@@ -617,32 +643,22 @@ class ResultGrid(QScrollArea):
     ) -> None:
         del highlight_query, dialogue_match_mode
         self.clear()
-        loading = texts.get("thumb_loading", "…")
-        for index, raw in enumerate(results or []):
-            card = ResultGridCard(self._host)
-            low_confidence = (
-                low_confidence_score is not None
-                and rank_offset + index == 0
-                and float(coerce_search_hit(raw).score) < float(low_confidence_score)
-            )
-            card.bind(
-                rank=rank_offset + index + 1,
-                hit=raw,
-                texts=texts,
-                on_preview=on_preview,
-                on_locate=on_locate,
-                on_export=on_export,
-                on_deep_locate=on_deep_locate,
-                on_add_to_shot_list=on_add_to_shot_list,
-                clip_score_mode=clip_score_mode,
-                low_confidence=low_confidence,
-                loading_text=loading,
-            )
-            card._on_select = self._select_card
-            self._cards.append(card)
+        self._extend_items(
+            results,
+            on_preview,
+            on_locate,
+            on_export,
+            texts,
+            on_deep_locate=on_deep_locate,
+            on_add_to_shot_list=on_add_to_shot_list,
+            clip_score_mode=clip_score_mode,
+            low_confidence_score=low_confidence_score,
+            rank_offset=rank_offset,
+        )
+        self._selected_index = None
         self._selected = None
         self._reflow(force=True)
-        QTimer.singleShot(0, self._sync_host_height)
+        QTimer.singleShot(0, self._after_layout)
 
     def append(
         self,
@@ -667,126 +683,361 @@ class ResultGrid(QScrollArea):
             return
         bar = self.verticalScrollBar()
         scroll_pos = int(bar.value())
-        loading = texts.get("thumb_loading", "…")
-        for index, raw in enumerate(rows):
-            card = ResultGridCard(self._host)
+        self._extend_items(
+            rows,
+            on_preview,
+            on_locate,
+            on_export,
+            texts,
+            on_deep_locate=on_deep_locate,
+            on_add_to_shot_list=on_add_to_shot_list,
+            clip_score_mode=clip_score_mode,
+            low_confidence_score=low_confidence_score,
+            rank_offset=rank_offset,
+        )
+        self._reflow(force=True)
+        bar.setValue(scroll_pos)
+        QTimer.singleShot(0, lambda: self._restore_scroll(scroll_pos))
+
+    def _extend_items(
+        self,
+        results,
+        on_preview,
+        on_locate,
+        on_export,
+        texts,
+        *,
+        on_deep_locate=None,
+        on_add_to_shot_list=None,
+        clip_score_mode: bool = False,
+        low_confidence_score: float | None = None,
+        rank_offset: int = 0,
+    ) -> None:
+        loading = (texts or {}).get("thumb_loading", "…")
+        for index, raw in enumerate(results or []):
             low_confidence = (
                 low_confidence_score is not None
                 and rank_offset + index == 0
                 and float(coerce_search_hit(raw).score) < float(low_confidence_score)
             )
-            card.bind(
-                rank=rank_offset + index + 1,
-                hit=raw,
-                texts=texts,
-                on_preview=on_preview,
-                on_locate=on_locate,
-                on_export=on_export,
-                on_deep_locate=on_deep_locate,
-                on_add_to_shot_list=on_add_to_shot_list,
-                clip_score_mode=clip_score_mode,
-                low_confidence=low_confidence,
-                loading_text=loading,
+            self._items.append(
+                {
+                    "hit": raw,
+                    "rank": rank_offset + index + 1,
+                    "texts": texts,
+                    "on_preview": on_preview,
+                    "on_locate": on_locate,
+                    "on_export": on_export,
+                    "on_deep_locate": on_deep_locate,
+                    "on_add_to_shot_list": on_add_to_shot_list,
+                    "clip_score_mode": clip_score_mode,
+                    "low_confidence": low_confidence,
+                    "loading_text": loading,
+                    "pixmap": None,
+                }
             )
-            card._on_select = self._select_card
-            self._cards.append(card)
-        self._reflow(force=True)
-        bar.setValue(scroll_pos)
-        QTimer.singleShot(0, self._sync_host_height)
 
     def _select_card(self, card: ResultGridCard) -> None:
-        self._selected = card
+        idx = getattr(card, "_logical_index", None)
+        self._selected_index = idx if isinstance(idx, int) else None
+        self._selected = card if self._selected_index is not None else None
         for other in self._cards:
-            other.set_selected(other is card)
+            if not isValid(other):
+                continue
+            other.set_selected(getattr(other, "_logical_index", None) == self._selected_index)
 
     def select_match(self, video_path: str, start_sec: float) -> bool:
         """Mark the hit that is playing and scroll it into the grid."""
         target = str(video_path or "").strip().replace("/", "\\").lower()
-        best = None
+        best_index = None
         best_delta = 0.51
-        for card in self._cards:
-            card_path = str(card._video_path or "").strip().replace("/", "\\").lower()
+        for index, item in enumerate(self._items):
+            coerced = coerce_search_hit(item["hit"])
+            card_path = str(coerced.video_path or "").strip().replace("/", "\\").lower()
             if card_path != target:
                 continue
-            delta = abs(float(card._start_sec) - float(start_sec or 0.0))
+            delta = abs(float(coerced.start_sec) - float(start_sec or 0.0))
             if delta < best_delta:
-                best = card
+                best_index = index
                 best_delta = delta
-        if best is None:
+        if best_index is None:
             return False
-        self._select_card(best)
-        self.ensureWidgetVisible(best, 24, 24)
+        self._selected_index = best_index
+        self._ensure_index_visible(best_index)
+        self._sync_visible(force_rebind=False)
+        card = self._bound.get(best_index)
+        if card is not None and isValid(card):
+            self._selected = card
+            for other in self._cards:
+                if isValid(other):
+                    other.set_selected(getattr(other, "_logical_index", None) == best_index)
+            self.ensureWidgetVisible(card, 24, 24)
         return True
+
+    def card_at(self, logical_index: int) -> ResultGridCard | None:
+        """Return the live pool card currently bound to a logical hit, if any."""
+        card = self._bound.get(int(logical_index))
+        if card is not None and isValid(card):
+            return card
+        return None
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._reflow()
 
+    def _on_scroll(self, _value: int = 0) -> None:
+        if self._syncing:
+            return
+        self._sync_visible()
+
+    def _after_layout(self) -> None:
+        self._sync_host_height()
+        self._sync_visible(force_rebind=True)
+
+    def _restore_scroll(self, scroll_pos: int) -> None:
+        self._sync_host_height()
+        self.verticalScrollBar().setValue(int(scroll_pos))
+        self._sync_visible(force_rebind=True)
+
     def _reflow(self, *, force: bool = False) -> None:
         width = max(1, self.viewport().width())
-        # Keep a little breathing room; leftover space is split as side padding so the block is centered.
         cols, card_w, thumb_h = grid_column_plan(width, self._scale_percent)
-        for card in self._cards:
-            card.apply_slot(card_w, thumb_h)
         used = cols * card_w + max(0, cols - 1) * _CARD_SPACING
         side = max(8, (width - used) // 2)
-        if (
-            not force
-            and cols == self._cols
-            and side == self._side_pad
-            and self._grid.count() == len(self._cards)
-        ):
-            self._sync_host_height()
-            return
+        geometry_changed = (
+            force
+            or cols != self._cols
+            or side != self._side_pad
+            or card_w != self._card_w
+            or thumb_h != self._thumb_h
+        )
         self._cols = cols
         self._side_pad = side
+        self._card_w = card_w
+        self._thumb_h = thumb_h
         self._grid.setContentsMargins(side, 8, side, _GRID_BOTTOM_PAD)
-        self._grid.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        # Measure row pitch from one pool card (or a throwaway) after apply_slot.
+        probe = self._cards[0] if self._cards and isValid(self._cards[0]) else None
+        if probe is None:
+            probe = ResultGridCard(self._host)
+            probe.hide()
+            self._cards.append(probe)
+            probe._on_select = self._select_card
+        probe.apply_slot(card_w, thumb_h)
+        card_h = max(
+            int(probe.sizeHint().height()),
+            int(probe.minimumSizeHint().height()),
+            int(thumb_h) + 48,
+        )
+        self._row_pitch = card_h + _CARD_SPACING
         for card in self._cards:
-            self._grid.removeWidget(card)
-        for index, card in enumerate(self._cards):
-            row, col = divmod(index, cols)
-            self._grid.addWidget(card, row, col, Qt.AlignmentFlag.AlignTop)
-        for col in range(max(cols, 1) + 1):
-            self._grid.setColumnStretch(col, 0)
-            self._grid.setColumnMinimumWidth(col, 0)
+            if isValid(card):
+                card.apply_slot(card_w, thumb_h)
         self._sync_host_height()
+        self._sync_visible(force_rebind=geometry_changed)
+
+    def _logical_rows(self) -> int:
+        cols = max(1, int(self._cols))
+        n = len(self._items)
+        if n <= 0:
+            return 0
+        return (n + cols - 1) // cols
 
     def _sync_host_height(self) -> None:
-        """Force scrollable height so the last card is not clipped."""
+        """Host height = full logical grid so the scrollbar range stays correct."""
         if not isValid(self) or not isValid(self._host):
             return
-        if not self._cards:
+        if not self._items:
             self._host.setMinimumHeight(0)
             return
-        self._grid.activate()
         margins = self._grid.contentsMargins()
-        cols = max(1, int(self._cols))
-        rows = (len(self._cards) + cols - 1) // cols
-        row_heights: list[int] = []
-        for row in range(rows):
-            chunk = self._cards[row * cols : (row + 1) * cols]
-            height = 0
-            for card in chunk:
-                height = max(
-                    height,
-                    int(card.sizeHint().height()),
-                    int(card.minimumSizeHint().height()),
-                    int(card.height()) if card.height() > 0 else 0,
-                )
-            row_heights.append(height)
-        spacing = max(0, int(self._grid.verticalSpacing()))
-        measured = (
-            int(margins.top())
-            + int(margins.bottom())
-            + sum(row_heights)
-            + max(0, rows - 1) * spacing
-        )
-        layout_hint = int(self._grid.sizeHint().height())
-        total = max(measured, layout_hint) + 8
+        rows = self._logical_rows()
+        pitch = self._row_pitch_px()
+        # pitch includes inter-row spacing; last row has no trailing gap below cards
+        # but bottom margin still applies.
+        body = rows * pitch - _CARD_SPACING if rows > 0 else 0
+        total = int(margins.top()) + int(margins.bottom()) + max(0, body) + 8
         if self._host.minimumHeight() != total:
             self._host.setMinimumHeight(total)
             self._host.updateGeometry()
+
+    def _row_pitch_px(self) -> int:
+        """Never use a 1px pitch — that would treat the whole list as "visible"."""
+        measured = int(self._row_pitch or 0)
+        floor = int(self._thumb_h or _THUMB_HEIGHT) + 48 + _CARD_SPACING
+        return max(measured, floor, 120)
+
+    def _visible_index_range(self) -> tuple[int, int]:
+        n = len(self._items)
+        if n <= 0:
+            return 0, -1
+        cols = max(1, int(self._cols))
+        pitch = self._row_pitch_px()
+        margins = self._grid.contentsMargins()
+        top_margin = int(margins.top())
+        scroll = int(self.verticalScrollBar().value())
+        view_h = max(1, int(self.viewport().height()))
+        first_row = max(0, (scroll - top_margin) // pitch - self._ROW_BUFFER)
+        last_row = ((scroll + view_h - top_margin) // pitch) + self._ROW_BUFFER
+        max_row = self._logical_rows() - 1
+        first_row = max(0, min(first_row, max_row))
+        last_row = max(0, min(last_row, max_row))
+        first = first_row * cols
+        last = min(n - 1, (last_row + 1) * cols - 1)
+        return first, last
+
+    def _ensure_pool(self, need: int) -> None:
+        # Cap growth so a bad pitch cannot spawn one widget per hit.
+        cols = max(1, int(self._cols))
+        view_h = max(1, int(self.viewport().height()))
+        pitch = self._row_pitch_px()
+        view_rows = max(1, (view_h + pitch - 1) // pitch)
+        soft_cap = cols * (view_rows + self._ROW_BUFFER * 2 + 2)
+        need = max(0, min(int(need), soft_cap, 64))
+        while len(self._cards) < need:
+            if not isValid(self._host):
+                break
+            card = ResultGridCard(self._host)
+            card.hide()
+            card._on_select = self._select_card
+            card._logical_index = None
+            self._cards.append(card)
+        # Drop invalid entries (deleteLater leftovers).
+        self._cards = [c for c in self._cards if isValid(c)]
+
+    def _unbind_card(self, card: ResultGridCard) -> None:
+        idx = getattr(card, "_logical_index", None)
+        if isinstance(idx, int) and self._bound.get(idx) is card:
+            self._bound.pop(idx, None)
+        card._logical_index = None
+        card.hide()
+        self._grid.removeWidget(card)
+
+    def _bind_card(self, card: ResultGridCard, index: int) -> None:
+        item = self._items[index]
+        card.bind(
+            rank=int(item["rank"]),
+            hit=item["hit"],
+            texts=item["texts"],
+            on_preview=item["on_preview"],
+            on_locate=item["on_locate"],
+            on_export=item["on_export"],
+            on_deep_locate=item["on_deep_locate"],
+            on_add_to_shot_list=item["on_add_to_shot_list"],
+            clip_score_mode=bool(item["clip_score_mode"]),
+            low_confidence=bool(item["low_confidence"]),
+            loading_text=str(item["loading_text"]),
+        )
+        card._on_select = self._select_card
+        card._logical_index = index
+        card.apply_slot(self._card_w, self._thumb_h)
+        pix = item.get("pixmap")
+        if pix is not None:
+            card.set_thumbnail(pix)
+        card.set_selected(index == self._selected_index)
+        self._bound[index] = card
+        self._place_card(card, index)
+        card.show()
+
+    def _place_card(self, card: ResultGridCard, index: int) -> None:
+        cols = max(1, int(self._cols))
+        row, col = divmod(int(index), cols)
+        margins = self._grid.contentsMargins()
+        x = int(margins.left()) + col * (self._card_w + _CARD_SPACING)
+        y = int(margins.top()) + row * max(1, int(self._row_pitch))
+        # Prefer absolute geometry so empty logical rows still scroll correctly.
+        card.setFixedWidth(int(self._card_w))
+        card_h = max(
+            int(card.sizeHint().height()),
+            int(card.minimumSizeHint().height()),
+            int(self._thumb_h) + 48,
+            max(0, int(self._row_pitch) - _CARD_SPACING),
+        )
+        card.setGeometry(x, y, int(self._card_w), card_h)
+        card.raise_()
+        # Not managed by QGridLayout — geometry is absolute on the host.
+        self._grid.removeWidget(card)
+
+    def _ensure_index_visible(self, index: int) -> None:
+        cols = max(1, int(self._cols))
+        pitch = self._row_pitch_px()
+        margins = self._grid.contentsMargins()
+        row = int(index) // cols
+        y = int(margins.top()) + row * pitch
+        bar = self.verticalScrollBar()
+        view_h = max(1, int(self.viewport().height()))
+        value = int(bar.value())
+        if y < value:
+            bar.setValue(y)
+        elif y + pitch > value + view_h:
+            bar.setValue(max(0, y + pitch - view_h))
+
+    def _sync_visible(self, *, force_rebind: bool = False) -> None:
+        if self._syncing:
+            return
+        self._syncing = True
+        try:
+            if not self._items:
+                for card in self._cards:
+                    if isValid(card):
+                        self._unbind_card(card)
+                self._bound.clear()
+                return
+            first, last = self._visible_index_range()
+            if last < first:
+                for card in self._cards:
+                    if isValid(card):
+                        self._unbind_card(card)
+                self._bound.clear()
+                return
+            need = last - first + 1
+            self._ensure_pool(need)
+
+            # Release cards whose logical index left the window.
+            for idx in list(self._bound.keys()):
+                if idx < first or idx > last:
+                    card = self._bound.pop(idx)
+                    if isValid(card):
+                        self._unbind_card(card)
+
+            free: list[ResultGridCard] = []
+            for card in self._cards:
+                if not isValid(card):
+                    continue
+                idx = getattr(card, "_logical_index", None)
+                if idx is None:
+                    free.append(card)
+                elif force_rebind and first <= idx <= last:
+                    # Geometry/scale changed: reposition; rebinding same hit is wasteful
+                    # unless we force a full data refresh.
+                    self._place_card(card, idx)
+                    card.apply_slot(self._card_w, self._thumb_h)
+                    card.set_selected(idx == self._selected_index)
+                    card.show()
+
+            for idx in range(first, last + 1):
+                if idx in self._bound and isValid(self._bound[idx]):
+                    card = self._bound[idx]
+                    self._place_card(card, idx)
+                    card.show()
+                    continue
+                if not free:
+                    self._ensure_pool(len(self._cards) + 1)
+                    free = [
+                        c
+                        for c in self._cards
+                        if isValid(c) and getattr(c, "_logical_index", None) is None
+                    ]
+                if not free:
+                    break
+                card = free.pop()
+                self._bind_card(card, idx)
+
+            if self._selected_index is not None:
+                bound = self._bound.get(self._selected_index)
+                self._selected = bound if bound is not None and isValid(bound) else None
+        finally:
+            self._syncing = False
 
     def sizeHint(self) -> QSize:
         return QSize(480, 280)

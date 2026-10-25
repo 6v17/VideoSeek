@@ -129,9 +129,9 @@ class SearchWorkspaceChromeTests(unittest.TestCase):
         self.app.processEvents()
         view.set_display_scale(160)
         self.app.processEvents()
-        self.assertGreaterEqual(view.grid._cards[0].width(), 300)
+        card = view.grid.card_at(0) or next(c for c in view.grid._cards if c.isVisible())
+        self.assertGreaterEqual(card.width(), 300)
         view.grid.hide()
-        card = view.grid._cards[0]
         card._show_overlay_now()
         card.apply_slot(168, 96)
         self.assertTrue(bool(card._overlay_buttons[0].property("compact")))

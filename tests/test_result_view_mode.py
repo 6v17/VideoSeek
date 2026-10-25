@@ -1,10 +1,12 @@
+import os
 import unittest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
 from src.domain.search_hit import SearchHit
 from ui.widgets.result_view import VIEW_GRID, VIEW_TABLE, ResultView
-
 
 _APP = None
 
@@ -138,24 +140,29 @@ class ResultViewModeTests(unittest.TestCase):
         def _noop(*_a, **_k):
             return None
 
+        grid.resize(1100, 800)
+        grid.show()
+        QApplication.instance().processEvents()
         grid.populate(hits, _noop, _noop, _noop, texts)
+        QApplication.instance().processEvents()
         grid._sync_host_height()
-        self.assertEqual(grid._cards[0].width(), _CARD_WIDTH)
+        card0 = grid.card_at(0) or next(c for c in grid._cards if c.isVisible())
+        self.assertEqual(card0.width(), _CARD_WIDTH)
         from ui.widgets.result_grid import grid_column_plan
 
         wide_cols, wide_card, _thumb_h = grid_column_plan(980)
         self.assertGreaterEqual(wide_cols, 3)
         self.assertGreaterEqual(wide_card, 232)
         self.assertLessEqual(wide_card, _CARD_WIDTH)
-        # 476–611px of usable width fits two minimum cards. Preferred width used to leave one.
         pair_cols, pair_card, _pair_thumb = grid_column_plan(476 + 16)
         self.assertEqual(pair_cols, 2)
         self.assertGreaterEqual(pair_card, 232)
         self.assertLessEqual(pair_card, _CARD_WIDTH)
         narrow_cols, _narrow_card, _narrow_thumb = grid_column_plan(400 + 16)
         self.assertEqual(narrow_cols, 1)
-        self.assertFalse(hasattr(grid._cards[0], "actions_host"))
+        self.assertFalse(hasattr(card0, "actions_host"))
         self.assertGreater(grid._host.minimumHeight(), _GRID_BOTTOM_PAD)
+        grid.hide()
 
     def test_select_match_marks_the_playing_card(self):
         from ui.widgets.result_grid import ResultGrid
@@ -170,10 +177,20 @@ class ResultViewModeTests(unittest.TestCase):
         def _noop(*_a, **_k):
             return None
 
+        grid.resize(800, 600)
+        grid.show()
+        QApplication.instance().processEvents()
         grid.populate(hits, _noop, _noop, _noop, texts)
+        QApplication.instance().processEvents()
         self.assertTrue(grid.select_match(r"D:\videos\b.mp4", 8.0))
-        self.assertTrue(grid._cards[1].property("selected"))
-        self.assertFalse(grid._cards[0].property("selected"))
+        self.assertEqual(grid._selected_index, 1)
+        card1 = grid.card_at(1)
+        card0 = grid.card_at(0)
+        self.assertIsNotNone(card1)
+        self.assertTrue(card1.property("selected"))
+        if card0 is not None:
+            self.assertFalse(card0.property("selected"))
+        grid.hide()
 
 
 if __name__ == "__main__":
