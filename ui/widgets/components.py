@@ -1,6 +1,6 @@
 
 from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QSize, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStackedWidget,
+    QStyle,
+    QStyleOptionButton,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -421,6 +423,105 @@ class NavigationSidebar(QWidget):
             button.setChecked(name == target)
 
 
+def _view_mode_ink(button: QPushButton) -> QColor:
+    """Match the segment colors: muted, text on hover, accent when selected."""
+    from PySide6.QtWidgets import QApplication
+
+    from ui.widgets.styles import THEME_COLORS_DARK, THEME_COLORS_LIGHT
+
+    app = QApplication.instance()
+    dark = False
+    if app is not None:
+        dark = app.palette().color(app.palette().ColorRole.Window).lightness() < 128
+    colors = THEME_COLORS_DARK if dark else THEME_COLORS_LIGHT
+    if button.isChecked():
+        key = "ACCENT"
+    elif button.underMouse():
+        key = "TEXT"
+    else:
+        key = "MUTED"
+    return QColor(str(colors.get(key) or "#6b6b6b"))
+
+
+def _paint_view_mode_glyph(painter: QPainter, rect, color: QColor, kind: str) -> None:
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(color)
+    if kind == "grid":
+        cell, gap = 5, 2
+        span = cell * 2 + gap
+        left = rect.center().x() - span // 2
+        top = rect.center().y() - span // 2
+        for row in range(2):
+            for col in range(2):
+                painter.drawRoundedRect(left + col * (cell + gap), top + row * (cell + gap), cell, cell, 1.2, 1.2)
+    else:
+        bar_w, bar_h, gap = 13, 2, 3
+        span = bar_h * 3 + gap * 2
+        left = rect.center().x() - bar_w // 2
+        top = rect.center().y() - span // 2
+        for index in range(3):
+            painter.drawRoundedRect(left, top + index * (bar_h + gap), bar_w, bar_h, 1.0, 1.0)
+    painter.restore()
+
+
+class _ViewModeButton(QPushButton):
+    """Icon-only list/grid toggle. The tooltip keeps the word."""
+
+    def __init__(self, kind: str, parent=None):
+        super().__init__(parent)
+        self._kind = kind
+        self.setFixedSize(28, 28)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        del event
+        painter = QPainter(self)
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = ""
+        self.style().drawControl(QStyle.ControlElement.CE_PushButton, option, painter, self)
+        _paint_view_mode_glyph(painter, option.rect, _view_mode_ink(self), self._kind)
+        painter.end()
+
+
+class _ElidedStatusLabel(QLabel):
+    """Status chip that gives up width before the size slider and view buttons."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("StatusLabel")
+        self.setWordWrap(False)
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(0)
+        self._full = ""
+
+    def sizeHint(self):  # noqa: N802
+        text = self._full or " "
+        return QSize(self.fontMetrics().horizontalAdvance(text) + 28, 28)
+
+    def minimumSizeHint(self):  # noqa: N802
+        return QSize(0, 28)
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        self._full = str(text or "")
+        self.setToolTip(self._full)
+        self.updateGeometry()
+        self._elide()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        width = max(0, int(self.width()) - 16)
+        if width <= 1:
+            super().setText(self._full)
+            return
+        super().setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, width))
+
+
 class SearchPage(QWidget):
     search_collapsed_changed = Signal(bool)
     preview_collapsed_changed = Signal(bool)
@@ -444,11 +545,7 @@ class SearchPage(QWidget):
         self.indexing_notice, self.indexing_notice_text = make_runtime_banner()
         self.indexing_notice.hide()
 
-        self.lbl_status = QLabel()
-        self.lbl_status.setObjectName("StatusLabel")
-        self.lbl_status.setWordWrap(False)
-        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.lbl_status.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.lbl_status = _ElidedStatusLabel()
 
         self.search_panel = SearchPanel()
         self.query_card = self.search_panel
@@ -480,6 +577,9 @@ class SearchPage(QWidget):
         self.score_input = self.search_panel.score_input
         self.score_label = self.search_panel.score_label
         self.score_cluster = self.search_panel.score_cluster
+        self.result_grouping = self.search_panel.result_grouping
+        self.result_grouping_label = self.search_panel.result_grouping_label
+        self.result_grouping_cluster = self.search_panel.result_grouping_cluster
         self.search_scope_cluster = self.search_panel.search_scope_cluster
         self.search_scope_label = self.search_panel.search_scope_label
         self.search_scope_select = self.search_panel.search_scope_select
@@ -551,18 +651,16 @@ class SearchPage(QWidget):
         view_row = QHBoxLayout(self.results_view_segment)
         view_row.setContentsMargins(2, 2, 2, 2)
         view_row.setSpacing(2)
-        self.btn_results_view_table = QPushButton()
-        set_button_role(self.btn_results_view_table, "GhostButton", chrome="modeSegment")
+        self.btn_results_view_table = _ViewModeButton("list")
+        set_button_role(self.btn_results_view_table, "GhostButton", chrome="viewIcon")
         self.btn_results_view_table.setCheckable(True)
         self.btn_results_view_table.setChecked(False)
         self.btn_results_view_table.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_results_view_table.setMinimumWidth(52)
-        self.btn_results_view_grid = QPushButton()
-        set_button_role(self.btn_results_view_grid, "GhostButton", chrome="modeSegment")
+        self.btn_results_view_grid = _ViewModeButton("grid")
+        set_button_role(self.btn_results_view_grid, "GhostButton", chrome="viewIcon")
         self.btn_results_view_grid.setCheckable(True)
         self.btn_results_view_grid.setChecked(True)
         self.btn_results_view_grid.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_results_view_grid.setMinimumWidth(52)
         view_row.addWidget(self.btn_results_view_table)
         view_row.addWidget(self.btn_results_view_grid)
         self._results_view_group = QButtonGroup(self)
@@ -598,6 +696,15 @@ class SearchPage(QWidget):
         size_row.addWidget(self.results_size_slider, 0)
         size_row.addWidget(self.results_size_value, 0)
 
+        self.btn_group_back = QPushButton()
+        set_button_role(self.btn_group_back, "AccentGhostButton", chrome="statusReturn")
+        self.btn_group_back.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_group_back.setFixedHeight(28)
+        self.btn_group_back.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.btn_group_back.hide()
+        self.results_size_cluster.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.results_actions.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        results_toolbar.addWidget(self.btn_group_back, 0)
         results_toolbar.addWidget(self.lbl_status, 1)
         results_toolbar.addWidget(self.results_size_cluster, 0)
         results_toolbar.addWidget(self.results_actions, 0)
@@ -685,6 +792,18 @@ class SearchPage(QWidget):
         self._viewport_budget_timer.setInterval(50)
         self._viewport_budget_timer.timeout.connect(self._apply_viewport_budget)
         QTimer.singleShot(0, self._apply_viewport_budget)
+
+    def set_group_return(self, label: str, tip: str = "") -> None:
+        """Show a compact back chip in the results status row, or hide it."""
+        text = str(label or "").strip()
+        button = self.btn_group_back
+        if not text:
+            button.hide()
+            button.setToolTip("")
+            return
+        button.setText(text)
+        button.setToolTip(str(tip or "").strip())
+        button.show()
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)

@@ -84,6 +84,14 @@ def preview_sample_time(start_sec: float, end_sec: float) -> float:
     return start
 
 
+def hit_preview_time(hit) -> float:
+    """Frame that should be shown. Chunk hits carry that frame on ``peak_sec``."""
+    peak = getattr(hit, "peak_sec", None)
+    if peak is not None:
+        return max(0.0, float(peak))
+    return preview_sample_time(getattr(hit, "start_sec", 0.0), getattr(hit, "end_sec", 0.0))
+
+
 def preview_max_drift_sec(start_sec: float, end_sec: float) -> float | None:
     """How far a fast keyframe may sit from the clip middle before ffmpeg is worth it.
 

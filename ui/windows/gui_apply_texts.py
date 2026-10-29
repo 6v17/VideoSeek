@@ -71,10 +71,14 @@ class ApplyTextsGuiMixin:
         if callable(apply_preview):
             apply_preview(t)
         self.search_page.results_title.setText(t["results_panel"])
-        self.search_page.btn_results_view_table.setText(t.get("results_view_table", "列表"))
-        self.search_page.btn_results_view_grid.setText(t.get("results_view_grid", "网格"))
-        self.search_page.btn_results_view_table.setToolTip(t.get("results_view_table_tip", ""))
-        self.search_page.btn_results_view_grid.setToolTip(t.get("results_view_grid_tip", ""))
+        table_tip = t.get("results_view_table_tip", "") or t.get("results_view_table", "列表")
+        grid_tip = t.get("results_view_grid_tip", "") or t.get("results_view_grid", "网格")
+        self.search_page.btn_results_view_table.setText("")
+        self.search_page.btn_results_view_grid.setText("")
+        self.search_page.btn_results_view_table.setToolTip(table_tip)
+        self.search_page.btn_results_view_grid.setToolTip(grid_tip)
+        self.search_page.btn_results_view_table.setAccessibleName(t.get("results_view_table", "列表"))
+        self.search_page.btn_results_view_grid.setAccessibleName(t.get("results_view_grid", "网格"))
         self.search_page._apply_search_collapse_label()
         self.search_page.preview_panel.btn_collapse.setToolTip(t.get("preview_card_collapse", "收起预览"))
         self.search_page.btn_preview_restore.setToolTip(t.get("preview_card_expand", "展开预览"))
@@ -107,6 +111,8 @@ class ApplyTextsGuiMixin:
         panel.score_label.setToolTip(score_hint)
         panel.score_input.setToolTip(score_hint)
         panel.score_value.setToolTip(score_hint)
+        if hasattr(self, "_populate_result_grouping_combo"):
+            self._populate_result_grouping_combo()
         self.search_page.search_scope_label.setText(t.get("search_scope_label", ""))
         self.search_page.skip_edges_label.setText(t.get("search_skip_edges_label", "跳过时段"))
         if hasattr(self, "_refresh_skip_edges_summary"):

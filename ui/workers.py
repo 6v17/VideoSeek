@@ -279,6 +279,7 @@ class SearchWorker(QThread):
         self.dialogue_status_message = ""
         self.dialogue_matched_by = ""
         self._stop_requested = False
+        self.hit_vectors = None
 
     def stop(self):
         self._stop_requested = True
@@ -286,6 +287,22 @@ class SearchWorker(QThread):
 
     def _should_stop(self) -> bool:
         return bool(self._stop_requested or self.isInterruptionRequested())
+
+    def _emit_results(self, results, *, app_cfg, kind: str) -> None:
+        rows = list(results or [])
+        self.hit_vectors = None
+        visual = str(kind or "").strip().lower() not in {"dialogue", "tags"}
+        if visual and rows and bool(app_cfg.get("search_result_grouping_enabled", True)):
+            try:
+                from src.services.search_result_groups import fetch_hit_frame_vectors
+
+                self.hit_vectors = fetch_hit_frame_vectors(rows, app_cfg)
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/workers.py:group_vectors")
+                self.hit_vectors = None
+        self.result_ready.emit(rows)
 
     def _emit_progress(self, phase: str, message: str = "") -> None:
         key = str(message or phase or "").strip()
@@ -379,7 +396,7 @@ class SearchWorker(QThread):
                 if kind in {"dialogue", "tags"}:
                     self.dialogue_status_message = ""
                     self.dialogue_matched_by = "team"
-                self.result_ready.emit(list(results) if results is not None else [])
+                self._emit_results(results, app_cfg=app_cfg, kind=kind)
                 return
 
             kind = str(config.search_kind or "").strip().lower()
@@ -396,7 +413,7 @@ class SearchWorker(QThread):
                 )
                 self.dialogue_status_message = str(message or "").strip()
                 self.dialogue_matched_by = str(matched_by or "").strip()
-                self.result_ready.emit(results)
+                self._emit_results(results, app_cfg=app_cfg, kind="dialogue")
                 return
 
             if kind == "tags":
@@ -412,7 +429,7 @@ class SearchWorker(QThread):
                 )
                 self.dialogue_status_message = str(message or "").strip()
                 self.dialogue_matched_by = str(matched_by or "").strip()
-                self.result_ready.emit(results)
+                self._emit_results(results, app_cfg=app_cfg, kind="tags")
                 return
 
             mode = str(config.search_mode or "").strip().lower()
@@ -470,7 +487,7 @@ class SearchWorker(QThread):
                 preview_anchor_sec=config.preview_anchor_sec,
                 pixel_query_data=config.pixel_query_data,
             )
-            self.result_ready.emit(list(results) if results is not None else [])
+            self._emit_results(results, app_cfg=app_cfg, kind=kind)
         except InterruptedError:
             logger.info("Search worker stopped")
         except Exception as exc:
@@ -1096,7 +1113,7 @@ class ThumbLoader(QThread):
         self._running = False
 
     def run(self):
-        from src.media.thumbnail import preview_max_drift_sec, preview_sample_time
+        from src.media.thumbnail import hit_preview_time, preview_max_drift_sec
         from src.utils import get_single_thumbnail
         from ui.thumb_cache import get_thumb_cache, result_thumb_key
 
@@ -1120,20 +1137,31 @@ class ThumbLoader(QThread):
                 self.thumb_ready.emit(table_row, None)
                 continue
 
-            cache_key = result_thumb_key(video_path, hit.start_sec, hit.end_sec, thumb_width, thumb_height)
+            cache_key = result_thumb_key(
+                video_path,
+                hit.start_sec,
+                hit.end_sec,
+                thumb_width,
+                thumb_height,
+                peak_sec=getattr(hit, "peak_sec", None),
+            )
             cached = cache.get(cache_key)
             if cached is not None:
                 self.thumb_ready.emit(table_row, cached)
                 continue
 
-            thumb_time = preview_sample_time(hit.start_sec, hit.end_sec)
-            frame = get_single_thumbnail(
-                video_path,
-                thumb_time,
-                max_drift_sec=preview_max_drift_sec(hit.start_sec, hit.end_sec),
-                segment_start=float(hit.start_sec),
-                segment_end=float(hit.end_sec),
-            )
+            thumb_time = hit_preview_time(hit)
+            # A scored frame must land on that frame. A chunk midpoint can use a nearby keyframe.
+            if getattr(hit, "peak_sec", None) is not None:
+                frame = get_single_thumbnail(video_path, thumb_time, max_drift_sec=0.45)
+            else:
+                frame = get_single_thumbnail(
+                    video_path,
+                    thumb_time,
+                    max_drift_sec=preview_max_drift_sec(hit.start_sec, hit.end_sec),
+                    segment_start=float(hit.start_sec),
+                    segment_end=float(hit.end_sec),
+                )
             if not self._running or self.isInterruptionRequested():
                 break
             if frame is None:

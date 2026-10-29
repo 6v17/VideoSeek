@@ -409,6 +409,8 @@ class MainWindow(
         self.search_page.score_input.sliderReleased.connect(
             lambda: self._on_search_score_threshold_changed(self.search_page.score_input.value())
         )
+        if hasattr(self.search_page, "result_grouping"):
+            self.search_page.result_grouping.currentIndexChanged.connect(self._on_result_grouping_changed)
         self._load_search_score_thresholds()
         if hasattr(self.search_page, "dialogue_search_mode"):
             self.search_page.dialogue_search_mode.currentIndexChanged.connect(
@@ -1278,7 +1280,9 @@ class MainWindow(
             if str(config.get("search_results_view_mode") or "") != next_mode:
                 config["search_results_view_mode"] = next_mode
                 save_config(config)
-        if rerender and getattr(self.search_controller, "_all_results", None):
+        if rerender and getattr(self.search_controller, "_source_hits", None):
+            self.search_controller.rebuild_grouped_results(pin_top=False)
+        elif rerender and getattr(self.search_controller, "_all_results", None):
             self.search_controller._render_current_page()
 
     def _save_config_field(self, key: str, value) -> None:
@@ -1989,6 +1993,25 @@ class MainWindow(
             enabled = bool(combo.currentData()) if combo is not None else False
             config["text_search_enhance_enabled"] = enabled
             save_config(config)
+        except Exception as exc:
+            self.show_error_dialog(self.texts["settings_save_failed"], exc)
+
+    def _on_result_grouping_changed(self, _index: int = 0) -> None:
+        try:
+            combo = getattr(self.search_page, "result_grouping", None)
+            if combo is None:
+                return
+            choice = str(combo.currentData() or "standard").strip().lower()
+            config = load_config()
+            config["search_result_grouping_enabled"] = choice != "off"
+            if choice in {"loose", "standard", "strict"}:
+                config["search_result_grouping_sensitivity"] = choice
+            save_config(config)
+            if hasattr(self, "_refresh_search_filter_summary"):
+                self._refresh_search_filter_summary()
+            controller = getattr(self, "search_controller", None)
+            if controller is not None and getattr(controller, "_source_hits", None):
+                controller.rebuild_grouped_results(pin_top=False)
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_save_failed"], exc)
 

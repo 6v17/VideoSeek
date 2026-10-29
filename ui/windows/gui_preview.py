@@ -341,7 +341,11 @@ class PreviewGuiMixin:
         path = str(payload.get("video_path") or "").strip()
         if not path:
             return
-        self.handle_play(path, payload.get("start_sec"), payload.get("end_sec"))
+        self.handle_play(
+            path,
+            payload.get("preview_sec", payload.get("start_sec")),
+            payload.get("end_sec"),
+        )
 
     def _preview_playback_bounds(self, video_path, start_sec, end_sec) -> tuple[float, float]:
         """Point hits (frame search) play ``preview_seconds`` around the hit.

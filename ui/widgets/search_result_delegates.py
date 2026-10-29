@@ -8,12 +8,12 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPixmap, QTextDocument
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from ui.views.table_views import _build_result_actions
-from ui.widgets.search_result_table_model import ThumbRole, VideoHtmlRole
+from ui.widgets.search_result_table_model import GroupMetaRole, ThumbRole, VideoHtmlRole
 from ui.widgets.thumb_cell import fit_thumb_pixmap
 
 
@@ -29,7 +29,56 @@ def _theme_colors() -> dict:
             return THEME_COLORS_DARK if bg.lightness() < 128 else THEME_COLORS_LIGHT
     except Exception:
         pass
-    return {"FIELD": "#242424", "LINE": "#454545", "MUTED": "#a3a3a3", "TEXT": "#e5e5e5"}
+    return {"FIELD": "#242424", "LINE": "#454545", "MUTED": "#a3a3a3", "TEXT": "#e5e5e5", "ACCENT": "#0078d4"}
+
+
+def _accent_color() -> QColor:
+    return QColor(str(_theme_colors().get("ACCENT") or "#0078d4"))
+
+
+def _member_wash() -> QColor:
+    color = QColor(_accent_color())
+    color.setAlpha(46)
+    return color
+
+
+def paint_member_wash(painter: QPainter, rect: QRect, *, selected: bool, palette) -> None:
+    """Tint an expanded duplicate row so it is not another ordinary hit."""
+    if selected:
+        painter.fillRect(rect, palette.highlight())
+        return
+    painter.fillRect(rect, _member_wash())
+    painter.fillRect(QRect(rect.left(), rect.top(), 3, rect.height()), _accent_color())
+
+
+def group_badge_chip_rect(cell: QRect, badge: str, metrics) -> QRect:
+    text_w = metrics.horizontalAdvance(str(badge or ""))
+    name_h = metrics.height()
+    chip_w = min(max(1, cell.width() - 16), text_w + 16)
+    chip_h = min(name_h + 4, max(1, cell.height() - name_h - 12))
+    return QRect(cell.left() + 8, cell.top() + 8 + name_h + 2, chip_w, chip_h)
+
+
+class SearchResultPlainDelegate(QStyledItemDelegate):
+    """Default cells. Expanded group members get a wash instead of a plain row."""
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:  # noqa: N802
+        meta = index.data(GroupMetaRole) or {}
+        if not isinstance(meta, dict) or not meta.get("member"):
+            super().paint(painter, option, index)
+            return
+        self.initStyleOption(option, index)
+        painter.save()
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        paint_member_wash(painter, option.rect, selected=selected, palette=option.palette)
+        painter.setPen(option.palette.highlightedText().color() if selected else option.palette.text().color())
+        text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        painter.drawText(
+            option.rect.adjusted(10, 0, -8, 0),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            option.fontMetrics.elidedText(text, Qt.TextElideMode.ElideRight, max(1, option.rect.width() - 18)),
+        )
+        painter.restore()
 
 
 class SearchResultThumbDelegate(QStyledItemDelegate):
@@ -38,7 +87,12 @@ class SearchResultThumbDelegate(QStyledItemDelegate):
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:  # noqa: N802
         self.initStyleOption(option, index)
         painter.save()
-        if option.state & QStyle.StateFlag.State_Selected:
+        meta = index.data(GroupMetaRole) or {}
+        member = isinstance(meta, dict) and bool(meta.get("member"))
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        if member:
+            paint_member_wash(painter, option.rect, selected=selected, palette=option.palette)
+        elif selected:
             painter.fillRect(option.rect, option.palette.highlight())
         colors = _theme_colors()
         margin = 6
@@ -74,7 +128,16 @@ class SearchResultThumbDelegate(QStyledItemDelegate):
 class SearchResultVideoDelegate(QStyledItemDelegate):
     """Plain text by default; rich HTML for dialogue/tag highlight rows."""
 
+    group_toggle_requested = Signal(int)
+
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:  # noqa: N802
+        meta = index.data(GroupMetaRole) or {}
+        if isinstance(meta, dict) and meta.get("member"):
+            self._paint_member_name(painter, option, index)
+            return
+        if isinstance(meta, dict) and meta.get("show_badge") and meta.get("badge"):
+            self._paint_grouped_name(painter, option, index, str(meta.get("badge") or ""))
+            return
         html = index.data(VideoHtmlRole)
         if not html:
             super().paint(painter, option, index)
@@ -89,6 +152,72 @@ class SearchResultVideoDelegate(QStyledItemDelegate):
         painter.translate(option.rect.x() + 4, option.rect.y() + max(0, (option.rect.height() - doc.size().height()) / 2))
         doc.drawContents(painter)
         painter.restore()
+
+    def _paint_member_name(self, painter: QPainter, option, index) -> None:
+        self.initStyleOption(option, index)
+        painter.save()
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        paint_member_wash(painter, option.rect, selected=selected, palette=option.palette)
+        name = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        painter.setPen(option.palette.highlightedText().color() if selected else option.palette.text().color())
+        painter.drawText(
+            option.rect.adjusted(12, 0, -8, 0),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            option.fontMetrics.elidedText(name, Qt.TextElideMode.ElideMiddle, max(1, option.rect.width() - 20)),
+        )
+        painter.restore()
+
+    def _paint_grouped_name(self, painter: QPainter, option, index, badge: str) -> None:
+        self.initStyleOption(option, index)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        if selected:
+            painter.fillRect(option.rect, option.palette.highlight())
+        name = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        metrics = option.fontMetrics
+        name_rect = QRect(option.rect.left() + 8, option.rect.top() + 6, option.rect.width() - 16, metrics.height())
+        chip = group_badge_chip_rect(option.rect, badge, metrics)
+        painter.setPen(option.palette.highlightedText().color() if selected else option.palette.text().color())
+        painter.drawText(
+            name_rect,
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            metrics.elidedText(name, Qt.TextElideMode.ElideMiddle, max(1, name_rect.width())),
+        )
+        accent = option.palette.highlightedText().color() if selected else _accent_color()
+        fill = QColor(accent)
+        fill.setAlpha(36 if selected else 255)
+        if not selected:
+            soft = QColor(str(_theme_colors().get("ACCENT_SOFT") or "#e8f3fc"))
+            fill = soft
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(fill)
+        painter.drawRoundedRect(chip, 4, 4)
+        painter.setPen(accent)
+        painter.drawText(
+            chip.adjusted(8, 0, -6, 0),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            metrics.elidedText(badge, Qt.TextElideMode.ElideRight, max(1, chip.width() - 14)),
+        )
+        painter.restore()
+
+    def editorEvent(self, event, model, option, index) -> bool:  # noqa: N802
+        del model
+        meta = index.data(GroupMetaRole) or {}
+        if not isinstance(meta, dict) or not meta.get("show_badge"):
+            return False
+        if event.type() not in {QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonDblClick}:
+            return False
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        badge = str(meta.get("badge") or "")
+        chip = group_badge_chip_rect(option.rect, badge, option.fontMetrics)
+        if not chip.contains(pos):
+            return False
+        if event.type() == QEvent.Type.MouseButtonRelease:
+            self.group_toggle_requested.emit(int(meta.get("group_id", -1)))
+        return True
 
 
 class SearchResultActionsDelegate(QStyledItemDelegate):
@@ -124,6 +253,7 @@ class SearchResultActionsDelegate(QStyledItemDelegate):
             on_deep_locate=handlers.get("on_deep_locate"),
             on_add_to_shot_list=handlers.get("on_add_to_shot_list"),
             anchor_score=float(ent.get("score") or 0.0),
+            preview_sec=ent.get("preview_sec"),
         )
 
     def updateEditorGeometry(self, editor, option, index) -> None:  # noqa: N802
@@ -140,5 +270,10 @@ class SearchResultActionsDelegate(QStyledItemDelegate):
         # Persistent editors cover visible rows; for off-screen / not-yet-opened rows
         # leave the cell empty (no button forest).
         self.initStyleOption(option, index)
+        meta = index.data(GroupMetaRole) or {}
+        if isinstance(meta, dict) and meta.get("member"):
+            selected = bool(option.state & QStyle.StateFlag.State_Selected)
+            paint_member_wash(painter, option.rect, selected=selected, palette=option.palette)
+            return
         if option.state & QStyle.StateFlag.State_Selected:
             painter.fillRect(option.rect, option.palette.highlight())

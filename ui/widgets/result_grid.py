@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
 from shiboken6 import isValid
 from PySide6.QtGui import QCursor, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.widgets.button_roles import set_button_role
+from ui.widgets.search_result_table_model import group_badge_text, group_subtitle_text
 from ui.widgets.styles import repolish_widget
 from src.app.path_display import video_display_name
 from src.domain.search_hit import coerce_search_hit
@@ -25,6 +27,7 @@ from ui.views.table_views import format_time_range as _format_time_range
 from ui.widgets.thumb_cell import fit_thumb_pixmap, make_thumb_label
 
 _OVERLAY_HIDE_DELAY_MS = 120
+_OVERLAY_SHOW_DELAY_MS = 140
 
 # Preferred card at 100%. Narrower panes shrink toward the scaled minimum, and
 # the column count steps through 2 before it jumps to 3.
@@ -122,12 +125,15 @@ class ResultGridCard(QFrame):
         super().__init__(parent)
         self.setObjectName("ResultGridCard")
         self.setProperty("selected", False)
+        # Whole-card :hover restyles every child while the pointer crosses the grid.
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
         self.setFixedWidth(_CARD_WIDTH)
 
         self._video_path = ""
         self._start_sec = 0.0
+        self._preview_sec = 0.0
         self._end_sec = 0.0
         self._match_kind = "frame"
         self._score = 0.0
@@ -138,6 +144,8 @@ class ResultGridCard(QFrame):
         self._on_add_to_shot_list = None
         self._source_pixmap = None
         self._on_select = None
+        self._on_open_group = None
+        self._group_id: int | None = None
         self._title_full = ""
         self._overlay_wanted = False
         self._logical_index: int | None = None
@@ -195,6 +203,10 @@ class ResultGridCard(QFrame):
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self._hide_overlay_now)
+        self._hover_timer = QTimer(self)
+        self._hover_timer.setSingleShot(True)
+        self._hover_timer.setInterval(_OVERLAY_SHOW_DELAY_MS)
+        self._hover_timer.timeout.connect(self._show_overlay_now)
 
         thumb_grid.addWidget(self.thumb_label, 0, 0)
         root.addWidget(self.thumb_wrap)
@@ -208,14 +220,29 @@ class ResultGridCard(QFrame):
         self.title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         root.addWidget(self.title_label)
 
+        line_h = self.fontMetrics().height() + 2
+        self.meta_row = QWidget()
+        self.meta_row.setFixedHeight(line_h)
+        meta_layout = QHBoxLayout(self.meta_row)
+        meta_layout.setContentsMargins(4, 0, 4, 0)
+        meta_layout.setSpacing(6)
+        self.badge_label = QLabel()
+        self.badge_label.setObjectName("ResultGridGroupBadge")
+        self.badge_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.badge_label.setFixedHeight(line_h)
+        self.badge_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.badge_label.hide()
+        self.badge_label.installEventFilter(self)
         self.meta_label = QLabel()
         self.meta_label.setObjectName("ResultGridMeta")
         self.meta_label.setWordWrap(False)
         self.meta_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
         self.meta_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.meta_label.setFixedHeight(self.meta_label.fontMetrics().height() + 2)
+        self.meta_label.setFixedHeight(line_h)
         self.meta_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        root.addWidget(self.meta_label)
+        meta_layout.addWidget(self.badge_label, 0)
+        meta_layout.addWidget(self.meta_label, 1)
+        root.addWidget(self.meta_row)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -223,6 +250,15 @@ class ResultGridCard(QFrame):
         self._layout_thumb_chrome()
 
     def eventFilter(self, watched, event):
+        badge = getattr(self, "badge_label", None)
+        if badge is not None and watched is badge and event.type() == QEvent.Type.MouseButtonRelease:
+            if (
+                event.button() == Qt.MouseButton.LeftButton
+                and self._group_id is not None
+                and self._on_open_group is not None
+            ):
+                self._on_open_group(int(self._group_id))
+                return True
         thumb_wrap = getattr(self, "thumb_wrap", None)
         if thumb_wrap is not None and watched is thumb_wrap:
             et = event.type()
@@ -276,8 +312,13 @@ class ResultGridCard(QFrame):
     def _request_overlay(self, wanted: bool) -> None:
         if wanted:
             self._hide_timer.stop()
-            self._show_overlay_now()
+            if self._overlay_wanted:
+                return
+            # Wait until the pointer rests. Building buttons on every card the
+            # mouse crosses stalls the grid.
+            self._hover_timer.start()
             return
+        self._hover_timer.stop()
         # Delay hide so moving onto buttons never collapses the overlay.
         self._hide_timer.start(_OVERLAY_HIDE_DELAY_MS)
 
@@ -310,13 +351,13 @@ class ResultGridCard(QFrame):
         if self._on_select is not None:
             self._on_select(self)
         if self._video_path and self._on_preview:
-            self._on_preview(self._video_path, self._start_sec, self._end_sec)
+            self._on_preview(self._video_path, self._preview_sec, self._end_sec)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self._video_path and self._on_preview:
             if self._on_select is not None:
                 self._on_select(self)
-            self._on_preview(self._video_path, self._start_sec, self._end_sec)
+            self._on_preview(self._video_path, self._preview_sec, self._end_sec)
         super().mouseDoubleClickEvent(event)
 
     def apply_slot(self, width: int, thumb_h: int) -> None:
@@ -337,7 +378,8 @@ class ResultGridCard(QFrame):
             return
         width = self.meta_label.width()
         if width <= 0:
-            width = max(48, self.width() - 20)
+            badge_w = self.badge_label.sizeHint().width() + 8 if self.badge_label.isVisible() else 0
+            width = max(48, self.width() - 20 - badge_w)
         else:
             width = max(48, width - 2)
         self.meta_label.setText(
@@ -497,6 +539,8 @@ class ResultGridCard(QFrame):
         self._video_path = str(coerced.video_path or "")
         self._start_sec = float(coerced.start_sec)
         self._end_sec = float(coerced.end_sec)
+        peak = getattr(coerced, "peak_sec", None)
+        self._preview_sec = float(peak) if peak is not None else self._start_sec
         self._score = float(coerced.score)
         self._match_kind = str(getattr(coerced, "match_kind", "frame") or "frame")
         matched_text = str(getattr(coerced, "matched_text", "") or "").strip()
@@ -528,9 +572,29 @@ class ResultGridCard(QFrame):
             score_text = f"{int(self._score * 100)}%"
         if low_confidence:
             score_text = f"{score_text} ⚠"
+        badge = ""
+        self._group_id = None
+        if bool(getattr(coerced, "show_badge", False)):
+            badge = group_badge_text(coerced, texts)
+            raw_group = getattr(coerced, "group_id", None)
+            self._group_id = None if raw_group is None else int(raw_group)
+            if self._group_id is None or self._group_id < 0:
+                self._group_id = None
+                badge = ""
         meta = f"{time_text} · {score_text}"
+        subtitle = group_subtitle_text(coerced, texts) if badge else ""
         self._meta_full = meta
         self.meta_label.setToolTip(meta)
+        if badge:
+            self.badge_label.setText(badge)
+            self.badge_label.setToolTip(subtitle or badge)
+            self.badge_label.show()
+            self.meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        else:
+            self.badge_label.clear()
+            self.badge_label.setToolTip("")
+            self.badge_label.hide()
+            self.meta_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
         self._refresh_meta_elide()
 
         # Build overlay buttons lazily on first hover (table virtualization companion).
@@ -539,6 +603,7 @@ class ResultGridCard(QFrame):
         self._actions_ready = False
         self._pending_action_texts = dict(texts or {})
         self._hide_timer.stop()
+        self._hover_timer.stop()
         self._overlay_wanted = False
         self.action_overlay.hide()
         self.set_selected(False)
@@ -547,6 +612,8 @@ class ResultGridCard(QFrame):
 
 class ResultGrid(QScrollArea):
     """Wrapping card grid for local search hits (viewport card pool / recycle)."""
+
+    group_open_requested = Signal(int)
 
     _ROW_BUFFER = 2
     # First search used to build the pool on the hot path (~300ms). Warm a
@@ -591,6 +658,7 @@ class ResultGrid(QScrollArea):
         self._row_pitch = 0
         self._scale_percent = RESULT_SCALE_DEFAULT
         self._syncing = False
+        self._pending_restore: tuple[int, int | None] | None = None
 
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
@@ -648,6 +716,7 @@ class ResultGrid(QScrollArea):
         dialogue_match_mode: str = "",
     ) -> None:
         del highlight_query, dialogue_match_mode
+        self._pending_restore = None
         self.clear()
         self._extend_items(
             results,
@@ -726,10 +795,11 @@ class ResultGrid(QScrollArea):
                 and rank_offset + index == 0
                 and float(coerce_search_hit(raw).score) < float(low_confidence_score)
             )
+            rank = int(getattr(raw, "display_rank", 0) or 0) or (rank_offset + index + 1)
             self._items.append(
                 {
                     "hit": raw,
-                    "rank": rank_offset + index + 1,
+                    "rank": rank,
                     "texts": texts,
                     "on_preview": on_preview,
                     "on_locate": on_locate,
@@ -742,6 +812,9 @@ class ResultGrid(QScrollArea):
                     "pixmap": None,
                 }
             )
+
+    def _emit_open_group(self, group_id: int) -> None:
+        self.group_open_requested.emit(int(group_id))
 
     def _select_card(self, card: ResultGridCard) -> None:
         idx = getattr(card, "_logical_index", None)
@@ -822,6 +895,27 @@ class ResultGrid(QScrollArea):
     def _after_layout(self) -> None:
         self._sync_host_height()
         self._sync_visible(force_rebind=True)
+        pending = self._pending_restore
+        self._pending_restore = None
+        if pending:
+            scroll, index = pending
+            # Scroll range settles after this layout. Restore on the next turn.
+            QTimer.singleShot(0, lambda s=int(scroll), i=index: self.restore_viewport(s, i))
+
+    def restore_viewport(self, scroll_value: int, selected_index: int | None = None) -> None:
+        """Put the list back where it was, and mark the card the user opened."""
+        index = None
+        if selected_index is not None and 0 <= int(selected_index) < len(self._items):
+            index = int(selected_index)
+            self._selected_index = index
+        self._restore_scroll(max(0, int(scroll_value)))
+        if index is None:
+            return
+        self._ensure_index_visible(index)
+        self._sync_visible()
+        for card in self._cards:
+            if isValid(card):
+                card.set_selected(getattr(card, "_logical_index", None) == index)
 
     def _restore_scroll(self, scroll_pos: int) -> None:
         self._sync_host_height()
@@ -958,6 +1052,7 @@ class ResultGrid(QScrollArea):
             loading_text=str(item["loading_text"]),
         )
         card._on_select = self._select_card
+        card._on_open_group = self._emit_open_group
         card._logical_index = index
         card.apply_slot(self._card_w, self._thumb_h)
         pix = item.get("pixmap")

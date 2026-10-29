@@ -194,12 +194,20 @@ def _chunk_hit_from_range(frame_hit: SearchHit, chunk_start: float, chunk_end: f
     end = float(chunk_end)
     if end <= start:
         end = start + 0.1
+    # The score belongs to one frame. Keep that timestamp so the thumbnail and
+    # preview show it, while the row still represents the whole chunk.
+    peak = float(frame_hit.start_sec)
+    if peak < start:
+        peak = start
+    elif peak > end:
+        peak = end
     return SearchHit(
         start,
         end,
         float(frame_hit.score),
         str(frame_hit.video_path),
         video_id=str(frame_hit.video_id or ""),
+        peak_sec=peak,
     )
 
 

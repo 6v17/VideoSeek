@@ -22,6 +22,7 @@ from ui.widgets.table_specs import LocalSearchCol
 ThumbRole = int(Qt.ItemDataRole.UserRole) + 10
 VideoHtmlRole = int(Qt.ItemDataRole.UserRole) + 11
 HitPayloadRole = int(Qt.ItemDataRole.UserRole)  # same as ORDER cell payload historically
+GroupMetaRole = int(Qt.ItemDataRole.UserRole) + 12
 
 
 def _escape_html(text: str) -> str:
@@ -109,6 +110,32 @@ def _video_cell_parts(
     return base_name, "", video_path
 
 
+def group_badge_text(hit, texts: dict) -> str:
+    kind = str(getattr(hit, "group_kind", "") or "")
+    count = int(getattr(hit, "member_count", 1) or 1)
+    if kind == "cross":
+        template = str(texts.get("search_group_cross") or "跨集 · {count}")
+    else:
+        template = str(texts.get("search_group_near") or "邻近 · {count}")
+    try:
+        return template.format(count=count)
+    except (KeyError, IndexError, ValueError):
+        return template
+
+
+def group_subtitle_text(hit, texts: dict) -> str:
+    if str(getattr(hit, "group_kind", "") or "") != "cross":
+        return ""
+    unique = int(getattr(hit, "unique_videos", 1) or 1)
+    if unique <= 1:
+        return ""
+    template = str(texts.get("search_group_cross_more") or "{name} · {count}")
+    try:
+        return template.format(name=str(getattr(hit, "lead_name", "") or ""), count=unique)
+    except (KeyError, IndexError, ValueError):
+        return template
+
+
 def build_result_row(
     raw,
     *,
@@ -138,15 +165,31 @@ def build_result_row(
         low_confidence=low_confidence,
     )
     range_tip = matched_text if match_kind in {"dialogue", "tags"} and matched_text else ""
+    show_badge = bool(getattr(hit, "show_badge", False))
+    badge = group_badge_text(hit, texts) if show_badge else ""
+    subtitle = group_subtitle_text(hit, texts) if show_badge else ""
+    if badge and not getattr(hit, "is_representative", True):
+        show_badge = False
+        badge = ""
+    video_tip = video_tip if not subtitle else f"{video_tip}\n{subtitle}"
+    order_text = str(int(rank))
+    display_rank = int(getattr(hit, "display_rank", 0) or 0)
+    if display_rank > 0:
+        order_text = str(display_rank)
+    raw_group_id = getattr(hit, "group_id", None)
+    group_id = -1 if raw_group_id is None else int(raw_group_id)
+    if group_id >= 0 and not bool(getattr(hit, "is_representative", True)):
+        order_text = "└"
     return {
         "rank": int(rank),
         "start_sec": float(hit.start_sec),
+        "preview_sec": float(hit.peak_sec) if getattr(hit, "peak_sec", None) is not None else float(hit.start_sec),
         "end_sec": float(hit.end_sec),
         "score": float(hit.score),
         "video_path": str(hit.video_path or ""),
         "match_kind": match_kind,
         "matched_text": matched_text,
-        "order_text": str(int(rank)),
+        "order_text": order_text,
         "video_text": video_text,
         "video_html": video_html,
         "video_tip": video_tip,
@@ -162,6 +205,12 @@ def build_result_row(
         "score_tip": score_tip,
         "thumb": None,
         "low_confidence": bool(low_confidence),
+        "group_id": group_id,
+        "group_member_count": int(getattr(hit, "member_count", 1) or 1),
+        "group_is_representative": bool(getattr(hit, "is_representative", True)),
+        "group_show_badge": bool(show_badge and badge),
+        "group_badge": badge,
+        "group_subtitle": subtitle,
     }
 
 
@@ -367,9 +416,20 @@ class SearchResultTableModel(QAbstractTableModel):
                 "video_path": ent["video_path"],
                 "start_sec": float(ent["start_sec"]),
                 "end_sec": float(ent["end_sec"]),
+                "preview_sec": float(ent.get("preview_sec", ent["start_sec"])),
                 "score": float(ent["score"]),
                 "match_kind": ent["match_kind"],
                 "matched_text": ent["matched_text"],
+            }
+        if role == GroupMetaRole:
+            stored_group = ent.get("group_id", -1)
+            group_id = -1 if stored_group is None else int(stored_group)
+            return {
+                "group_id": group_id,
+                "show_badge": bool(ent.get("group_show_badge")),
+                "badge": str(ent.get("group_badge") or ""),
+                "subtitle": str(ent.get("group_subtitle") or ""),
+                "member": group_id >= 0 and not bool(ent.get("group_is_representative", True)),
             }
         if role == ThumbRole and col == int(LocalSearchCol.PREVIEW):
             return ent.get("thumb")
@@ -398,7 +458,11 @@ class SearchResultTableModel(QAbstractTableModel):
                 return ""
         if role == Qt.ItemDataRole.ToolTipRole:
             if col == int(LocalSearchCol.VIDEO):
-                return ent.get("video_tip") or ""
+                tip = str(ent.get("video_tip") or "")
+                subtitle = str(ent.get("group_subtitle") or "")
+                if subtitle and subtitle not in tip:
+                    tip = f"{tip}\n{subtitle}" if tip else subtitle
+                return tip
             if col == int(LocalSearchCol.RANGE):
                 return ent.get("range_tip") or ""
             if col == int(LocalSearchCol.MODE):

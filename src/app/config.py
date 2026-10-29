@@ -110,6 +110,8 @@ DEFAULT_CONFIG = {
     "search_min_score_compose": 0.1,
     "search_min_score_dialogue": 0.0,
     "text_search_enhance_enabled": False,
+    "search_result_grouping_enabled": True,
+    "search_result_grouping_sensitivity": "standard",
     "search_skip_edges_enabled": False,
     "search_skip_ranges": "",
     "search_skip_intro_sec": 0,
@@ -298,6 +300,7 @@ CONFIG_ENUMS = {
     "search_scope_mode": {"all", "selected"},
     "dialogue_search_scope_mode": {"all", "selected"},
     "search_results_view_mode": {"table", "grid"},
+    "search_result_grouping_sensitivity": {"loose", "standard", "strict"},
     "theme": {"dark", "light"},
     "language": {"zh", "en"},
     "download_mode": {"default_dir", "library"},
@@ -632,6 +635,13 @@ def _sanitize_general_settings(config):
             DEFAULT_CONFIG["text_search_enhance_enabled"],
         ),
         DEFAULT_CONFIG["text_search_enhance_enabled"],
+    )
+    sanitized["search_result_grouping_enabled"] = _coerce_bool(
+        sanitized.get(
+            "search_result_grouping_enabled",
+            DEFAULT_CONFIG["search_result_grouping_enabled"],
+        ),
+        DEFAULT_CONFIG["search_result_grouping_enabled"],
     )
     sanitized["search_skip_edges_enabled"] = _coerce_bool(
         sanitized.get(

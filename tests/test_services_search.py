@@ -136,7 +136,7 @@ class SearchServiceTests(unittest.TestCase):
         mock_per_video_search.assert_called_once()
         self.assertTrue(mock_per_video_search.call_args.kwargs.get("precise_image"))
 
-    def test_apply_frame_neighbor_rerank_disabled_by_default(self):
+    def test_text_neighbor_rerank_can_be_turned_off(self):
         class DummyIndex:
             def reconstruct(self, idx):
                 return np.array([1.0, 0.0], dtype=np.float32)
@@ -154,17 +154,51 @@ class SearchServiceTests(unittest.TestCase):
             DummyIndex(),
             timestamps,
             paths,
-            config={},
+            config={"frame_neighbor_rerank_enabled": False},
             is_text=True,
         )
         self.assertEqual(reranked, results)
+
+    def test_text_neighbor_rerank_snaps_to_closer_frame(self):
+        class DummyIndex:
+            def reconstruct(self, idx):
+                if int(idx) == 2:
+                    return np.array([1.0, 0.0], dtype=np.float32)
+                return np.array([0.2, 0.0], dtype=np.float32)
+
+        results = [SearchHit(1.0, 1.0, 0.2, "a.mp4")]
+        frame_ids = [1]
+        query_vector = np.array([[1.0, 0.0]], dtype=np.float32)
+        timestamps = np.array([0.0, 1.0, 2.0], dtype=np.float32)
+        paths = np.array(["a.mp4", "a.mp4", "a.mp4"], dtype=object)
+
+        reranked = search_service.apply_frame_neighbor_rerank(
+            results,
+            frame_ids,
+            query_vector,
+            DummyIndex(),
+            timestamps,
+            paths,
+            config={"fps": 1, "frame_neighbor_rerank_window": 2},
+            is_text=True,
+        )
+        self.assertEqual(len(reranked), 1)
+        self.assertEqual(float(reranked[0].start_sec), 2.0)
+        self.assertGreater(float(reranked[0].score), 0.2)
 
     def test_neighbor_rerank_auto_enabled_for_image_search(self):
         self.assertFalse(search_service.neighbor_rerank_enabled({}, is_text=False, precise_image=True))
         self.assertTrue(search_service.neighbor_rerank_enabled({}, is_text=False, precise_image=False))
 
-    def test_neighbor_rerank_respects_text_default(self):
-        self.assertFalse(search_service.neighbor_rerank_enabled({}, is_text=True))
+    def test_neighbor_rerank_shares_switch_for_text_search(self):
+        self.assertTrue(search_service.neighbor_rerank_enabled({}, is_text=True))
+        self.assertFalse(
+            search_service.neighbor_rerank_enabled(
+                {"frame_neighbor_rerank_enabled": False},
+                is_text=True,
+            )
+        )
+        self.assertFalse(search_service.neighbor_rerank_enabled({}, is_text=True, precise_image=True))
 
     def test_neighbor_rerank_enabled_for_fast_image_search_by_default(self):
         self.assertTrue(search_service.neighbor_rerank_enabled({}, is_text=False, precise_image=False))

@@ -6,7 +6,7 @@ viewport (±1 row). Thumbnails are painted by SearchResultThumbDelegate.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -19,10 +19,17 @@ from ui.views.table_views import _build_result_actions
 from ui.widgets.button_roles import name_table_corner_button
 from ui.widgets.search_result_delegates import (
     SearchResultActionsDelegate,
+    SearchResultPlainDelegate,
     SearchResultThumbDelegate,
     SearchResultVideoDelegate,
+    group_badge_chip_rect,
 )
-from ui.widgets.search_result_table_model import HitPayloadRole, SearchResultTableModel, ThumbRole
+from ui.widgets.search_result_table_model import (
+    GroupMetaRole,
+    HitPayloadRole,
+    SearchResultTableModel,
+    ThumbRole,
+)
 from ui.widgets.table_scroll import table_wheel_pixel_delta
 from ui.widgets.table_specs import LOCAL_SEARCH_TABLE_SPEC, LocalSearchCol
 
@@ -30,12 +37,15 @@ from ui.widgets.table_specs import LOCAL_SEARCH_TABLE_SPEC, LocalSearchCol
 class ResultTable(QTableView):
     """Local vector search results (7 columns, preview column) — virtualized."""
 
+    group_toggle_requested = Signal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.spec = LOCAL_SEARCH_TABLE_SPEC
         self._display_row_height = int(self.spec.row_height)
         self._open_action_rows: set[int] = set()
         self._sync_actions_scheduled = False
+        self._pending_restore: tuple[int, int | None] | None = None
 
         self.result_model = SearchResultTableModel(self)
         self.setModel(self.result_model)
@@ -46,6 +56,10 @@ class ResultTable(QTableView):
         self.setItemDelegateForColumn(int(LocalSearchCol.PREVIEW), self._thumb_delegate)
         self.setItemDelegateForColumn(int(LocalSearchCol.VIDEO), self._video_delegate)
         self.setItemDelegateForColumn(int(LocalSearchCol.ACTIONS), self._actions_delegate)
+        self._video_delegate.group_toggle_requested.connect(self.group_toggle_requested)
+        self._plain_delegate = SearchResultPlainDelegate(self)
+        self.setItemDelegate(self._plain_delegate)
+        self.viewport().setMouseTracking(True)
 
         self._apply_spec()
         self.verticalScrollBar().valueChanged.connect(self._schedule_sync_action_editors)
@@ -166,6 +180,7 @@ class ResultTable(QTableView):
             on_deep_locate=on_deep_locate,
             on_add_to_shot_list=on_add_to_shot_list,
         )
+        self._pending_restore = None
         self.result_model.set_hits(
             results,
             texts=texts,
@@ -176,6 +191,28 @@ class ResultTable(QTableView):
             dialogue_match_mode=dialogue_match_mode,
         )
         self._schedule_sync_action_editors()
+        QTimer.singleShot(0, self._consume_pending_restore)
+
+    def _consume_pending_restore(self) -> None:
+        pending = self._pending_restore
+        self._pending_restore = None
+        if not pending:
+            return
+        scroll, index = pending
+        QTimer.singleShot(0, lambda s=int(scroll), i=index: self.restore_viewport(s, i))
+
+    def restore_viewport(self, scroll_value: int, selected_index: int | None = None) -> None:
+        """Put the list back where it was, and mark the row the user opened."""
+        bar = self.verticalScrollBar()
+        bar.setValue(max(0, int(scroll_value)))
+        if selected_index is None:
+            return
+        row = int(selected_index)
+        if row < 0 or row >= self.result_model.rowCount():
+            return
+        self.selectRow(row)
+        index = self.result_model.index(row, int(LocalSearchCol.VIDEO))
+        self.scrollTo(index, QAbstractItemView.ScrollHint.EnsureVisible)
 
     def append_results(
         self,
@@ -210,6 +247,21 @@ class ResultTable(QTableView):
             dialogue_match_mode=dialogue_match_mode,
         )
         self._schedule_sync_action_editors()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        super().mouseMoveEvent(event)
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        index = self.indexAt(pos)
+        hand = False
+        if index.isValid() and index.column() == int(LocalSearchCol.VIDEO):
+            meta = index.data(GroupMetaRole) or {}
+            if isinstance(meta, dict) and meta.get("show_badge") and meta.get("badge"):
+                chip = group_badge_chip_rect(self.visualRect(index), str(meta.get("badge") or ""), self.fontMetrics())
+                hand = chip.contains(pos)
+        if hand:
+            self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.viewport().unsetCursor()
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
         bar = self.verticalScrollBar()
@@ -281,6 +333,7 @@ class ResultTable(QTableView):
             on_deep_locate=handlers.get("on_deep_locate"),
             on_add_to_shot_list=handlers.get("on_add_to_shot_list"),
             anchor_score=float(ent.get("score") or 0.0),
+            preview_sec=ent.get("preview_sec"),
         )
 
     def _sync_action_editors(self) -> None:

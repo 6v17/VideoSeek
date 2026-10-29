@@ -581,6 +581,7 @@ def _build_result_actions(
     on_deep_locate=None,
     on_add_to_shot_list=None,
     anchor_score=None,
+    preview_sec=None,
 ):
     container = QWidget()
     layout = QGridLayout(container)
@@ -595,8 +596,9 @@ def _build_result_actions(
     preview_button.setFixedSize(74, 32)
     preview_button.setCursor(Qt.PointingHandCursor)
     preview_button.setToolTip(texts["preview_tip"])
+    play_at = start_sec if preview_sec is None else preview_sec
     preview_button.clicked.connect(
-        lambda _, path=video_path, clip_start=start_sec, clip_end=end_sec: on_preview(path, clip_start, clip_end)
+        lambda _, path=video_path, clip_start=play_at, clip_end=end_sec: on_preview(path, clip_start, clip_end)
     )
 
     locate_button = _configure_table_action_button(QPushButton(texts["locate"]))

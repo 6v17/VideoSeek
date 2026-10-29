@@ -52,6 +52,13 @@ class SearchController(QObject):
         self._is_shutdown = False
         self._last_coarse_results = []
         self._all_results = []
+        self._source_hits = []
+        self._source_vectors = None
+        self._result_groups = []
+        self._expanded_group_ids = set()
+        self._grid_group_focus = None
+        self._group_return = None
+        self._group_hooks = False
         self._current_page = 0
         self._last_search_duration = 0.0
         self._result_display_context = {}
@@ -221,9 +228,16 @@ class SearchController(QObject):
         self._search_config = None
         self.stop_thumbnail_loading()
         self._all_results = []
+        self._source_hits = []
+        self._source_vectors = None
+        self._result_groups = []
+        self._expanded_group_ids = set()
+        self._grid_group_focus = None
+        self._group_return = None
         self._current_page = 0
         self._result_display_context = {}
         self._result_view().clear()
+        self._set_group_return(None)
         self._pin_top_guard = True
         self._reset_result_scroll()
         self._pin_top_guard = False
@@ -369,7 +383,7 @@ class SearchController(QObject):
         self._window_limit = int(SEARCH_CANDIDATE_LIMIT)
         # A short first page (chunk collapse, nearby-frame dedupe) is not the end.
         # Growth stops only when a larger fetch adds no new hits.
-        self._window_exhausted = len(self._all_results) == 0
+        self._window_exhausted = len(self._source_hits) == 0
         self._prefetch_hold = False
 
     def _maybe_grow_window(self, *, ignore_worker=None) -> None:
@@ -384,7 +398,7 @@ class SearchController(QObject):
             self._window_limit,
             self._furthest_visible_index(),
             exhausted=self._window_exhausted,
-            loaded_count=len(self._all_results),
+            loaded_count=len(self._source_hits),
         )
         if nxt is None:
             return
@@ -417,14 +431,14 @@ class SearchController(QObject):
             return
         requested = int(getattr(worker, "window_limit", 0) or 0)
         incoming = list(rows or [])
-        extra = _unseen_hits(self._all_results, incoming)
+        extra = _unseen_hits(self._source_hits, incoming)
         if not extra:
             self._window_exhausted = True
         else:
-            self._all_results.extend(extra)
-            self._append_rendered(extra)
-            self._update_results_status_text(self._all_results, dict(self._result_display_context or {}))
-            self._ensure_visible_thumbnails()
+            self._source_hits = incoming
+            vectors = getattr(worker, "hit_vectors", None)
+            self._source_vectors = list(vectors) if isinstance(vectors, list) else None
+            self.rebuild_grouped_results(pin_top=False)
         if requested > 0:
             self._window_limit = requested
         self._maybe_grow_window(ignore_worker=worker)
@@ -635,7 +649,13 @@ class SearchController(QObject):
         if not is_locate_run:
             self._last_coarse_results = list(results or [])
         self.parent_window.push_inference_status()
-        self._all_results = list(results or [])
+        self._source_hits = list(results or [])
+        vectors = getattr(self.worker, "hit_vectors", None)
+        self._source_vectors = list(vectors) if isinstance(vectors, list) else None
+        self._expanded_group_ids = set()
+        self._grid_group_focus = None
+        self._group_return = None
+        self._all_results = list(self._source_hits)
         self._current_page = 0
         self._last_search_duration = max(0.0, time.time() - self.start_time)
         self._search_config = getattr(self.worker, "config", None)
@@ -645,6 +665,7 @@ class SearchController(QObject):
         if not self._all_results:
             self._result_display_context = {}
             result_view.clear()
+            self._set_group_return(None)
             self._sync_results_pager()
             status = self._resolve_empty_search_status()
             self.parent_window.search_page.lbl_status.setText(status)
@@ -689,7 +710,132 @@ class SearchController(QObject):
             "dialogue_match_mode": dialogue_match_mode,
         }
         self._ensure_result_scroll_hooks()
-        self._render_current_page(pin_top=True)
+        self._ensure_group_hooks()
+        self.rebuild_grouped_results(pin_top=True)
+
+    def rebuild_grouped_results(self, *, pin_top: bool = False) -> None:
+        """Collapse the current hit list. Safe to call again when the grouping control changes."""
+        from src.app.config import load_config
+        from src.services.search_result_groups import (
+            flatten_result_groups,
+            focus_group_rows,
+            group_search_hits,
+        )
+
+        self._ensure_group_hooks()
+        hits = list(self._source_hits or [])
+        kind = str((self._result_display_context or {}).get("search_kind") or "").strip().lower()
+        config = load_config()
+        enabled = bool(config.get("search_result_grouping_enabled", True)) and kind not in {"dialogue", "tags"}
+        sensitivity = str(config.get("search_result_grouping_sensitivity") or "standard")
+        vectors = self._source_vectors
+        if not isinstance(vectors, list) or len(vectors) != len(hits):
+            vectors = None
+        groups = group_search_hits(hits, vectors, enabled=enabled, sensitivity=sensitivity)
+        self._result_groups = groups
+        self._expanded_group_ids = {
+            group_id
+            for group_id in self._expanded_group_ids
+            if 0 <= int(group_id) < len(groups) and len(groups[int(group_id)].members) > 1
+        }
+        focus = self._grid_group_focus
+        if focus is None or not (0 <= int(focus) < len(groups)):
+            self._grid_group_focus = None
+            self._all_results = flatten_result_groups(groups, expanded=self._expanded_group_ids)
+            self._set_group_return(None)
+        else:
+            group = groups[int(focus)]
+            self._all_results = focus_group_rows(group, group_id=int(focus))
+            self._set_group_return(group)
+        self._render_current_page(pin_top=pin_top)
+
+    def _set_group_return(self, group) -> None:
+        """Put group drill-in back on the status row. Never a bar above the list."""
+        page = getattr(self.parent_window, "search_page", None)
+        setter = getattr(page, "set_group_return", None)
+        try:
+            self._result_view().set_group_banner("", "")
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/controllers/search_controller.py:clear_group_banner")
+        if not callable(setter):
+            return
+        if group is None:
+            setter("")
+            return
+        texts = getattr(self.parent_window, "texts", {}) or {}
+        from ui.widgets.search_result_table_model import group_badge_text, group_subtitle_text
+
+        probe = type(
+            "Hit",
+            (),
+            {
+                "group_kind": str(group.kind or ""),
+                "member_count": len(group.members),
+                "unique_videos": group.unique_videos,
+                "lead_name": group.lead_name,
+            },
+        )()
+        badge = group_badge_text(probe, texts)
+        subtitle = group_subtitle_text(probe, texts)
+        back = str(texts.get("search_group_back") or "返回结果")
+        setter(f"{back} · {badge}" if badge else back, subtitle)
+
+    def _ensure_group_hooks(self) -> None:
+        if self._group_hooks:
+            return
+        view = self._result_view()
+        view.table.group_toggle_requested.connect(self._open_result_group)
+        view.grid.group_open_requested.connect(self._open_result_group)
+        view.group_back_clicked.connect(self._close_result_group)
+        button = getattr(getattr(self.parent_window, "search_page", None), "btn_group_back", None)
+        if button is not None:
+            button.clicked.connect(self._close_result_group)
+        self._group_hooks = True
+
+    def _open_result_group(self, group_id: int) -> None:
+        view = self._result_view()
+        if view.view_mode == "grid":
+            scroll = int(view.grid.verticalScrollBar().value())
+        else:
+            scroll = int(view.table.verticalScrollBar().value())
+        self._group_return = {
+            "scroll": scroll,
+            "group_id": int(group_id),
+            "mode": view.view_mode,
+        }
+        self._grid_group_focus = int(group_id)
+        self.rebuild_grouped_results(pin_top=True)
+
+    def _close_result_group(self) -> None:
+        saved = self._group_return
+        self._group_return = None
+        self._grid_group_focus = None
+        # Drop the "pin to top" follow-up from opening the group, or it lands after the restore.
+        self._pin_top_on_resume = False
+        self._pin_top_guard = False
+        self.rebuild_grouped_results(pin_top=False)
+        if not saved:
+            return
+        view = self._result_view()
+        index = self._representative_index(int(saved["group_id"]))
+        same_mode = str(saved.get("mode") or "") == view.view_mode
+        scroll = int(saved["scroll"]) if same_mode else 0
+        # populate() already queued the layout pass. Hand it the place to land.
+        if view.view_mode == "grid":
+            view.grid._pending_restore = (scroll, index)
+        else:
+            view.table._pending_restore = (scroll, index)
+
+    def _representative_index(self, group_id: int) -> int | None:
+        for index, hit in enumerate(self._all_results or []):
+            stored = getattr(hit, "group_id", None)
+            if stored is None or int(stored) != int(group_id):
+                continue
+            if bool(getattr(hit, "is_representative", True)):
+                return index
+        return None
 
     def _render_current_page(self, *, pin_top: bool = False) -> None:
         results = self._all_results
@@ -722,7 +868,9 @@ class SearchController(QObject):
             QTimer.singleShot(0, self._release_pin_guard)
 
     def _release_pin_guard(self) -> None:
-        self._reset_result_scroll()
+        # Only the group we just opened should stay pinned. Returning restores the old place.
+        if self._grid_group_focus is not None:
+            self._reset_result_scroll()
         self._pin_top_guard = False
         self._ensure_visible_thumbnails()
 
@@ -971,7 +1119,14 @@ class SearchController(QObject):
                 index, raw = int(raw[0]), raw[1]
             hit = coerce_search_hit(raw)
             cached = cache.get(
-                result_thumb_key(hit.video_path, hit.start_sec, hit.end_sec, thumb_width, thumb_height)
+                result_thumb_key(
+                    hit.video_path,
+                    hit.start_sec,
+                    hit.end_sec,
+                    thumb_width,
+                    thumb_height,
+                    peak_sec=getattr(hit, "peak_sec", None),
+                )
             )
             pixmap = self._pixmap_from_cached_thumb(cached)
             if pixmap is not None:

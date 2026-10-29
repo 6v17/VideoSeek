@@ -542,8 +542,10 @@ class ChunkSearchTests(unittest.TestCase):
         self.assertEqual(aggregated[0].video_id, "vid-a")
         self.assertAlmostEqual(float(aggregated[0].start_sec), 0.0)
         self.assertAlmostEqual(float(aggregated[0].end_sec), 4.0)
+        self.assertAlmostEqual(float(aggregated[0].peak_sec), 2.0)
         self.assertAlmostEqual(float(aggregated[1].score), 0.8)
         self.assertAlmostEqual(float(aggregated[1].start_sec), 4.0)
+        self.assertAlmostEqual(float(aggregated[1].peak_sec), 6.0)
 
     @patch("src.services.search_chunk_pipeline._aggregate_frame_hits_to_chunks", return_value=[])
     @patch("src.services.search_chunk_pipeline._collect_frame_candidates_for_chunk_search")

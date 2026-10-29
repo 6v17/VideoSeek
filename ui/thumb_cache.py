@@ -65,16 +65,22 @@ class ThumbPixmapCache:
                 self._entries.popitem(last=False)
 
 
-def result_thumb_key(video_path: str, start_sec: float, end_sec: float, width: int, height: int) -> tuple:
+def result_thumb_key(
+    video_path: str,
+    start_sec: float,
+    end_sec: float,
+    width: int,
+    height: int,
+    peak_sec: float | None = None,
+) -> tuple:
     """Same key the thumbnail loader stores, so a view switch can reuse the image."""
     from src.media.thumbnail import preview_sample_time
 
-    return ThumbPixmapCache.make_key(
-        video_path,
-        preview_sample_time(start_sec, end_sec),
-        width,
-        height,
-    )
+    if peak_sec is None:
+        sample = preview_sample_time(start_sec, end_sec)
+    else:
+        sample = max(0.0, float(peak_sec))
+    return ThumbPixmapCache.make_key(video_path, sample, width, height)
 
 
 _GLOBAL_CACHE = ThumbPixmapCache(max_entries=2048)

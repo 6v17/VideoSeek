@@ -42,7 +42,9 @@ def _retimed_hit(hit: SearchHit, timestamp: float, score: float, *, video_path: 
 
 
 def _neighbor_rerank_enabled(config, is_text: bool = False, precise_image: bool = False) -> bool:
-    if is_text or precise_image:
+    """Text and image frame search share one switch. Precise image uses its own refine."""
+    del is_text
+    if precise_image:
         return False
     return bool(get_frame_neighbor_rerank_enabled(config))
 

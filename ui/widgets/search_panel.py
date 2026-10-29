@@ -666,7 +666,25 @@ class SearchPanel(VSCard):
         score_row.addWidget(self.score_value, 0)
         score_row.addStretch(1)
         self.score_cluster.setFixedHeight(self._sp_options_row_height)
+
+        self.result_grouping_label = QLabel()
+        self.result_grouping_label.setObjectName("InlineFieldLabel")
+        self._configure_field_label(self.result_grouping_label)
+        self.result_grouping = QComboBox()
+        self.result_grouping.setObjectName("SearchGroupingSelect")
+        self.result_grouping.setFixedWidth(96)
+        self.result_grouping.setFixedHeight(self._sp_options_combo_height)
+        self.result_grouping_cluster = QWidget()
+        self.result_grouping_cluster.setObjectName("SearchGroupingCluster")
+        grouping_row = QHBoxLayout(self.result_grouping_cluster)
+        grouping_row.setContentsMargins(0, 2, 0, 2)
+        grouping_row.setSpacing(self._sp_field_gap)
+        grouping_row.addWidget(self.result_grouping_label, 0)
+        grouping_row.addWidget(self.result_grouping, 0)
+        self.result_grouping_cluster.setFixedHeight(self._sp_options_row_height)
+
         options_row_layout.addWidget(self.score_cluster, 0)
+        options_row_layout.addWidget(self.result_grouping_cluster, 0)
 
         self.options_row.setFixedHeight(self._sp_options_row_height)
         self.options_row.setSizePolicy(
@@ -983,6 +1001,7 @@ class SearchPanel(VSCard):
                 "image_search_mode_label",
                 "dialogue_search_mode_label",
                 "score_label",
+                "result_grouping_label",
             )
         ]
         labeled = [label for label in labels if isinstance(label, QLabel)]

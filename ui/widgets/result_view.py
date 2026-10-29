@@ -29,6 +29,7 @@ class ResultView(QWidget):
     """Wraps result table/grid; controllers call populate / set_thumbnail instead of setCellWidget."""
 
     view_mode_changed = Signal(str)
+    group_back_clicked = Signal()
 
     def __init__(
         self,
@@ -109,6 +110,10 @@ class ResultView(QWidget):
         self._sync_empty_overlay()
         if emit:
             self.view_mode_changed.emit(self._mode)
+
+    def set_group_banner(self, title: str, back_text: str = "") -> None:
+        """No-op. Grid drill-in returns from the status-row chip, not a bar above the list."""
+        del title, back_text
 
     def set_viewport_min_height(self, height: int) -> None:
         """One floor for the stack. Child table/grid mins must not stack on top of it."""

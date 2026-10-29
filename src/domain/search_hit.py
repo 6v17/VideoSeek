@@ -15,6 +15,8 @@ class SearchHit:
     match_kind: str = "frame"
     video_id: str = ""
     matched_text: str = ""
+    # Chunk hits keep the segment range in start/end. This is the frame that scored.
+    peak_sec: float | None = None
 
     def as_tuple(self) -> Tuple[float, float, float, str]:
         return (self.start_sec, self.end_sec, self.score, self.video_path)

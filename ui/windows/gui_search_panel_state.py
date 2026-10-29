@@ -230,6 +230,35 @@ class SearchPanelStateMixin:
             label.setToolTip(hint)
         combo.setToolTip(hint)
 
+    def _populate_result_grouping_combo(self) -> None:
+        if not hasattr(self, "search_page"):
+            return
+        combo = getattr(self.search_page, "result_grouping", None)
+        label = getattr(self.search_page, "result_grouping_label", None)
+        if combo is None:
+            return
+        texts = getattr(self, "texts", {}) or {}
+        from src.app.config import load_config
+
+        config = load_config()
+        enabled = bool(config.get("search_result_grouping_enabled", True))
+        sensitivity = str(config.get("search_result_grouping_sensitivity") or "standard").strip().lower()
+        current = "off" if not enabled else sensitivity if sensitivity in {"loose", "standard", "strict"} else "standard"
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(texts.get("search_result_grouping_off", "Off"), "off")
+        combo.addItem(texts.get("search_result_grouping_loose", "Loose"), "loose")
+        combo.addItem(texts.get("search_result_grouping_standard", "Standard"), "standard")
+        combo.addItem(texts.get("search_result_grouping_strict", "Strict"), "strict")
+        restore = combo.findData(current)
+        combo.setCurrentIndex(2 if restore < 0 else restore)
+        combo.blockSignals(False)
+        hint = str(texts.get("search_result_grouping_hint") or "")
+        combo.setToolTip(hint)
+        if label is not None:
+            label.setText(texts.get("search_result_grouping_label", "聚组"))
+            label.setToolTip(hint)
+
     def _set_text_search_enhance_ui(self, enabled: bool) -> None:
         if not hasattr(self, "search_page"):
             return
@@ -406,6 +435,7 @@ class SearchPanelStateMixin:
                         cluster.setMinimumWidth(int(width))
             if show_enhance:
                 self._populate_text_search_enhance_combo()
+        self._populate_result_grouping_combo()
 
         if active_tab == self.SEARCH_TAB_IMAGE:
             page.image_search_mode_label.setText(texts.get("search_image_mode_label", texts.get("setting_search_mode", "")))
@@ -580,6 +610,14 @@ class SearchPanelStateMixin:
                 mode = combo.currentText().strip() if combo is not None else ""
                 if mode:
                     parts.append(mode)
+        grouping = getattr(page, "result_grouping", None)
+        grouping_choice = str(grouping.currentData() or "") if grouping is not None else ""
+        if grouping_choice == "off":
+            parts.append(str(texts.get("search_result_grouping_off_summary") or "聚组关"))
+        elif grouping_choice in {"loose", "strict"}:
+            label = grouping.currentText().strip() if grouping is not None else ""
+            if label:
+                parts.append(label)
         score_kind = self._active_search_score_kind()
         if score_kind is not None:
             from src.app.config import DEFAULT_CONFIG

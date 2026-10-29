@@ -284,6 +284,20 @@ QCheckBox:disabled {
     line-height: 1.35em;
     min-height: 18px;
 }
+#AccentGhostButton[chrome="statusReturn"] {
+    color: __ACCENT__;
+    background: __ACCENT_SOFT__;
+    border: 1px solid __ACCENT__;
+    border-radius: __RADIUS_MD__;
+    font-size: __FS_XS__;
+    font-weight: 700;
+    padding: 0 10px;
+}
+#AccentGhostButton[chrome="statusReturn"]:hover {
+    color: __INVERSE_TEXT__;
+    background: __ACCENT__;
+    border-color: __ACCENT__;
+}
 #HeroCard {
     background: __HERO__;
     border: 1px solid __HERO_LINE__;
@@ -1595,6 +1609,23 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     color: __ACCENT__;
     border: 1px solid __ACCENT__;
 }
+#GhostButton[chrome="viewIcon"] {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: __RADIUS_MD__;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0;
+}
+#GhostButton[chrome="viewIcon"]:hover:!checked {
+    background: __BUTTON_SOFT_HOVER__;
+}
+#GhostButton[chrome="viewIcon"]:checked {
+    background: __ACCENT_SOFT__;
+    border: 1px solid __ACCENT__;
+}
 #LibraryGroupedVideoTree, #LibraryGroupedScroll {
     background: transparent;
     border: none;
@@ -2058,10 +2089,6 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
     border: 1px solid __LINE__;
     border-radius: __RADIUS_LG__;
 }
-#ResultGridCard:hover {
-    border-color: __ACCENT__;
-    background: __BUTTON_SOFT__;
-}
 #ResultGridCard[selected="true"] {
     border-color: __ACCENT__;
     background: __ACCENT_SOFT__;
@@ -2093,6 +2120,15 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
     background: transparent;
     border: none;
     padding: 0;
+}
+#ResultGridGroupBadge {
+    color: __ACCENT__;
+    background: __ACCENT_SOFT__;
+    border: none;
+    border-radius: __RADIUS_MD__;
+    font-size: __FS_XS__;
+    font-weight: 700;
+    padding: 0 6px;
 }
 #ResultGridActions {
     background: transparent;
