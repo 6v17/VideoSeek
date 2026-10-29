@@ -731,6 +731,8 @@ class SearchPanelStateMixin:
             panel = getattr(page, "search_panel", None)
             collapsed = bool(getattr(panel, "_query_collapsed", False))
             page.lbl_active_model.setVisible(not collapsed)
+            config = load_config()
+            self._sync_cloud_embedding_badge(texts, config=config)
             if active_tab == self.SEARCH_TAB_DIALOGUE:
                 page.lbl_active_model.setText(
                     texts.get(
@@ -750,7 +752,6 @@ class SearchPanelStateMixin:
                 page.lbl_text_model_hint.setVisible(False)
                 return
 
-            config = load_config()
             model_label = format_active_model_search_label(config)
             page.lbl_active_model.setText(
                 texts.get("search_active_model", "Active model: {model}").format(model=model_label)
@@ -782,6 +783,25 @@ class SearchPanelStateMixin:
             collapsed = bool(getattr(panel, "_query_collapsed", False))
             page.lbl_active_model.setVisible(not collapsed)
             page.lbl_text_model_hint.setVisible(False)
+            self._sync_cloud_embedding_badge(texts, config=None)
+
+    def _sync_cloud_embedding_badge(self, texts, config=None) -> None:
+        badge = getattr(getattr(self, "search_page", None), "lbl_cloud_embedding", None)
+        if badge is None:
+            return
+        provider = ""
+        if config is not None:
+            from src.storage.config_store import get_active_model_profile
+
+            provider = str(get_active_model_profile(config=config).get("provider") or "").strip()
+        visible = provider == "qwen3_vl_embedding_cloud"
+        badge.setText(texts.get("search_cloud_embedding_badge", "云嵌入"))
+        badge.setToolTip(texts.get("search_cloud_embedding_badge_tip", ""))
+        badge.setProperty("state", "warn" if visible else "neutral")
+        badge.setVisible(visible)
+        from ui.widgets.styles import repolish_widget
+
+        repolish_widget(badge)
 
     def _refresh_search_precision_controls(self) -> None:
         self._refresh_search_panel_state()

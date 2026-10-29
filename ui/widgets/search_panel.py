@@ -418,6 +418,12 @@ class SearchPanel(VSCard):
         self.text_search.setAcceptRichText(False)
 
         self.lbl_active_model = _ElidedHint()
+        self.lbl_cloud_embedding = QLabel()
+        self.lbl_cloud_embedding.setObjectName("StatusHint")
+        self.lbl_cloud_embedding.setProperty("state", "warn")
+        self.lbl_cloud_embedding.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.lbl_cloud_embedding.setFixedHeight(20)
+        self.lbl_cloud_embedding.hide()
 
         self.lbl_text_model_hint = _StripHint(self, self.text_search)
         self.lbl_text_model_hint.setObjectName("StatusHint")
@@ -738,6 +744,7 @@ class SearchPanel(VSCard):
         self._header_pad.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         tab_row.addWidget(self.search_query_tabs, 0)
         tab_row.addWidget(self.lbl_active_model, 0)
+        tab_row.addWidget(self.lbl_cloud_embedding, 0)
         tab_row.addWidget(self._header_pad, 1)
         tab_row.addWidget(self.btn_collapse, 0, Qt.AlignmentFlag.AlignVCenter)
 

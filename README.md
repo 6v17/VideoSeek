@@ -7,7 +7,7 @@
 [中文说明](./README.zh.md) | **English**
 
 Search a local video library by **text or screenshot**, with **hard-subtitle OCR**; preview hits and export MP4, Jianying, or NLE timelines.  
-Indexing runs on your machine (ONNX · Lance · FFmpeg); **your media is not uploaded**.
+By default, indexing stays on your machine (ONNX · Lance · FFmpeg) and **media is not uploaded**. If you turn on Cloud embedding in Settings, extracted frames and queries are sent to the cloud service you configure.
 
 > **Free forever.** Do not pay for resale or “paid install” copies — get it from [GitHub](https://github.com/6v17/VideoSeek) / [the site](https://www.lv17.top/).
 
@@ -25,7 +25,7 @@ Indexing runs on your machine (ONNX · Lance · FFmpeg); **your media is not upl
 - **Hard-subtitle OCR** — Keyword search over on-screen dialogue  
 - **Libraries & scope** — Multiple libraries, selected videos, search presets  
 - **Preview & export** — Timeline preview; MP4; Jianying draft / Premiere XML / DaVinci FCPXML  
-- **Local-first** — Data stays on disk; optional LAN search and localhost Agent API  
+- **Local-first** — Sync and search stay on this machine unless you turn on Cloud embedding, which sends frames and queries to the service you configure. Optional LAN search and localhost Agent API  
 
 > Optional: video understanding, tag search, multiple CLIP-family models, experimental recap cuts, and more. **Main path: sync → search → export.**
 

@@ -550,6 +550,7 @@ class SearchPage(QWidget):
         self.search_panel = SearchPanel()
         self.query_card = self.search_panel
         self.lbl_active_model = self.search_panel.lbl_active_model
+        self.lbl_cloud_embedding = self.search_panel.lbl_cloud_embedding
         self.lbl_text_model_hint = self.search_panel.lbl_text_model_hint
         self.lbl_dialogue_hint = self.search_panel.lbl_dialogue_hint
         self.lbl_tags_hint = self.search_panel.lbl_tags_hint

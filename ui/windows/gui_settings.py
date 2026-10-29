@@ -998,6 +998,28 @@ class SettingsGuiMixin:
             from src.core.cloud_vl_embedding import normalize_cloud_vl_settings
 
             previous_cloud_vl = normalize_cloud_vl_settings(config.get("cloud_vl_embedding"))
+            cloud_vl_turning_on = (not previous_cloud_vl["enabled"]) and bool(
+                self.settings_page.input_cloud_vl_enabled.currentData()
+            )
+            if cloud_vl_turning_on and not self.show_confirm_dialog(
+                self.texts.get("setting_cloud_vl_confirm_title", "开启云嵌入"),
+                self.texts.get(
+                    "setting_cloud_vl_confirm_body",
+                    "开启后，同步抽出的每一帧都会以 JPEG 上传到你配置的云端计算向量。素材不再只留在本机。",
+                ),
+                kind="warning",
+                confirm_text=self.texts.get("setting_cloud_vl_confirm_ok", "仍然开启"),
+                cancel_text=self.texts.get("setting_cloud_vl_confirm_cancel", "保持关闭"),
+            ):
+                off_index = self.settings_page.input_cloud_vl_enabled.findData(False)
+                if off_index >= 0:
+                    self.settings_page.input_cloud_vl_enabled.setCurrentIndex(off_index)
+                profile_combo = self.settings_page.input_active_model_profile
+                if str(profile_combo.currentData() or "") == "qwen3_vl_embedding_cloud":
+                    restore_index = profile_combo.findData(previous_active_profile_id)
+                    if restore_index >= 0:
+                        profile_combo.setCurrentIndex(restore_index)
+                return
             config["cloud_vl_embedding"] = normalize_cloud_vl_settings(
                 {
                     "enabled": bool(self.settings_page.input_cloud_vl_enabled.currentData()),

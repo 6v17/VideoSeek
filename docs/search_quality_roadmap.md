@@ -134,7 +134,7 @@
 ### API 向量
 
 - 形态：文本/帧 → API 出向量 → **本地 Lance 检索**（建库也须同一模型）
-- 已接一版备选：设置「云嵌入备选」。模型 `qwen3-vl-embedding`，默认维度 2048，北京 DashScope。开启后它就是当前模型，关掉回到刚才的本地档案。向量在 `model_assets/qwen3-vl-embedding-cloud/qwen3-vl-embedding-2048/`，和 Chinese-CLIP 分开。
+- 已接一版备选：设置「云嵌入备选」。模型 `qwen3-vl-embedding`，默认维度 2048，北京 DashScope。开启前要确认：抽出的帧和查询会上传到配置的云端。向量在 `model_assets/qwen3-vl-embedding-cloud/qwen3-vl-embedding-2048/`，和 Chinese-CLIP 分开。`cloud_vl_embedding.base_url` 可改。
 - 风险：厂商换模/换维 → 本地库要重建；命门在厂商。帧和查询会离开本机。
 
 ---

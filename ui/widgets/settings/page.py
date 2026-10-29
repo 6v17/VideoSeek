@@ -1447,7 +1447,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_cloud_vl_enabled.setText(
             texts.get(
                 "setting_cloud_vl_enabled_hint",
-                "开启后它就是当前模型。向量写在自己的目录，和 Chinese-CLIP 分开。关掉后回到刚才的本地模型。",
+                "开启后，抽出的每一帧会以 JPEG 上传到你配置的云端计算向量。素材不再只留在本机。",
             )
         )
         self.hint_cloud_vl_api_key.setText(
