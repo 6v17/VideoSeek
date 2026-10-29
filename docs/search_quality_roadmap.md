@@ -121,7 +121,7 @@
 ① 完善 CLIP 工程（上表）
 ② 可选本地 Qwen3-VL-Embedding-2B（GPU、独立 profile、重嵌）
 ③ 可选 Rerank 2B（只打 top-K，不与 ② 绑死第一版）
-④ 云 API 向量（钉模型版本；换维=废库）
+④ 云 API 向量：设置里可选 DashScope `qwen3-vl-embedding`（默认关，独立档案，维度钉死；换维=另一套空库）
 ```
 
 ### 2B 备注
@@ -134,8 +134,8 @@
 ### API 向量
 
 - 形态：文本/帧 → API 出向量 → **本地 Lance 检索**（建库也须同一模型）
-- 风险：厂商换模/换维 → 本地库要重建；命门在厂商
-- 适合试验/fork；官方宜可选，默认仍本地
+- 已接一版备选：设置「云嵌入备选」。模型 `qwen3-vl-embedding`，默认维度 2048，北京 DashScope。开启后它就是当前模型，关掉回到刚才的本地档案。向量在 `model_assets/qwen3-vl-embedding-cloud/qwen3-vl-embedding-2048/`，和 Chinese-CLIP 分开。
+- 风险：厂商换模/换维 → 本地库要重建；命门在厂商。帧和查询会离开本机。
 
 ---
 

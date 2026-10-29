@@ -11,6 +11,7 @@ _PROVIDER_DEFAULT_DIMENSION = {
     "clip_onnx": 512,
     "chinese_clip_onnx": 512,
     "siglip2_onnx": 768,
+    "qwen3_vl_embedding_cloud": 2048,
 }
 
 

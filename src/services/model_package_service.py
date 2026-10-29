@@ -268,6 +268,8 @@ def _profile_required_files(profile):
 
 
 def _profile_files_ready(profile):
+    if str(profile.get("provider", "") or "").strip() == "qwen3_vl_embedding_cloud":
+        return True
     resource_dir = _resolve_profile_resource_dir(profile)
     if not resource_dir or not os.path.isdir(resource_dir):
         return False

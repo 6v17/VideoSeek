@@ -211,6 +211,16 @@ DEFAULT_CONFIG = {
     "update_notice_dismissed_version": "",
     "free_notice_seen": False,
     "understanding": DEFAULT_UNDERSTANDING_CONFIG,
+    "cloud_vl_embedding": {
+        "enabled": False,
+        "api_key": "",
+        "base_url": (
+            "https://dashscope.aliyuncs.com/api/v1/services/embeddings/"
+            "multimodal-embedding/multimodal-embedding"
+        ),
+        "model": "qwen3-vl-embedding",
+        "dimension": 2048,
+    },
 }
 
 CONFIG_BOUNDS = {
@@ -719,7 +729,9 @@ def _sanitize_general_settings(config):
     sanitized["search_scope_library_paths"] = [
         str(item or "").strip() for item in raw_scope_paths if str(item or "").strip()
     ]
-    return sanitized
+    from src.services.cloud_vl_profile import sync_cloud_vl_profile
+
+    return sync_cloud_vl_profile(sanitized)
 
 
 def _should_migrate_to_user_data(config):

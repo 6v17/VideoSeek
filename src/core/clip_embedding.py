@@ -201,7 +201,7 @@ def get_engine():
             engine = build_inference_engine(provider)
             engine.provider_id = provider
             engine.model_profile_id = profile_id
-            if getattr(engine, "visual_session", None) is None:
+            if not getattr(engine, "remote", False) and getattr(engine, "visual_session", None) is None:
                 raise RuntimeError(
                     f"Inference engine '{provider}' initialized without a visual ONNX session."
                 )
@@ -1267,6 +1267,13 @@ def _register_default_inference_engines():
         )
 
     register_inference_engine("chinese_clip_onnx", _chinese_clip_factory)
+
+    def _cloud_vl_factory():
+        from src.core.cloud_vl_embedding import CloudVlEmbeddingEngine
+
+        return CloudVlEmbeddingEngine()
+
+    register_inference_engine("qwen3_vl_embedding_cloud", _cloud_vl_factory)
 
 
 _register_default_inference_engines()

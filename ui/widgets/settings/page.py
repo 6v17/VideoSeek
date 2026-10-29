@@ -326,6 +326,10 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.share_client_panel.hide()
         self.input_export_video_silent = NoWheelComboBox()
         self.input_active_model_profile = NoWheelComboBox()
+        self.input_cloud_vl_enabled = NoWheelComboBox()
+        self.input_cloud_vl_api_key = QLineEdit()
+        self.input_cloud_vl_api_key.setEchoMode(QLineEdit.Password)
+        self.input_cloud_vl_dimension = NoWheelComboBox()
         self.btn_rediscover_models = QPushButton()
         self.btn_download_runtime_resources = QPushButton()
         self.btn_remove_model_profile = QPushButton()
@@ -382,6 +386,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_agent_api_enabled = ClickableLabel()
         self.label_team_mode = ClickableLabel()
         self.label_active_model_profile = ClickableLabel()
+        self.label_cloud_vl_enabled = ClickableLabel()
+        self.label_cloud_vl_api_key = ClickableLabel()
+        self.label_cloud_vl_dimension = ClickableLabel()
         self.label_data_root = ClickableLabel()
         self.label_ffmpeg_path = ClickableLabel()
         self.label_model_dir = ClickableLabel()
@@ -427,6 +434,15 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_agent_api_enabled = QLabel()
         self.hint_team_mode = QLabel()
         self.hint_active_model_profile = QLabel()
+        self.hint_cloud_vl_enabled = QLabel()
+        self.hint_cloud_vl_api_key = QLabel()
+        self.hint_cloud_vl_dimension = QLabel()
+        for hint_label in (
+            self.hint_cloud_vl_enabled,
+            self.hint_cloud_vl_api_key,
+            self.hint_cloud_vl_dimension,
+        ):
+            hint_label.setWordWrap(True)
         self.hint_data_root = QLabel()
         self.hint_ffmpeg_path = QLabel()
         self.hint_ffmpeg_active = QLabel()
@@ -498,6 +514,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_team_mode, width=COMPONENT_SIZES["settings_input_width"] + 120)
         self._configure_setting_input(self.input_export_video_silent, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_active_model_profile, width=COMPONENT_SIZES["settings_input_width"] + 120)
+        self._configure_setting_input(self.input_cloud_vl_enabled, width=COMPONENT_SIZES["settings_input_width"] + 36)
+        self._configure_setting_input(self.input_cloud_vl_api_key, width=COMPONENT_SIZES["settings_input_width"] + 120)
+        self._configure_setting_input(self.input_cloud_vl_dimension, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self.btn_download_runtime_resources.setObjectName("AccentGhostButton")
         self.btn_download_runtime_resources.setMinimumHeight(34)
         self.btn_rediscover_models.setObjectName("AccentGhostButton")
@@ -840,6 +859,27 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_active_model_profile,
             self.input_active_model_profile_bundle,
             self.hint_active_model_profile,
+        )
+        self._add_setting_row(
+            self.section_model_gpu_form,
+            5,
+            self.label_cloud_vl_enabled,
+            self.input_cloud_vl_enabled,
+            self.hint_cloud_vl_enabled,
+        )
+        self._add_setting_row(
+            self.section_model_gpu_form,
+            6,
+            self.label_cloud_vl_api_key,
+            self.input_cloud_vl_api_key,
+            self.hint_cloud_vl_api_key,
+        )
+        self._add_setting_row(
+            self.section_model_gpu_form,
+            7,
+            self.label_cloud_vl_dimension,
+            self.input_cloud_vl_dimension,
+            self.hint_cloud_vl_dimension,
         )
         self._add_setting_row(
             self.section_paths_form,
@@ -1395,6 +1435,60 @@ class SettingsPage(QWidget, SettingsFormMixin):
                 "Switching changes both model resources and model-scoped data paths.",
             )
         )
+        self.label_cloud_vl_enabled.setText(
+            _fallback_text(texts, "setting_cloud_vl_enabled", "云嵌入备选", "Cloud embedding")
+        )
+        self.label_cloud_vl_api_key.setText(
+            _fallback_text(texts, "setting_cloud_vl_api_key", "云嵌入 API Key", "Cloud embedding API key")
+        )
+        self.label_cloud_vl_dimension.setText(
+            _fallback_text(texts, "setting_cloud_vl_dimension", "云嵌入维度", "Cloud embedding dimension")
+        )
+        self.hint_cloud_vl_enabled.setText(
+            texts.get(
+                "setting_cloud_vl_enabled_hint",
+                "开启后它就是当前模型。向量写在自己的目录，和 Chinese-CLIP 分开。关掉后回到刚才的本地模型。",
+            )
+        )
+        self.hint_cloud_vl_api_key.setText(
+            texts.get(
+                "setting_cloud_vl_api_key_hint",
+                "北京地域的 DashScope Key。留空则沿用理解设置里通义千问视觉的 Key。",
+            )
+        )
+        self.input_cloud_vl_api_key.setPlaceholderText(
+            texts.get("setting_cloud_vl_api_key_placeholder", "留空则沿用通义千问视觉 Key")
+        )
+        self.hint_cloud_vl_dimension.setText(
+            texts.get(
+                "setting_cloud_vl_dimension_hint",
+                "写入该档案的向量维度，默认 2048。更改后是另一套空索引，需要重新同步。",
+            )
+        )
+        current_cloud_enabled = self.input_cloud_vl_enabled.currentData()
+        self.input_cloud_vl_enabled.blockSignals(True)
+        self.input_cloud_vl_enabled.clear()
+        self.input_cloud_vl_enabled.addItem(
+            texts.get("setting_cloud_vl_enabled_option_off", "关闭"), False
+        )
+        self.input_cloud_vl_enabled.addItem(
+            texts.get("setting_cloud_vl_enabled_option_on", "开启"), True
+        )
+        restore_cloud = self.input_cloud_vl_enabled.findData(current_cloud_enabled)
+        self.input_cloud_vl_enabled.setCurrentIndex(0 if restore_cloud < 0 else restore_cloud)
+        self.input_cloud_vl_enabled.blockSignals(False)
+        current_cloud_dim = self.input_cloud_vl_dimension.currentData()
+        self.input_cloud_vl_dimension.blockSignals(True)
+        self.input_cloud_vl_dimension.clear()
+        for dimension in (256, 512, 768, 1024, 1536, 2048, 2560):
+            self.input_cloud_vl_dimension.addItem(str(dimension), dimension)
+        restore_dim = self.input_cloud_vl_dimension.findData(current_cloud_dim)
+        default_dim = self.input_cloud_vl_dimension.findData(2048)
+        if restore_dim >= 0:
+            self.input_cloud_vl_dimension.setCurrentIndex(restore_dim)
+        elif default_dim >= 0:
+            self.input_cloud_vl_dimension.setCurrentIndex(default_dim)
+        self.input_cloud_vl_dimension.blockSignals(False)
         self.hint_data_root.setText(texts["setting_data_root_hint"])
         self.hint_ffmpeg_path.setText(texts["setting_ffmpeg_path_hint"])
         self.hint_ffmpeg_active.setText(texts["setting_ffmpeg_active"].format(path=texts["setting_ffmpeg_unknown"]))

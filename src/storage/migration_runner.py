@@ -369,6 +369,8 @@ def _migrate_global_asset_files(config):
 
 def _migrate_model_resource_files(config):
     profile = get_active_model_profile(config=config)
+    if str(profile.get("provider") or "").strip() == "qwen3_vl_embedding_cloud":
+        return 0
     files = dict(profile.get("files") or {})
     target_dir = get_active_model_resource_dir(config=config)
     os.makedirs(target_dir, exist_ok=True)

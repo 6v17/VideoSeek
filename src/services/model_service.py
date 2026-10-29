@@ -44,6 +44,8 @@ def get_required_model_files(config=None):
         # Keep runtime checks usable even when no model profile is configured yet.
         return list(REQUIRED_MODEL_FILES)
     provider = str(profile.get("provider", "") or "").strip()
+    if provider == "qwen3_vl_embedding_cloud":
+        return []
 
     files_map = profile.get("files")
     if isinstance(files_map, dict):

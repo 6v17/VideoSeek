@@ -190,6 +190,15 @@ class SettingsGuiMixin:
         self.settings_page.sync_chunk_advanced_visibility()
         prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
         self.settings_page.input_prefer_gpu.setCurrentIndex(0 if prefer_gpu else 1)
+        from src.core.cloud_vl_embedding import normalize_cloud_vl_settings
+
+        cloud_vl = normalize_cloud_vl_settings(config.get("cloud_vl_embedding"))
+        cloud_enabled_index = self.settings_page.input_cloud_vl_enabled.findData(bool(cloud_vl["enabled"]))
+        self.settings_page.input_cloud_vl_enabled.setCurrentIndex(0 if cloud_enabled_index < 0 else cloud_enabled_index)
+        self.settings_page.input_cloud_vl_api_key.setText(str(cloud_vl["api_key"] or ""))
+        cloud_dim_index = self.settings_page.input_cloud_vl_dimension.findData(int(cloud_vl["dimension"]))
+        if cloud_dim_index >= 0:
+            self.settings_page.input_cloud_vl_dimension.setCurrentIndex(cloud_dim_index)
         inference_ep = str(config.get("inference_ep", DEFAULT_CONFIG["inference_ep"]) or "auto").strip().lower()
         ep_index = self.settings_page.input_inference_ep.findData(inference_ep)
         self.settings_page.input_inference_ep.setCurrentIndex(0 if ep_index < 0 else ep_index)
@@ -836,7 +845,10 @@ class SettingsGuiMixin:
             model_variant = str(runtime.get("model_variant", "") or profile.get("model_variant", "") or "").strip()
             if not model_variant:
                 model_variant = "vit-base-patch32"
-            display_name = f"{provider_dir} / {model_variant}"
+            if provider == "qwen3_vl_embedding_cloud":
+                display_name = str(profile.get("display_name") or "").strip() or "Qwen3-VL Embedding（云）"
+            else:
+                display_name = f"{provider_dir} / {model_variant}"
             combo.addItem(display_name, profile_id)
         if combo.count() == 0:
             combo.addItem(
@@ -861,6 +873,10 @@ class SettingsGuiMixin:
             model_dir = str(runtime.get("model_dir", "") or "").strip() or config.get("model_dir", DEFAULT_CONFIG["model_dir"])
             self.settings_page.input_prefer_gpu.setCurrentIndex(0 if prefer_gpu else 1)
             self.settings_page.input_model_dir.setText(model_dir)
+            cloud_selected = selected_profile_id == "qwen3_vl_embedding_cloud"
+            cloud_index = self.settings_page.input_cloud_vl_enabled.findData(cloud_selected)
+            if cloud_index >= 0:
+                self.settings_page.input_cloud_vl_enabled.setCurrentIndex(cloud_index)
             break
 
     def save_settings(self):
@@ -979,6 +995,19 @@ class SettingsGuiMixin:
             config["min_chunk_duration"] = new_min_chunk_duration
             config["chunk_policy"] = new_chunk_policy
             config["prefer_gpu"] = bool(self.settings_page.input_prefer_gpu.currentData())
+            from src.core.cloud_vl_embedding import normalize_cloud_vl_settings
+
+            previous_cloud_vl = normalize_cloud_vl_settings(config.get("cloud_vl_embedding"))
+            config["cloud_vl_embedding"] = normalize_cloud_vl_settings(
+                {
+                    "enabled": bool(self.settings_page.input_cloud_vl_enabled.currentData()),
+                    "api_key": self.settings_page.input_cloud_vl_api_key.text().strip(),
+                    "dimension": self.settings_page.input_cloud_vl_dimension.currentData() or 2048,
+                    "model": previous_cloud_vl["model"],
+                    "base_url": previous_cloud_vl["base_url"],
+                    "previous_profile_id": previous_cloud_vl.get("previous_profile_id", ""),
+                }
+            )
             config["inference_ep"] = str(
                 self.settings_page.input_inference_ep.currentData() or DEFAULT_CONFIG["inference_ep"]
             ).strip().lower()
@@ -1059,6 +1088,17 @@ class SettingsGuiMixin:
                 else:
                     config.pop("pending_cleanup_data_root", None)
             save_config(config)
+            saved_config = load_config()
+            saved_active_profile_id = str((saved_config.get("models") or {}).get("active_profile") or "").strip()
+            saved_cloud_vl = normalize_cloud_vl_settings(saved_config.get("cloud_vl_embedding"))
+            if saved_active_profile_id and saved_active_profile_id != previous_active_profile_id:
+                profile_switched = True
+            if (
+                bool(previous_cloud_vl.get("enabled")) != bool(saved_cloud_vl.get("enabled"))
+                or int(previous_cloud_vl.get("dimension") or 0) != int(saved_cloud_vl.get("dimension") or 0)
+            ):
+                profile_switched = True
+            self._populate_model_profile_options(saved_config)
             if previous_lance_ann_enabled != bool(config.get("lance_ann_enabled")):
                 try:
                     from src.app.logging_utils import get_logger
@@ -1099,6 +1139,7 @@ class SettingsGuiMixin:
                 or previous_embedding_batch_size != config["embedding_batch_size"]
                 or profile_switched
                 or effective_model_dir_changed
+                or previous_cloud_vl != normalize_cloud_vl_settings(config.get("cloud_vl_embedding"))
             ):
                 from src.core.clip_embedding import reset_engine
 
