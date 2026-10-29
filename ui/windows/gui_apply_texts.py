@@ -111,8 +111,6 @@ class ApplyTextsGuiMixin:
         panel.score_label.setToolTip(score_hint)
         panel.score_input.setToolTip(score_hint)
         panel.score_value.setToolTip(score_hint)
-        if hasattr(self, "_populate_result_grouping_combo"):
-            self._populate_result_grouping_combo()
         self.search_page.search_scope_label.setText(t.get("search_scope_label", ""))
         self.search_page.skip_edges_label.setText(t.get("search_skip_edges_label", "跳过时段"))
         if hasattr(self, "_refresh_skip_edges_summary"):
