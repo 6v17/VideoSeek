@@ -1,10 +1,10 @@
 # Engineering conventions
 
-Short rules for keeping VideoSeek maintainable. Architecture overview: [`architecture.md`](architecture.md).
+Short rules for keeping VideoSeek maintainable. Architecture overview: [`architecture.md`](architecture.md). How to send a change: [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Hard rules
 
-1. **New features go through `src/services/`** — UI and Agent HTTP only schedule; they do not copy business logic.
+1. **New features go through `src/services/`** — UI and Agent HTTP only schedule; they do not copy business logic. Reuse what is already there: indexes in `src/storage`, inference in `src/core`, and the existing HTTP helpers. Do not add a second index, inference stack, or client for one feature.
 2. **Do not extend legacy npy / FAISS index paths** — Lance is the write/read path. Legacy code is maintenance-only until removed.
 3. **Indexing/search reads are Lance-only** — `_load_vectors_from_disk` / search assets do not load `*_vectors.npy`. Users import npy → Lance from **Settings → Paths** (not auto on launch); after `lance_migration.completed`, startup gates trust that flag and skip vector-dir listdir (sidecar npy may remain). Library details mark npy-only videos as `broken_asset`, not `ready`.
 4. **Do not import private (`_foo`) symbols across packages** — if another module needs it, make a public helper or move it. Stage→stage `from … import _foo` is a failed split.
@@ -57,6 +57,7 @@ The former monolith `src/web/agent_api.py` is split into `src/web/agent_api/` (`
 - **No UTF-8 BOM** on tracked files — BOM in `pyproject.toml` breaks tomllib / pip / pytest while Ruff may still pass. Local check: `python scripts/check_no_bom.py`.
 - Text encoding / line endings: `.editorconfig` (`charset = utf-8`) and `.gitattributes` (`text=auto eol=lf`). Do not save sources as “UTF-8 with BOM”.
 - Expand Ruff rules gradually; do not dump a repo-wide style rewrite in one PR.
+- User-visible copy lives in `src/app/i18n.py` (Chinese and English). If that key is also in `src/app/copy_overrides.py`, change both. The override is what the UI shows.
 - Former megafile `tests/test_services.py` is split into `tests/test_services_*.py` (+ `services_test_support.py`).
 - **MainWindow mixin attrs** — `tests/test_gui_mixin_attr_ratchet.py` freezes how many `self._` names are touched from 2+ files under `ui/windows/gui*.py`. Most multi-file names are intentional `_sync_*` / `_refresh_*` hooks or a few shared queues/flags; do not “decouple” single-file (A-class) attrs for cosmetics. Whole-repo `self._` scans overcount and are not a refactor brief.
 

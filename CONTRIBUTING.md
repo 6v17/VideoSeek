@@ -5,18 +5,19 @@
 - 缺陷和小修复可以直接开 [issue](https://github.com/6v17/VideoSeek/issues) 或 pull request。
 - 新功能，以及会改索引、数据库或文件格式的改动，先开 issue。写清要解决什么、动哪些数据。确认后再写代码。
 - 一个 pull request 只做一件事。说明为什么改，以及你怎么验证的。
-- 不要为单个功能再写一套索引或推理。索引放在 `src/storage`，模型推理放在 `src/core`，网络请求先找已有调用。
+- 新代码遵守 [`docs/engineering.md`](docs/engineering.md)。按阶段把边界划清：一个模块一件事。文件变长时先找能切开的边界，不要为了行数拆碎，也不要把无关的事继续揉进同一个文件。
+- 加东西时先复用已有入口。索引放在 `src/storage`，模型推理放在 `src/core`，业务逻辑放在 `src/services`，网络请求先找已有调用。不要为单个功能再写一套。
 - 改用户可见的文案时，同时改 `src/app/i18n.py` 里的中文和英文。这句如果已经在 `src/app/copy_overrides.py` 里，两处一起改。
 
 ## 平台与依赖
 
-当前会持续维护和打包的平台是 Windows 10/11。其他平台上的修复也欢迎，请在说明里写上系统、芯片和你实际跑过的测试。文档里先不要把这些平台写成已经官方支持。
+当前会持续维护和打包的平台是 Windows 10/11。其他平台上的修复也欢迎，请在说明里写上系统版本和你实际跑过的测试。
 
-不要为了某一个平台放宽依赖版本。某个包装不上时，在 issue 里写明 Python 版本、系统和完整报错。
+某个包装不上时，在 issue 里写明 Python 版本、系统和完整报错。不要为了让自己的平台装上而改依赖约束。
 
 ## 本地检查
 
-环境准备见 [`docs/quickstart.md`](docs/quickstart.md)。项目要求 Python 3.10 或更高，持续集成跑的是 3.10。若某个更新的版本没有 `onnxruntime` 或 `faiss-cpu` 的预编译包，请在说明里写明，不要改依赖约束。
+环境准备见 [`docs/quickstart.md`](docs/quickstart.md)。项目要求 Python 3.10 或更高，持续集成跑的是 3.10。若某个更新的版本没有 `onnxruntime` 或 `faiss-cpu` 的预编译包，请在说明里写明。
 
 ```bash
 python -m ruff check src ui tests scripts main.py
