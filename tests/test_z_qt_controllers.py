@@ -1231,6 +1231,32 @@ class PreviewDialogTests(unittest.TestCase):
         chrome._on_slider_released()
         player.set_time.assert_called_once_with(60000, unlock=True)
 
+    def test_expanded_chrome_stays_idle_until_a_clip_is_attached(self):
+        from ui.playback.expanded_preview_chrome import ExpandedPreviewChrome
+
+        chrome = ExpandedPreviewChrome()
+        idle = (
+            chrome.play_button,
+            chrome.maximize_button,
+            chrome.slider,
+            chrome.set_start_button,
+            chrome.set_end_button,
+            chrome.clear_segment_button,
+            chrome.add_to_shot_list_button,
+            chrome.frame_export_button,
+            chrome.export_button,
+        )
+        self.assertTrue(all(not widget.isEnabled() for widget in idle))
+
+        player = MagicMock()
+        player.is_available.return_value = False
+        chrome.bind_player(player)
+        chrome.attach_clip("D:/videos/clip.mp4", 0.0, 1.0)
+        self.assertTrue(chrome.play_button.isEnabled())
+        self.assertTrue(chrome.slider.isEnabled())
+        self.assertTrue(chrome.add_to_shot_list_button.isEnabled())
+        self.assertFalse(chrome.export_button.isEnabled())
+
     @patch("ui.playback.preview_dialog.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
     @patch("ui.playback.preview_dialog.VlcPreviewPlayer")
     def test_slider_release_uses_known_duration_when_vlc_length_is_unavailable(self, mock_vlc_cls, _mock_timer):

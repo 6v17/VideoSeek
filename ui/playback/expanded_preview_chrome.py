@@ -169,6 +169,7 @@ class ExpandedPreviewChrome(QWidget):
         self._transport_key_filter = None
         self._install_transport_keyboard()
 
+        self.reset()
         self.setVisible(False)
 
     def _install_transport_keyboard(self) -> None:

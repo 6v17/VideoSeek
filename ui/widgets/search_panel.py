@@ -581,6 +581,8 @@ class SearchPanel(VSCard):
             self.search_query_tabs.addTab(placeholder, "")
         self.search_query_tabs.setFixedHeight(36)
         self.search_query_tabs.currentChanged.connect(self.query_stack.setCurrentIndex)
+        # Text is the landing tab. Image search stays one click away.
+        self.search_query_tabs.setCurrentIndex(1)
 
 
     def _assemble_search_filters_and_layout(self, layout):

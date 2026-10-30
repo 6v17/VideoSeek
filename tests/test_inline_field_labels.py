@@ -50,5 +50,11 @@ class InlineFieldLabelLayoutTests(unittest.TestCase):
             )
 
 
+    def test_text_search_is_the_landing_tab(self):
+        panel = SearchPanel()
+        self.assertEqual(panel.search_query_tabs.currentIndex(), 1)
+        self.assertIs(panel.query_stack.currentWidget(), panel.text_search)
+
+
 if __name__ == "__main__":
     unittest.main()
