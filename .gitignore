@@ -16,9 +16,8 @@ htmlcov/
 venv/
 env/
 
-# Local / IDE noise (tracked project files under .idea/ stay as-is)
-.idea/workspace.xml
-.idea/shelf/
+# Local / IDE noise
+.idea/
 .vscode/
 *.swp
 *.swo
@@ -36,6 +35,12 @@ scripts/release/runtime/*
 
 # Private release packaging (Nuitka/Inno one-shot). Keep a local copy; do not publish.
 scripts/build_release.ps1
+
+# Local model weights dropped at the repo root
+models/
+
+# Nuitka crash dumps
+nuitka-crash-report.xml
 
 # Build / packaging
 dist/
