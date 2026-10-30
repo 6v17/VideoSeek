@@ -48,6 +48,52 @@ class FfmpegBinaryUsableTests(unittest.TestCase):
             with patch("src.infra.ffmpeg_paths.subprocess.run", return_value=ok):
                 self.assertTrue(ffmpeg_paths.is_ffmpeg_binary_usable(str(binary)))
 
+    def test_elf_macho_and_fat_headers_pass_off_windows(self):
+        headers = (
+            b"\x7fELF",
+            b"\xcf\xfa\xed\xfe",
+            b"\xce\xfa\xed\xfe",
+            b"\xfe\xed\xfa\xcf",
+            b"\xfe\xed\xfa\xce",
+            b"\xca\xfe\xba\xbe",
+        )
+        ok = subprocess.CompletedProcess(
+            args=["ffmpeg", "-version"],
+            returncode=0,
+            stdout=b"ffmpeg version N-test\n",
+            stderr=b"",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for index, magic in enumerate(headers):
+                binary = Path(temp_dir) / f"ffmpeg-{index}"
+                payload = magic + (b"\0" * (ffmpeg_paths._MIN_FFMPEG_BYTES - len(magic)))
+                binary.write_bytes(payload)
+                with (
+                    patch("src.infra.ffmpeg_paths.os.name", "posix"),
+                    patch("src.infra.ffmpeg_paths.subprocess.run", return_value=ok),
+                ):
+                    self.assertTrue(
+                        ffmpeg_paths.is_ffmpeg_binary_usable(str(binary)),
+                        magic,
+                    )
+
+    def test_windows_rejects_macho_even_when_version_would_pass(self):
+        ok = subprocess.CompletedProcess(
+            args=["ffmpeg", "-version"],
+            returncode=0,
+            stdout=b"ffmpeg version N-test\n",
+            stderr=b"",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            binary = Path(temp_dir) / "ffmpeg"
+            magic = b"\xcf\xfa\xed\xfe"
+            binary.write_bytes(magic + (b"\0" * (ffmpeg_paths._MIN_FFMPEG_BYTES - len(magic))))
+            with (
+                patch("src.infra.ffmpeg_paths.os.name", "nt"),
+                patch("src.infra.ffmpeg_paths.subprocess.run", return_value=ok),
+            ):
+                self.assertFalse(ffmpeg_paths.is_ffmpeg_binary_usable(str(binary)))
+
 
 class HasFfmpegSkipsBrokenManagedCopyTests(unittest.TestCase):
     def test_broken_appdata_stub_does_not_count_as_installed(self):

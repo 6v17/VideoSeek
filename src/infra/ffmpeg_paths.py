@@ -12,6 +12,14 @@ from src.infra.paths import get_app_data_dir, get_app_install_dir
 # that is merely larger than this floor, so usability also requires -version.
 _MIN_FFMPEG_BYTES = 1024 * 1024
 _VERSION_OK: dict[tuple, bool] = {}
+# Mach-O little-endian, big-endian, and fat/universal. Linux stays ELF; Windows stays PE.
+_MACHO_MAGICS = (
+    b"\xcf\xfa\xed\xfe",
+    b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf",
+    b"\xfe\xed\xfa\xce",
+    b"\xca\xfe\xba\xbe",
+)
 
 
 def get_default_ffmpeg_path():
@@ -56,9 +64,10 @@ def _ffmpeg_reports_version(path: str, size: int, mtime: float) -> bool:
 def is_ffmpeg_binary_usable(path: str) -> bool:
     """True when ``path`` is a real ffmpeg binary, not a truncated copy.
 
-    Size and PE/ELF magic reject stubs. ``ffmpeg -version`` rejects a larger
-    truncated file that still starts with ``MZ``. The version result is cached
-    by path, size, and mtime.
+    Size and a platform executable header reject stubs. Windows accepts PE.
+    Other platforms accept ELF, PE, and Mach-O (including fat binaries).
+    ``ffmpeg -version`` rejects a larger truncated file that still has a
+    valid header. The version result is cached by path, size, and mtime.
     """
     text = os.path.normpath(str(path or "").strip())
     if not text or not os.path.isfile(text):
@@ -78,7 +87,11 @@ def is_ffmpeg_binary_usable(path: str) -> bool:
     if os.name == "nt":
         magic_ok = magic[:2] == b"MZ"
     else:
-        magic_ok = magic[:4] == b"\x7fELF" or magic[:2] == b"MZ"
+        magic_ok = (
+            magic[:4] == b"\x7fELF"
+            or magic[:2] == b"MZ"
+            or magic[:4] in _MACHO_MAGICS
+        )
     if not magic_ok:
         return False
     return _ffmpeg_reports_version(text, size, mtime)

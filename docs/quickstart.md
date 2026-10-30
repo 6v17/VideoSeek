@@ -9,7 +9,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 `onnxruntime-directml` 换成 `onnxruntime`。
+Windows 上 `requirements.txt` 安装带 DirectML 的 ONNX Runtime。Linux / macOS 由同一份文件里的平台标记安装 `onnxruntime`，不用再手动换包。
 
 ## 2) 运行资源
 
