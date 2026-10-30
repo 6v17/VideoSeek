@@ -2,7 +2,7 @@
 
 import unittest
 
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QSizePolicy, QWidget
 
 from ui.widgets.components import NavigationSidebar, SearchPage
 
@@ -94,4 +94,18 @@ class SearchBrowseLayoutTests(unittest.TestCase):
         page.adopt_preview_width()
         self._app.processEvents()
         self.assertGreaterEqual(page.compare_splitter.sizes()[1], 470)
+        page.hide()
+
+    def test_ready_status_stays_a_chip(self):
+        page = SearchPage()
+        page.lbl_status.setText("就绪")
+        page.resize(1400, 700)
+        page.show()
+        self._app.processEvents()
+        self.assertEqual(
+            page.lbl_status.sizePolicy().horizontalPolicy(),
+            QSizePolicy.Policy.Maximum,
+        )
+        self.assertLess(page.lbl_status.width(), 160)
+        self.assertGreater(page.results_actions.x(), page.lbl_status.x() + page.lbl_status.width())
         page.hide()

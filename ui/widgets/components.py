@@ -486,14 +486,14 @@ class _ViewModeButton(QPushButton):
 
 
 class _ElidedStatusLabel(QLabel):
-    """Status chip that gives up width before the size slider and view buttons."""
+    """Status chip sized to its text. Leftover toolbar width stays empty."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("StatusLabel")
         self.setWordWrap(False)
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.setMinimumWidth(0)
         self._full = ""
 
@@ -706,7 +706,8 @@ class SearchPage(QWidget):
         self.results_size_cluster.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.results_actions.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         results_toolbar.addWidget(self.btn_group_back, 0)
-        results_toolbar.addWidget(self.lbl_status, 1)
+        results_toolbar.addWidget(self.lbl_status, 0, Qt.AlignmentFlag.AlignVCenter)
+        results_toolbar.addStretch(1)
         results_toolbar.addWidget(self.results_size_cluster, 0)
         results_toolbar.addWidget(self.results_actions, 0)
 
