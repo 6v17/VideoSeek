@@ -769,28 +769,6 @@ class SearchControllerTests(unittest.TestCase):
             "Done 1.25s · 1 · Use Find shot"
         )
 
-    def test_results_status_says_closest_when_top_groups_are_flat(self):
-        from src.domain.search_hit import SearchHit
-
-        parent = _make_parent_window()
-        parent.texts["search_done"] = "Done {duration:.2f}s · {count}"
-        parent.texts["search_results_closest_only"] = "No exact match"
-        parent.texts["search_done_deep_locate_hint"] = ""
-        controller = SearchController(parent)
-        controller.worker = MagicMock()
-        controller._last_search_duration = 0.4
-        controller._visual_results_flat = True
-        hits = [
-            SearchHit(0.0, 1.0, 0.356, "a.mp4"),
-            SearchHit(1.0, 2.0, 0.353, "b.mp4"),
-        ]
-
-        controller._update_results_status_text(hits, {"search_kind": "text"})
-
-        parent.search_page.lbl_status.setText.assert_called_once_with(
-            "Done 0.40s · 2 · No exact match"
-        )
-
     @patch("ui.controllers.search_controller.SearchWarmupWorker")
     def test_start_warmup_starts_once(self, mock_worker_cls):
         parent = _make_parent_window()

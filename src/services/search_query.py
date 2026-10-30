@@ -40,35 +40,6 @@ def _coalesce_query_vector(query_data, is_text=False, query_vector=None):
     return build_query_vector(query_data, is_text=is_text)
 
 
-# UI hint only. A real match usually pulls its group ahead of the next one;
-# a query with no answer keeps the top two almost tied. This is not a cutoff
-# and is not calibrated — recheck on a few dozen labeled queries before
-# treating the gap as "no result".
-VISUAL_FLAT_TOP_GAP = 0.02
-
-
-def visual_results_lack_standout(hits, *, gap: float = VISUAL_FLAT_TOP_GAP) -> bool:
-    """True when the best two hits are too close to call one of them the match.
-
-    Pass group representatives, not raw frames. Adjacent frames of a real hit
-    score almost the same and would look like "no answer".
-    """
-    scores: list[float] = []
-    for hit in hits or []:
-        try:
-            scores.append(float(getattr(hit, "score", 0.0) or 0.0))
-        except (TypeError, ValueError):
-            continue
-    if len(scores) < 2:
-        return False
-    scores.sort(reverse=True)
-    try:
-        limit = float(gap)
-    except (TypeError, ValueError):
-        return False
-    return (scores[0] - scores[1]) < limit
-
-
 def filter_hits_by_min_score(hits, min_score, *, relative: bool = False) -> List[SearchHit]:
     """Drop weak hits.
 

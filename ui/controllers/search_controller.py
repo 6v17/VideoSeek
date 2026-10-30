@@ -55,7 +55,6 @@ class SearchController(QObject):
         self._source_hits = []
         self._source_vectors = None
         self._result_groups = []
-        self._visual_results_flat = False
         self._expanded_group_ids = set()
         self._grid_group_focus = None
         self._group_return = None
@@ -232,7 +231,6 @@ class SearchController(QObject):
         self._source_hits = []
         self._source_vectors = None
         self._result_groups = []
-        self._visual_results_flat = False
         self._expanded_group_ids = set()
         self._grid_group_focus = None
         self._group_return = None
@@ -665,7 +663,6 @@ class SearchController(QObject):
 
         result_view = self._result_view()
         if not self._all_results:
-            self._visual_results_flat = False
             self._result_display_context = {}
             result_view.clear()
             self._set_group_return(None)
@@ -736,13 +733,6 @@ class SearchController(QObject):
             vectors = None
         groups = group_search_hits(hits, vectors, enabled=enabled, sensitivity=sensitivity)
         self._result_groups = groups
-        self._visual_results_flat = False
-        if kind not in {"dialogue", "tags"} and groups:
-            from src.services.search_query import visual_results_lack_standout
-
-            self._visual_results_flat = visual_results_lack_standout(
-                [group.representative for group in groups]
-            )
         self._expanded_group_ids = {
             group_id
             for group_id in self._expanded_group_ids
@@ -987,10 +977,6 @@ class SearchController(QObject):
             return
 
         status_text = texts["search_done"].format(duration=duration, count=total_count)
-        if getattr(self, "_visual_results_flat", False):
-            flat_hint = str(texts.get("search_results_closest_only") or "").strip()
-            if flat_hint:
-                status_text = f"{status_text} · {flat_hint}"
         clip_score_mode = bool(context.get("clip_score_mode"))
         if clip_score_mode:
             try:
