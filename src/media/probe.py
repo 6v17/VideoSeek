@@ -39,6 +39,9 @@ def get_video_stream_info(video_path):
 
     ffprobe_path = get_ffprobe_path()
     if not ffprobe_path:
+        fallback = _stream_info_from_opencv(video_path)
+        if fallback is not None:
+            return fallback
         return _failed("ffprobe missing")
 
     path = os.fspath(video_path)
@@ -125,6 +128,22 @@ def _pick_duration(*candidates):
         if parsed is not None:
             return parsed
     return None
+
+
+def _stream_info_from_opencv(video_path):
+    """Duration and size when ffprobe.exe is not installed next to ffmpeg."""
+    info = _probe_video_stream_with_opencv(video_path)
+    if not info.get("width") and not info.get("duration"):
+        return None
+    return {
+        "width": info.get("width"),
+        "height": info.get("height"),
+        "duration": info.get("duration"),
+        "codec_name": "",
+        "pix_fmt": "",
+        "bits_per_raw_sample": None,
+        "profile": "",
+    }
 
 
 def _probe_video_duration_with_opencv(video_path):

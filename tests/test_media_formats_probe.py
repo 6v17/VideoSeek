@@ -83,6 +83,17 @@ class ProbeDurationTests(unittest.TestCase):
         self.assertNotIn("100M", cmd)
         self.assertNotIn("probe_failed", info)
 
+    @patch("src.media.probe.get_ffprobe_path", return_value="")
+    @patch(
+        "src.media.probe._probe_video_stream_with_opencv",
+        return_value={"width": 1280, "height": 720, "duration": 90.0, "fps": 24.0, "frame_count": 2160},
+    )
+    def test_missing_ffprobe_uses_opencv(self, _mock_cv, _mock_path):
+        info = probe_mod.get_video_stream_info(r"D:\lib\clip.mp4")
+        self.assertEqual(info["width"], 1280)
+        self.assertEqual(info["duration"], 90.0)
+        self.assertNotIn("probe_failed", info)
+
     @patch("src.media.probe.get_ffprobe_path", return_value="ffprobe")
     @patch("src.media.probe.subprocess.run", side_effect=OSError("ffprobe crashed"))
     def test_probe_failure_is_marked(self, _mock_run, _mock_path):
