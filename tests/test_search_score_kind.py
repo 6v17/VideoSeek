@@ -1,7 +1,7 @@
 import unittest
 
 from src.domain.search_hit import SearchHit
-from src.services.search_query import filter_hits_by_min_score
+from src.services.search_query import filter_hits_by_min_score, visual_results_lack_standout
 from src.storage.config_store import (
     SEARCH_CANDIDATE_LIMIT,
     SEARCH_TOP_K_MAX,
@@ -78,6 +78,19 @@ class SearchScoreKindTests(unittest.TestCase):
         self.assertEqual([hit.video_path for hit in kept], ["noise.mp4", "hit.mp4"])
         absolute = filter_hits_by_min_score(hits, 0.37, relative=False)
         self.assertEqual([hit.video_path for hit in absolute], ["noise.mp4"])
+
+    def test_flat_top_is_a_hint_not_a_cutoff(self):
+        tied = [
+            SearchHit(0.0, 1.0, 0.356, "a.mp4"),
+            SearchHit(1.0, 2.0, 0.353, "b.mp4"),
+        ]
+        self.assertTrue(visual_results_lack_standout(tied))
+        separated = [
+            SearchHit(0.0, 1.0, 0.448, "hit.mp4"),
+            SearchHit(1.0, 2.0, 0.360, "other.mp4"),
+        ]
+        self.assertFalse(visual_results_lack_standout(separated))
+        self.assertFalse(visual_results_lack_standout(separated[:1]))
 
 
 if __name__ == "__main__":
