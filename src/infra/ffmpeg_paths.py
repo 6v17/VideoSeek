@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 
 from src.infra.paths import get_app_data_dir, get_app_install_dir
 
-# Real ffmpeg builds are tens of MB; a few-byte stub from a failed copy must not
-# count as installed (otherwise Full-edition auto-import never retries).
-_MIN_FFMPEG_BYTES = 256 * 1024
+# Real ffmpeg builds are tens of MB. Size alone still accepts a truncated PE
+# that is merely larger than this floor, so usability also requires -version.
+_MIN_FFMPEG_BYTES = 1024 * 1024
+_VERSION_OK: dict[tuple, bool] = {}
 
 
 def get_default_ffmpeg_path():
@@ -28,17 +30,42 @@ def get_configured_ffmpeg_target_path(config=None):
     return os.path.normpath(get_default_ffmpeg_path())
 
 
-def is_ffmpeg_binary_usable(path: str) -> bool:
-    """True when ``path`` looks like a real ffmpeg binary (not a truncated stub).
+def _ffmpeg_reports_version(path: str, size: int, mtime: float) -> bool:
+    key = (os.path.normcase(os.path.normpath(path)), int(size), float(mtime))
+    cached = _VERSION_OK.get(key)
+    if cached is not None:
+        return cached
+    ok = False
+    try:
+        run_kwargs = {
+            "capture_output": True,
+            "timeout": 8,
+            "check": False,
+        }
+        if os.name == "nt":
+            run_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        completed = subprocess.run([path, "-version"], **run_kwargs)
+        blob = (completed.stdout or b"") + (completed.stderr or b"")
+        ok = completed.returncode == 0 and b"ffmpeg version" in blob.lower()
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        ok = False
+    _VERSION_OK[key] = ok
+    return ok
 
-    Cheap checks only (size + PE/ELF magic) — no subprocess. Used by resolution and
-    ``has_ffmpeg`` so a 6-byte AppData leftover does not block re-import.
+
+def is_ffmpeg_binary_usable(path: str) -> bool:
+    """True when ``path`` is a real ffmpeg binary, not a truncated copy.
+
+    Size and PE/ELF magic reject stubs. ``ffmpeg -version`` rejects a larger
+    truncated file that still starts with ``MZ``. The version result is cached
+    by path, size, and mtime.
     """
     text = os.path.normpath(str(path or "").strip())
     if not text or not os.path.isfile(text):
         return False
     try:
         size = int(os.path.getsize(text))
+        mtime = float(os.path.getmtime(text))
     except OSError:
         return False
     if size < _MIN_FFMPEG_BYTES:
@@ -49,8 +76,12 @@ def is_ffmpeg_binary_usable(path: str) -> bool:
     except OSError:
         return False
     if os.name == "nt":
-        return magic[:2] == b"MZ"
-    return magic[:4] == b"\x7fELF" or magic[:2] == b"MZ"
+        magic_ok = magic[:2] == b"MZ"
+    else:
+        magic_ok = magic[:4] == b"\x7fELF" or magic[:2] == b"MZ"
+    if not magic_ok:
+        return False
+    return _ffmpeg_reports_version(text, size, mtime)
 
 
 def get_ffmpeg_path():

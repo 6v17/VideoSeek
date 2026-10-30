@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -61,8 +62,10 @@ class BundledRuntimeServiceTests(unittest.TestCase):
                 for file_path in package_dir.rglob("*"):
                     if file_path.is_file():
                         archive.write(file_path, file_path.relative_to(package_dir.parent).as_posix())
-            # Large enough + PE magic so has_ffmpeg() accepts the copied binary.
-            Path(runtime_dir, "ffmpeg.exe").write_bytes(b"MZ" + (b"\0" * (256 * 1024)))
+            # Size + PE magic; -version is mocked so the copy counts as installed.
+            from src.infra import ffmpeg_paths
+
+            Path(runtime_dir, "ffmpeg.exe").write_bytes(b"MZ" + (b"\0" * (ffmpeg_paths._MIN_FFMPEG_BYTES - 2)))
 
             manifest = {
                 "manifest_version": 1,
@@ -94,6 +97,15 @@ class BundledRuntimeServiceTests(unittest.TestCase):
                 patch("src.services.model_package_service.save_config"),
                 patch("src.services.model_package_service.get_config_schema_version", return_value=2),
                 patch("src.services.runtime_resource_service.load_config", side_effect=_load_config),
+                patch(
+                    "src.infra.ffmpeg_paths.subprocess.run",
+                    return_value=subprocess.CompletedProcess(
+                        args=["ffmpeg", "-version"],
+                        returncode=0,
+                        stdout=b"ffmpeg version test\n",
+                        stderr=b"",
+                    ),
+                ),
             ):
                 result = bundled_runtime_service.bootstrap_bundled_runtime()
 

@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,11 +27,26 @@ class FfmpegBinaryUsableTests(unittest.TestCase):
             _write_fake_pe(tiny, size=1024)
             self.assertFalse(ffmpeg_paths.is_ffmpeg_binary_usable(str(tiny)))
 
-    def test_large_pe_like_file_is_usable(self):
+    def test_large_pe_without_version_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             binary = Path(temp_dir) / "ffmpeg.exe"
             _write_fake_pe(binary, size=ffmpeg_paths._MIN_FFMPEG_BYTES)
-            self.assertTrue(ffmpeg_paths.is_ffmpeg_binary_usable(str(binary)))
+            failed = subprocess.CompletedProcess(args=["ffmpeg", "-version"], returncode=1, stdout=b"", stderr=b"")
+            with patch("src.infra.ffmpeg_paths.subprocess.run", return_value=failed):
+                self.assertFalse(ffmpeg_paths.is_ffmpeg_binary_usable(str(binary)))
+
+    def test_version_output_marks_binary_usable(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            binary = Path(temp_dir) / "ffmpeg.exe"
+            _write_fake_pe(binary, size=ffmpeg_paths._MIN_FFMPEG_BYTES)
+            ok = subprocess.CompletedProcess(
+                args=["ffmpeg", "-version"],
+                returncode=0,
+                stdout=b"ffmpeg version N-test\n",
+                stderr=b"",
+            )
+            with patch("src.infra.ffmpeg_paths.subprocess.run", return_value=ok):
+                self.assertTrue(ffmpeg_paths.is_ffmpeg_binary_usable(str(binary)))
 
 
 class HasFfmpegSkipsBrokenManagedCopyTests(unittest.TestCase):
