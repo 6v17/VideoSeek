@@ -75,6 +75,7 @@ python import_runtime_resources.py openai-clip.zip ffmpeg.exe
 - [`docs/quickstart.md`](docs/quickstart.md) — from-source setup and troubleshooting  
 - [`docs/for-agents.md`](docs/for-agents.md) — localhost Agent API  
 - [`docs/architecture.md`](docs/architecture.md) — architecture (developers)  
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to contribute  
 
 ## Community
 
