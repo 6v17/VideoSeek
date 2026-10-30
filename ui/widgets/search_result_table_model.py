@@ -111,29 +111,16 @@ def _video_cell_parts(
 
 
 def group_badge_text(hit, texts: dict) -> str:
-    kind = str(getattr(hit, "group_kind", "") or "")
+    del texts
     count = int(getattr(hit, "member_count", 1) or 1)
-    if kind == "cross":
-        template = str(texts.get("search_group_cross") or "跨集 · {count}")
-    else:
-        template = str(texts.get("search_group_near") or "邻近 · {count}")
-    try:
-        return template.format(count=count)
-    except (KeyError, IndexError, ValueError):
-        return template
+    if count <= 1:
+        return ""
+    return str(count)
 
 
 def group_subtitle_text(hit, texts: dict) -> str:
-    if str(getattr(hit, "group_kind", "") or "") != "cross":
-        return ""
-    unique = int(getattr(hit, "unique_videos", 1) or 1)
-    if unique <= 1:
-        return ""
-    template = str(texts.get("search_group_cross_more") or "{name} · {count}")
-    try:
-        return template.format(name=str(getattr(hit, "lead_name", "") or ""), count=unique)
-    except (KeyError, IndexError, ValueError):
-        return template
+    del hit, texts
+    return ""
 
 
 def build_result_row(
