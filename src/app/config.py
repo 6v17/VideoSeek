@@ -104,10 +104,10 @@ DEFAULT_CONFIG = {
     "sampling_fps_mode": "dynamic",
     "sampling_fps_rules": "0-10m=2; 10m-=1",
     "search_top_k": 100,
-    "search_min_score_image": 0.5,
-    "search_min_score_image_chunk": 0.2,
-    "search_min_score_text": 0.15,
-    "search_min_score_compose": 0.1,
+    "search_min_score_image": 0.12,
+    "search_min_score_image_chunk": 0.12,
+    "search_min_score_text": 0.08,
+    "search_min_score_compose": 0.08,
     "search_min_score_dialogue": 0.0,
     "text_search_enhance_enabled": False,
     "search_result_grouping_enabled": True,
@@ -618,6 +618,12 @@ def _sanitize_general_settings(config):
     sanitized.pop("search_min_score", None)
     sanitized.pop("search_min_score_video_discovery", None)
     sanitized.pop("search_min_score_precise", None)
+    # Older floors were absolute cosine. Those numbers overlap on real CLIP
+    # queries, so visual search now stores a drop below the best hit.
+    if "search_min_score_relative" not in sanitized:
+        for key in score_keys + ("search_min_score_image_chunk",):
+            sanitized[key] = DEFAULT_CONFIG[key]
+    sanitized["search_min_score_relative"] = True
 
     for key, allowed_values in CONFIG_ENUMS.items():
         value = str(sanitized.get(key, DEFAULT_CONFIG[key]) or "").strip().lower()

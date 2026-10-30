@@ -311,7 +311,7 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 | `text_enhance` | 否 | 跟 `/health` | **Agent 可显式开关**画面文搜增强；见 §3 机制说明；`meta.text_enhance_applied` 表示是否生效 |
 | `top_k` | 否 | 300 | 第一窗条数；显式值最高 10000，供翻页补窗 |
 | `mode` | 否 | 桌面 `search_mode` | `frame` \| `chunk`（`dialogue`/`tags` 时响应 `mode` 分别为 `dialogue`/`tags`） |
-| `min_score` | 否 | 本机该档最低相关度 | 显式值优先。帧级、视频择优、深入共用一档；片段、文搜、组合搜各一档。字幕仅模糊匹配使用。标签没有这项 |
+| `min_score` | 否 | 画面搜索是距本次最高分的差距；字幕模糊匹配是绝对分 | 显式值优先。0 表示不过滤。帧级、视频择优、深入共用一档；片段、文搜、组合搜各一档。标签没有这项 |
 | `search_precision_mode` | 否 | 见 health | `fast` \| `precise`；图搜未传时用 `agent_api_default_image_precision`；纯文搜忽略 |
 | `client_request_id` | 否 | — | 原样回显，便于对账 |
 | `scope` | 否 | 桌面范围 | 见 §2.3 |

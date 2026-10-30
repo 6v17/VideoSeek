@@ -40,14 +40,31 @@ def _coalesce_query_vector(query_data, is_text=False, query_vector=None):
     return build_query_vector(query_data, is_text=is_text)
 
 
-def filter_hits_by_min_score(hits, min_score) -> List[SearchHit]:
-    if min_score is None:
-        return list(hits or [])
+def filter_hits_by_min_score(hits, min_score, *, relative: bool = False) -> List[SearchHit]:
+    """Drop weak hits.
+
+    ``relative=False`` keeps ``score >= min_score`` (dialogue fuzzy match).
+    ``relative=True`` keeps scores within ``min_score`` of this result list's best
+    hit. CLIP cosine ranges overlap across queries, so one absolute floor cannot
+    mean "relevant". ``0`` does not filter.
+    """
+    rows = list(hits or [])
+    if min_score is None or not rows:
+        return rows
     try:
         threshold = float(min_score)
     except (TypeError, ValueError):
-        return list(hits or [])
-    return [hit for hit in (hits or []) if float(getattr(hit, "score", 0.0) or 0.0) >= threshold]
+        return rows
+    if threshold <= 0:
+        return rows
+
+    def _score(hit) -> float:
+        return float(getattr(hit, "score", 0.0) or 0.0)
+
+    if not relative:
+        return [hit for hit in rows if _score(hit) >= threshold]
+    floor = max(_score(hit) for hit in rows) - threshold
+    return [hit for hit in rows if _score(hit) >= floor]
 
 
 # Public names for cross-module callers (engineering.md rule 4).

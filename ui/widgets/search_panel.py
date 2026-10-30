@@ -638,10 +638,10 @@ class SearchPanel(VSCard):
         from ui.widgets.components import NoWheelSlider
 
         self._score_defaults = {
-            "image": 50,
-            "image_chunk": 20,
-            "text": 15,
-            "compose": 10,
+            "image": 12,
+            "image_chunk": 12,
+            "text": 8,
+            "compose": 8,
             "dialogue": 0,
         }
         self._score_values = dict(self._score_defaults)
@@ -657,7 +657,7 @@ class SearchPanel(VSCard):
         self.score_input.setValue(self._score_defaults["image"])
         self.score_input.setFixedWidth(148)
         self.score_input.setFixedHeight(self._sp_options_combo_height)
-        self.score_value = QLabel("50%")
+        self.score_value = QLabel("12%")
         self.score_value.setObjectName("SearchScoreValue")
         self.score_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.score_value.setFixedWidth(40)

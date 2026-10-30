@@ -1,5 +1,7 @@
 import unittest
 
+from src.domain.search_hit import SearchHit
+from src.services.search_query import filter_hits_by_min_score
 from src.storage.config_store import (
     SEARCH_CANDIDATE_LIMIT,
     SEARCH_TOP_K_MAX,
@@ -36,8 +38,8 @@ class SearchScoreKindTests(unittest.TestCase):
 
     def test_new_modes_use_their_own_defaults(self):
         blank = {"language": "zh"}
-        self.assertEqual(get_search_min_score(blank, kind="image"), 0.5)
-        self.assertEqual(get_search_min_score(blank, kind="image_chunk"), 0.2)
+        self.assertEqual(get_search_min_score(blank, kind="image"), 0.12)
+        self.assertEqual(get_search_min_score(blank, kind="image_chunk"), 0.12)
         self.assertEqual(get_search_min_score(blank, kind="dialogue"), 0.0)
         stored = {
             "search_min_score_image_chunk": 0.33,
@@ -58,13 +60,24 @@ class SearchScoreKindTests(unittest.TestCase):
         blank = {"language": "zh"}
         self.assertEqual(
             resolve_effective_min_score(None, config=blank, is_text=False, search_mode="chunk"),
-            0.2,
+            0.12,
         )
         self.assertEqual(
             resolve_effective_min_score(0.4, config=blank, is_text=False, search_mode="chunk"),
             0.4,
         )
         self.assertIsNone(resolve_effective_min_score(None, config=blank, search_kind="tags"))
+
+    def test_relative_floor_keeps_hits_near_the_best_score(self):
+        hits = [
+            SearchHit(0.0, 1.0, 0.393, "noise.mp4"),
+            SearchHit(1.0, 2.0, 0.353, "hit.mp4"),
+            SearchHit(2.0, 3.0, 0.20, "tail.mp4"),
+        ]
+        kept = filter_hits_by_min_score(hits, 0.08, relative=True)
+        self.assertEqual([hit.video_path for hit in kept], ["noise.mp4", "hit.mp4"])
+        absolute = filter_hits_by_min_score(hits, 0.37, relative=False)
+        self.assertEqual([hit.video_path for hit in absolute], ["noise.mp4"])
 
 
 if __name__ == "__main__":

@@ -392,7 +392,11 @@ class SearchWorker(QThread):
                     text_enhance=text_enhance,
                     api_port_default=int(app_cfg.get("team_api_port", 8765) or 8765),
                 )
-                results = filter_hits_by_min_score(results, resolved_min_score)
+                results = filter_hits_by_min_score(
+                    results,
+                    resolved_min_score,
+                    relative=kind not in {"dialogue", "tags"},
+                )
                 if kind in {"dialogue", "tags"}:
                     self.dialogue_status_message = ""
                     self.dialogue_matched_by = "team"
@@ -478,7 +482,7 @@ class SearchWorker(QThread):
                     should_stop_callback=self._should_stop,
                     **base_kwargs,
                 )
-            results = filter_hits_by_min_score(results, resolved_min_score)
+            results = filter_hits_by_min_score(results, resolved_min_score, relative=True)
             from src.services.search_service import locate_crop_confidence_warning_key
 
             self.locate_warning_key = locate_crop_confidence_warning_key(

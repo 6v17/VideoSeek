@@ -513,14 +513,10 @@ def _hits_to_payload(
     ]
 
 
-def _filter_hits(hits: List[SearchHit], min_score: Optional[float]) -> List[SearchHit]:
-    if min_score is None:
-        return hits
-    try:
-        threshold = float(min_score)
-    except (TypeError, ValueError):
-        return hits
-    return [hit for hit in hits if float(hit.score) >= threshold]
+def _filter_hits(hits: List[SearchHit], min_score: Optional[float], *, relative: bool = False) -> List[SearchHit]:
+    from src.services.search_query import filter_hits_by_min_score
+
+    return filter_hits_by_min_score(hits, min_score, relative=relative)
 
 
 def _preset_to_agent_payload(preset: dict, config=None) -> Dict[str, Any]:
@@ -934,7 +930,7 @@ def _execute_agent_search_work(body: AgentSearchRequest) -> Dict[str, Any]:
             config=config,
         )
 
-    hits = _filter_hits(hits, resolved["min_score"])
+    hits = _filter_hits(hits, resolved["min_score"], relative=True)
     _record_agent_search_telemetry(resolved, hits, preview_anchor_sec=preview_anchor_sec)
     scope_meta = _build_scope_meta(_scope_for_request_meta(body, resolved), config=config)
     response = {
