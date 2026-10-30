@@ -13,6 +13,9 @@ from src.utils import (
 
 
 def _resolve_runtime_model_dir(config):
+    profile = get_active_model_profile(config=config)
+    if str(profile.get("provider") or "").strip() == "qwen3_vl_embedding_cloud":
+        return str(config.get("model_dir", "") or "").strip()
     try:
         model_dir = get_active_model_resource_dir(config=config)
         if model_dir:

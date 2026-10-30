@@ -6,11 +6,12 @@ import numpy as np
 
 from src.core.cloud_vl_embedding import (
     CLOUD_VL_PROFILE_ID,
+    CLOUD_VL_PROVIDER_ID,
     embed_contents,
     normalize_cloud_vl_settings,
     resolve_cloud_vl_api_key,
 )
-from src.services.cloud_vl_profile import sync_cloud_vl_profile
+from src.services.cloud_vl_profile import build_cloud_vl_profile, sync_cloud_vl_profile
 from src.services.model_package_service import _profile_files_ready
 from src.services.model_service import get_required_model_files
 
@@ -131,6 +132,22 @@ class CloudVlEmbeddingTests(unittest.TestCase):
         self.assertFalse(status["prefer_gpu"])
         self.assertEqual(status["backend"], "Cloud")
         self.assertEqual(status["warning"], "")
+
+    def test_embedding_spec_skips_missing_model_dir(self):
+        from src.storage.config_store import get_active_embedding_spec
+
+        config = {
+            "schema_version": 2,
+            "models": {
+                "active_profile": CLOUD_VL_PROFILE_ID,
+                "profiles": [build_cloud_vl_profile({"enabled": True, "dimension": 1024})],
+            },
+        }
+        with patch("src.app.logging_utils.note_swallowed") as swallowed:
+            spec = get_active_embedding_spec(config=config)
+        self.assertFalse(swallowed.called)
+        self.assertEqual(spec["dimension"], 1024)
+        self.assertEqual(spec["provider"], CLOUD_VL_PROVIDER_ID)
 
 
 if __name__ == "__main__":

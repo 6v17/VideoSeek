@@ -279,13 +279,16 @@ def get_active_embedding_spec(config=None):
         dimension = 0
 
     # Packaged model files are source of truth (fixes stale 512d labels for Large=768).
-    try:
-        disk_dimension = _read_on_disk_embedding_dimension(get_active_model_resource_dir(config=cfg))
-    except Exception as exc:
-        from src.app.logging_utils import note_swallowed
+    # Cloud embedding has no local weight directory; the profile dimension is the source.
+    disk_dimension = 0
+    if provider != "qwen3_vl_embedding_cloud":
+        try:
+            disk_dimension = _read_on_disk_embedding_dimension(get_active_model_resource_dir(config=cfg))
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
 
-        note_swallowed(exc, "src/storage/config_store.py:read_on_disk_embedding_dimension")
-        disk_dimension = 0
+            note_swallowed(exc, "src/storage/config_store.py:read_on_disk_embedding_dimension")
+            disk_dimension = 0
     if disk_dimension > 0:
         dimension = disk_dimension
 
