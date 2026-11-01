@@ -1,4 +1,4 @@
-"""Supported library video container suffixes (ingestion whitelist)."""
+"""Supported video containers and still-image suffixes (ingestion whitelists)."""
 
 from __future__ import annotations
 
@@ -32,6 +32,25 @@ _MPEG_PROGRAM_STREAM_EXTS = frozenset({".mpg", ".mpeg"})
 def is_supported_video_path(path: str | os.PathLike[str]) -> bool:
     name = os.fspath(path).lower()
     return name.endswith(VIDEO_EXTS)
+
+
+# Still images for the image gallery. HEIC is decoded by ``load_image_bgr`` when pillow-heif is present.
+IMAGE_EXTS = (
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".bmp",
+    ".heic",
+    ".heif",
+    ".heics",
+    ".heifs",
+)
+
+
+def is_supported_image_path(path: str | os.PathLike[str]) -> bool:
+    name = os.fspath(path).lower()
+    return name.endswith(IMAGE_EXTS)
 
 
 def is_transport_like_video_path(path: str | os.PathLike[str]) -> bool:

@@ -2089,3 +2089,135 @@ class ShotListBatchExportWorker(QThread):
         except Exception as exc:
             logger.exception("Shot list batch export failed")
             self.error_signal.emit(str(exc).strip() or repr(exc))
+
+
+class ImageGallerySyncWorker(QThread):
+    progress_signal = Signal(str, int, int)
+    finished_signal = Signal(bool, object)
+    error_signal = Signal(str)
+
+    def __init__(self, *, embed: bool = True, folders=None):
+        super().__init__()
+        self._stop_requested = False
+        self.embed = bool(embed)
+        self.folders = None if folders is None else [str(path) for path in folders if str(path or "").strip()]
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def run(self):
+        from src.services.image_gallery_service import (
+            ImageGalleryStopped,
+            discover_image_gallery,
+            sync_image_gallery,
+        )
+
+        try:
+            run = sync_image_gallery if self.embed else discover_image_gallery
+            kwargs = {}
+            if not self.embed and self.folders is not None:
+                kwargs["folders"] = self.folders
+            summary = run(
+                progress_callback=lambda phase, current, total: self.progress_signal.emit(
+                    str(phase), int(current), int(total)
+                ),
+                should_stop=lambda: self._stop_requested or self.isInterruptionRequested(),
+                **kwargs,
+            )
+            self.finished_signal.emit(True, summary)
+        except ImageGalleryStopped as exc:
+            self.finished_signal.emit(True, exc.summary)
+        except Exception as exc:
+            logger.exception("Image gallery sync failed")
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+            self.finished_signal.emit(False, {"error": str(exc)})
+
+
+class ImageGallerySearchWorker(QThread):
+    hits_ready = Signal(int, object)
+    thumb_ready = Signal(int, int, object)
+    finished_signal = Signal(int, bool, str)
+
+    def __init__(
+        self,
+        text: str = "",
+        generation: int = 0,
+        *,
+        image_paths=None,
+        fusion=None,
+        min_score: float = 0.0,
+    ):
+        super().__init__()
+        self.text = str(text or "")
+        self.image_paths = [str(path or "").strip() for path in (image_paths or []) if str(path or "").strip()]
+        self.fusion = fusion
+        self.min_score = float(min_score or 0.0)
+        self.generation = int(generation)
+        self._running = True
+
+    def stop(self):
+        self._running = False
+        self.requestInterruption()
+
+    def run(self):
+        from src.core.image_io import qimage_from_image_path
+        from src.services.image_gallery_service import search_image_gallery_by_vector
+        from src.services.search_preset_query import encode_mixed_query_vector
+
+        try:
+            if not self.text.strip() and not self.image_paths:
+                hits = []
+            else:
+                vector = encode_mixed_query_vector(
+                    query=self.text,
+                    source_image_paths=self.image_paths,
+                    fusion=self.fusion,
+                )
+                hits = search_image_gallery_by_vector(vector, min_score=self.min_score)
+        except ValueError as exc:
+            self.finished_signal.emit(self.generation, False, str(exc))
+            return
+        except Exception as exc:
+            logger.exception("Image gallery search failed")
+            self.finished_signal.emit(self.generation, False, str(exc).strip() or repr(exc))
+            return
+        self.hits_ready.emit(self.generation, hits)
+        for index, hit in enumerate(hits):
+            if not self._running or self.isInterruptionRequested():
+                break
+            path = str((hit or {}).get("path") or "")
+            image = qimage_from_image_path(path, _gallery_thumb_edge()) if path else None
+            self.thumb_ready.emit(self.generation, index, image)
+        self.finished_signal.emit(self.generation, True, "")
+
+
+def _gallery_thumb_edge() -> int:
+    """Decode at the largest result-card size so the shared size slider stays sharp."""
+    from ui.widgets.result_grid import RESULT_SCALE_MAX, grid_thumb_pixel_size
+
+    width, height = grid_thumb_pixel_size(RESULT_SCALE_MAX)
+    return max(64, int(width), int(height))
+
+
+class ImageGalleryPreviewWorker(QThread):
+    preview_ready = Signal(str, object)
+
+    def __init__(self, path: str):
+        super().__init__()
+        self.path = str(path or "")
+        self._running = True
+
+    def stop(self):
+        self._running = False
+        self.requestInterruption()
+
+    def run(self):
+        from src.core.image_io import qimage_from_image_path
+
+        if not self._running or self.isInterruptionRequested():
+            return
+        image = qimage_from_image_path(self.path, 720)
+        if not self._running or self.isInterruptionRequested():
+            return
+        self.preview_ready.emit(self.path, image)

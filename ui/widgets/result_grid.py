@@ -345,6 +345,13 @@ class ResultGridCard(QFrame):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self._on_select is not None:
             self._on_select(self)
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._match_kind == "image"
+            and self._video_path
+            and self._on_preview is not None
+        ):
+            self._on_preview(self._video_path, self._preview_sec, self._end_sec)
         super().mousePressEvent(event)
 
     def _emit_preview(self) -> None:
@@ -354,6 +361,15 @@ class ResultGridCard(QFrame):
             self._on_preview(self._video_path, self._preview_sec, self._end_sec)
 
     def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._video_path and self._match_kind == "image":
+            if self._on_select is not None:
+                self._on_select(self)
+            if self._on_export is not None:
+                self._on_export(self._video_path, self._start_sec, self._end_sec)
+            elif self._on_locate is not None:
+                self._on_locate(self._video_path)
+            super().mouseDoubleClickEvent(event)
+            return
         if event.button() == Qt.MouseButton.LeftButton and self._video_path and self._on_preview:
             if self._on_select is not None:
                 self._on_select(self)
@@ -444,6 +460,40 @@ class ResultGridCard(QFrame):
     def _rebuild_action_buttons(self, texts: dict) -> None:
         self._clear_action_buttons()
         buttons: list[QPushButton] = []
+
+        if self._match_kind == "image":
+            preview = _overlay_action_button(
+                _fallback_text(texts, "preview", "预览", "Preview"),
+                role="GhostButton",
+                table_class="TableBtn",
+            )
+            preview.setToolTip(_fallback_text(texts, "preview_tip", "", ""))
+            preview.clicked.connect(self._emit_preview)
+            buttons.append(preview)
+            locate = _overlay_action_button(
+                _fallback_text(texts, "locate", "定位", "Locate"),
+                role="SuccessGhostButton",
+                table_class="TableLocateBtn",
+            )
+            locate.setToolTip(_fallback_text(texts, "locate_tip", "", ""))
+            locate.clicked.connect(lambda: self._on_locate and self._on_locate(self._video_path))
+            buttons.append(locate)
+            open_original = _overlay_action_button(
+                _fallback_text(texts, "gallery_open", "打开原图", "Open original"),
+                role="AccentGhostButton",
+                table_class="TableBtn",
+            )
+            open_original.clicked.connect(
+                lambda: self._on_export
+                and self._on_export(self._video_path, self._start_sec, self._end_sec)
+            )
+            buttons.append(open_original)
+            self._overlay_buttons = []
+            for index, button in enumerate(buttons):
+                self._place_action_button(button, index)
+            self._actions_ready = True
+            self._fit_overlay_actions()
+            return
 
         # Same order / roles as table_views._build_result_actions.
         preview = _overlay_action_button(
@@ -561,9 +611,11 @@ class ResultGridCard(QFrame):
         else:
             self._set_title_text(base_name, self._video_path)
 
-        time_text = _format_time_range(
-            self._start_sec, self._end_sec, texts, match_kind=self._match_kind
-        )
+        time_text = ""
+        if self._match_kind != "image":
+            time_text = _format_time_range(
+                self._start_sec, self._end_sec, texts, match_kind=self._match_kind
+            )
         if clip_score_mode:
             pct = format_clip_score_percent(self._score)
             tier = resolve_clip_confidence_label(self._score, texts)
@@ -581,7 +633,7 @@ class ResultGridCard(QFrame):
             if self._group_id is None or self._group_id < 0:
                 self._group_id = None
                 badge = ""
-        meta = f"{time_text} · {score_text}"
+        meta = score_text if self._match_kind == "image" or not time_text else f"{time_text} · {score_text}"
         subtitle = group_subtitle_text(coerced, texts) if badge else ""
         self._meta_full = meta
         self.meta_label.setToolTip(meta)

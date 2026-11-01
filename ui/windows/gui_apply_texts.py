@@ -11,6 +11,28 @@ from ui.widgets.list_find_bar import list_find_text_kwargs
 class ApplyTextsGuiMixin:
     """Page-scoped text refresh helpers used by ``MainWindow.apply_texts``."""
 
+    def _apply_search_idle_hint(self, t) -> None:
+        """The list starts as a prompt. A finished search keeps its own empty line."""
+        page = getattr(self, "search_page", None)
+        view = getattr(page, "result_view", None)
+        if view is None or not hasattr(view, "set_empty_message"):
+            return
+        idle = str((t or {}).get("search_idle_hint") or "").strip()
+        if not idle:
+            return
+        from src.app.copy_overrides import COPY_OVERRIDES
+        from src.app.i18n import TEXTS
+
+        known = {""}
+        for lang in ("zh", "en"):
+            bundle = TEXTS.get(lang) or {}
+            known.add(str(bundle.get("search_idle_hint") or "").strip())
+            known.add(str(bundle.get("no_results") or "").strip())
+            known.add(str((COPY_OVERRIDES.get(lang) or {}).get("no_results") or "").strip())
+        current = str(getattr(view, "_empty_message", "") or "").strip()
+        if current in known:
+            view.set_empty_message(idle)
+
     def _apply_texts_chrome(self, t):
         self.setWindowTitle(f"{t['app_name']} v{get_app_version()}")
         self.sidebar.title.setText(t["app_name"])
@@ -21,6 +43,8 @@ class ApplyTextsGuiMixin:
         self.sidebar.btn_page_search.setText(t["nav_search"])
         self.sidebar.btn_page_link.setText(t["nav_link"])
         self.sidebar.btn_page_library.setText(t["nav_library"])
+        self.sidebar.btn_page_dialogue.setText(t.get("nav_dialogue", "Subtitles"))
+        self.sidebar.btn_page_gallery.setText(t["nav_gallery"])
         self.sidebar.btn_page_understanding.setText(t["nav_understanding"])
         self.sidebar.btn_page_settings.setText(t["nav_settings"])
         self.sidebar.btn_collapse.setToolTip(t.get("nav_sidebar_hide", "隐藏侧边栏 (Ctrl+B)"))
@@ -70,7 +94,12 @@ class ApplyTextsGuiMixin:
         apply_preview = getattr(preview_dialog, "apply_texts", None)
         if callable(apply_preview):
             apply_preview(t)
-        self.search_page.results_title.setText(t["results_panel"])
+        if self._search_active_tab() == self.SEARCH_TAB_GALLERY:
+            self.search_page.results_title.setText(
+                t.get("search_gallery_results_title", t["results_panel"])
+            )
+        else:
+            self.search_page.results_title.setText(t["results_panel"])
         table_tip = t.get("results_view_table_tip", "") or t.get("results_view_table", "列表")
         grid_tip = t.get("results_view_grid_tip", "") or t.get("results_view_grid", "网格")
         self.search_page.btn_results_view_table.setText("")
@@ -120,9 +149,7 @@ class ApplyTextsGuiMixin:
             panel.relayout_inline_fields()
         self.search_page.preview_placeholder.setText(t["preview_placeholder"])
         self.result_table.apply_header_labels(t)
-        self.search_page.result_view.set_empty_message(t["no_results"])
-        self.search_page.results_pager.set_texts(t)
-        self.search_controller._sync_results_pager()
+        self._apply_search_idle_hint(t)
 
     def _apply_texts_link_page(self, t):
         self.link_page.header.title.setText(t["link_page_title"])
@@ -142,15 +169,25 @@ class ApplyTextsGuiMixin:
         self.link_page.btn_clear_legacy.setText(t["download_btn_clear_legacy"])
         self.video_download_controller.refresh_default_dir_label()
 
+    def _apply_texts_gallery_page(self, t):
+        page = getattr(self, "gallery_page", None)
+        if page is None:
+            return
+        page.apply_texts(t)
+        controller = getattr(self, "image_gallery_controller", None)
+        if controller is not None and not controller.is_busy():
+            controller.refresh()
+
     def _apply_texts_library_page(self, t):
         self.library_page.header.title.setText(t["library_page_title"])
         self.library_page.header.subtitle.hide()
-        self.library_page.btn_tab_visual.setText(t.get("library_tab_visual", "Videos"))
-        self.library_page.btn_tab_dialogue.setText(t.get("library_tab_dialogue", "Dialogue"))
-        if getattr(self.library_page, "lbl_mode_caption", None) is not None:
-            self.library_page.lbl_mode_caption.setText(
-                t.get("library_mode_caption", "Library type")
-            )
+        dialogue = getattr(self, "dialogue_page", None)
+        if dialogue is not None:
+            dialogue.header.title.setText(t.get("nav_dialogue", "Subtitles"))
+            dialogue.header.subtitle.hide()
+            caption = getattr(dialogue, "lbl_action_caption", None)
+            if caption is not None:
+                caption.setText(t.get("library_action_caption", ""))
         if getattr(self.library_page, "lbl_action_caption", None) is not None:
             self.library_page.lbl_action_caption.setText(
                 t.get("library_action_caption", "Actions for current type")
@@ -171,8 +208,9 @@ class ApplyTextsGuiMixin:
         self.library_page.btn_sync_db.setText(
             t.get("sync_selected_videos", t.get("update_index", "Sync selected"))
         )
-        self.library_page.btn_refresh_visual_library.setText(
-            t.get("refresh_visual_library", "刷新选中库")
+        self.library_page.btn_refresh_visual_library.setText("")
+        self.library_page.btn_refresh_visual_library.setAccessibleName(
+            t.get("refresh_visual_library", "刷新")
         )
         self.library_page.btn_refresh_visual_library.setToolTip(
             t.get(
@@ -280,7 +318,8 @@ class ApplyTextsGuiMixin:
         self.library_page.btn_subtitle_sample_advanced.setText(
             t.get("subtitle_sample_advanced", "Advanced")
         )
-        self.library_page.btn_refresh_dialogue_library.setText(
+        self.library_page.btn_refresh_dialogue_library.setText("")
+        self.library_page.btn_refresh_dialogue_library.setAccessibleName(
             t.get("refresh_dialogue_library", "Refresh")
         )
         self.library_page.btn_refresh_dialogue_library.setToolTip(

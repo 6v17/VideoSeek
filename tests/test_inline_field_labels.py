@@ -54,6 +54,10 @@ class InlineFieldLabelLayoutTests(unittest.TestCase):
         panel = SearchPanel()
         self.assertEqual(panel.search_query_tabs.currentIndex(), 1)
         self.assertIs(panel.query_stack.currentWidget(), panel.text_search)
+        self.assertEqual(panel.search_query_tabs.count(), 6)
+        self.assertEqual(panel.query_stack.count(), 6)
+        panel.search_query_tabs.setCurrentIndex(3)
+        self.assertIs(panel.query_stack.currentWidget(), panel.gallery_form)
 
 
 if __name__ == "__main__":

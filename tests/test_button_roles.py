@@ -11,6 +11,8 @@ from PySide6.QtWidgets import QAbstractButton, QApplication, QCheckBox, QPushBut
 
 from ui.widgets.button_roles import ACTION_ROLES
 from ui.widgets.components import LibraryPage, LinkSearchPage, NavigationSidebar, SearchPage
+from ui.widgets.dialogue_library_page import DialogueLibraryPage
+from ui.widgets.image_gallery_page import ImageGalleryPage
 from ui.widgets.settings.page import SettingsPage
 from ui.widgets.understanding_page import UnderstandingEvidencePage
 from ui.windows.gui_settings import SettingsGuiMixin
@@ -41,6 +43,8 @@ class ButtonRoleTests(unittest.TestCase):
             NavigationSidebar(),
             SearchPage(),
             LibraryPage(),
+            DialogueLibraryPage(),
+            ImageGalleryPage(),
             LinkSearchPage(),
             UnderstandingEvidencePage(),
             SettingsPage(),
@@ -58,6 +62,8 @@ class ButtonRoleTests(unittest.TestCase):
             NavigationSidebar(),
             SearchPage(),
             LibraryPage(),
+            DialogueLibraryPage(),
+            ImageGalleryPage(),
             LinkSearchPage(),
             UnderstandingEvidencePage(),
             SettingsPage(),

@@ -2514,7 +2514,7 @@ class UnderstandingGuiMixin:
             self._sync_asr_extract_button()
 
     def _populate_understanding_dialogue_table(self, cues: list) -> None:
-        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QTableWidgetItem, QWidget
+        from PySide6.QtWidgets import QTableWidgetItem
 
         from ui.widgets.table_specs import UnderstandingDialogueCol as Col
 
@@ -2557,34 +2557,103 @@ class UnderstandingGuiMixin:
             table.setItem(index, Col.RANGE, time_item)
             table.setItem(index, Col.SPEAKER, speaker_item)
             table.setItem(index, Col.TEXT, text_item)
-            edit_button = QPushButton(edit_label)
-            edit_button.setObjectName("GhostButton")
-            edit_button.setProperty("class", "TableBtn")
-            edit_button.setCursor(Qt.CursorShape.PointingHandCursor)
-            edit_button.setFixedSize(56, 30)
-            edit_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            edit_button.setAutoDefault(False)
-            edit_button.setDefault(False)
-            edit_button.clicked.connect(lambda _checked=False, r=index: self._edit_understanding_dialogue_cue(r))
-            delete_button = QPushButton(delete_label)
-            delete_button.setObjectName("DangerGhostButton")
-            delete_button.setProperty("class", "TableDeleteBtn")
-            delete_button.setCursor(Qt.CursorShape.PointingHandCursor)
-            delete_button.setFixedSize(56, 30)
-            delete_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            delete_button.setAutoDefault(False)
-            delete_button.setDefault(False)
-            delete_button.clicked.connect(lambda _checked=False, r=index: self._delete_understanding_dialogue_cue(r))
-            host = QWidget()
-            host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            row_layout = QHBoxLayout(host)
-            row_layout.setContentsMargins(4, 0, 8, 0)
-            row_layout.setSpacing(8)
-            row_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            row_layout.addWidget(edit_button)
-            row_layout.addWidget(delete_button)
-            table.setCellWidget(index, Col.ACTIONS, host)
         table.blockSignals(False)
+        self._dialogue_action_labels = (edit_label, delete_label)
+        self._dialogue_action_rows = set()
+        self._ensure_dialogue_action_scroll(table)
+        self._schedule_dialogue_action_widgets()
+
+    def _ensure_dialogue_action_scroll(self, table) -> None:
+        if getattr(table, "_dialogue_actions_hooked", False):
+            return
+        table._dialogue_actions_hooked = True
+        bar = table.verticalScrollBar()
+        bar.valueChanged.connect(self._schedule_dialogue_action_widgets)
+        bar.rangeChanged.connect(self._schedule_dialogue_action_widgets)
+
+    def _schedule_dialogue_action_widgets(self, *_args) -> None:
+        if getattr(self, "_dialogue_actions_scheduled", False):
+            return
+        self._dialogue_actions_scheduled = True
+        QTimer.singleShot(0, self._sync_dialogue_action_widgets)
+
+    def _dialogue_action_span(self, table) -> tuple[int, int]:
+        count = table.rowCount()
+        if count <= 0:
+            return 0, -1
+        viewport_h = table.viewport().height()
+        top = table.rowAt(0) if viewport_h > 0 else -1
+        bottom = table.rowAt(max(0, viewport_h - 1)) if viewport_h > 0 else -1
+        if top < 0:
+            top = 0
+        if bottom < 0:
+            row_h = max(1, table.verticalHeader().defaultSectionSize())
+            visible = max(8, (max(viewport_h, 44) + row_h - 1) // row_h)
+            bottom = min(count - 1, top + visible)
+        return max(0, top - 2), min(count - 1, bottom + 2)
+
+    def _dialogue_action_host(self, row: int):
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QWidget
+
+        edit_label, delete_label = getattr(self, "_dialogue_action_labels", ("Edit", "Delete"))
+        edit_button = QPushButton(edit_label)
+        edit_button.setObjectName("GhostButton")
+        edit_button.setProperty("class", "TableBtn")
+        edit_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        edit_button.setFixedSize(56, 30)
+        edit_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        edit_button.setAutoDefault(False)
+        edit_button.setDefault(False)
+        edit_button.clicked.connect(lambda _checked=False, r=row: self._edit_understanding_dialogue_cue(r))
+        delete_button = QPushButton(delete_label)
+        delete_button.setObjectName("DangerGhostButton")
+        delete_button.setProperty("class", "TableDeleteBtn")
+        delete_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        delete_button.setFixedSize(56, 30)
+        delete_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        delete_button.setAutoDefault(False)
+        delete_button.setDefault(False)
+        delete_button.clicked.connect(lambda _checked=False, r=row: self._delete_understanding_dialogue_cue(r))
+        host = QWidget()
+        host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        row_layout = QHBoxLayout(host)
+        row_layout.setContentsMargins(4, 0, 8, 0)
+        row_layout.setSpacing(8)
+        row_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        row_layout.addWidget(edit_button)
+        row_layout.addWidget(delete_button)
+        return host
+
+    def _sync_dialogue_action_widgets(self) -> None:
+        """Edit and delete buttons exist only for rows on screen."""
+        from ui.widgets.table_specs import UnderstandingDialogueCol as Col
+
+        self._dialogue_actions_scheduled = False
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "dialogue_table", None) if page is not None else None
+        if table is None:
+            return
+        count = table.rowCount()
+        mounted = set(getattr(self, "_dialogue_action_rows", set()))
+        if count <= 0:
+            self._dialogue_action_rows = set()
+            return
+        first, last = self._dialogue_action_span(table)
+        wanted = set(range(first, last + 1)) if last >= first else set()
+        for row in list(mounted):
+            if row in wanted and row < count:
+                continue
+            widget = table.cellWidget(row, Col.ACTIONS) if 0 <= row < count else None
+            if widget is not None:
+                table.removeCellWidget(row, Col.ACTIONS)
+                widget.deleteLater()
+            mounted.discard(row)
+        for row in sorted(wanted):
+            if row in mounted and table.cellWidget(row, Col.ACTIONS) is not None:
+                continue
+            table.setCellWidget(row, Col.ACTIONS, self._dialogue_action_host(row))
+            mounted.add(row)
+        self._dialogue_action_rows = mounted
 
     def _edit_understanding_dialogue_cue(self, row: int) -> None:
         from ui.dialogs.dialogue_cue import DialogueCueDialog
@@ -3075,10 +3144,7 @@ class UnderstandingGuiMixin:
             self._sync_recap_review_rewrite_button()
 
     def open_subtitle_library_for_recap(self) -> None:
-        self.switch_page("library")
-        page = getattr(self, "library_page", None)
-        if page is not None:
-            page.set_library_mode(1)
+        self.switch_page("dialogue")
 
     def _current_video_has_exportable_evidence(self) -> bool:
         video_id = self._selected_understanding_video_id()

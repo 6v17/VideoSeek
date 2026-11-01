@@ -124,9 +124,9 @@ class SubtitleAdvancedRowTests(unittest.TestCase):
         cls._app = QApplication.instance() or QApplication(sys.argv)
 
     def test_sample_controls_stay_hidden_until_advanced_is_opened(self):
-        from ui.widgets.components import LibraryPage
+        from ui.widgets.dialogue_library_page import DialogueLibraryPage
 
-        page = LibraryPage()
+        page = DialogueLibraryPage()
         self.assertTrue(page.subtitle_sample_advanced_row.isHidden())
         self.assertFalse(page.btn_subtitle_sample_advanced.isChecked())
         self.assertIs(

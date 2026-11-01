@@ -45,12 +45,15 @@ from src.utils import (
 )
 from src.services.version_service import get_local_version_status
 from ui.controllers.app_meta_controller import AppMetaController
+from ui.controllers.image_gallery_controller import ImageGalleryController
 from ui.widgets.components import (
     LibraryPage,
     LinkSearchPage,
     NavigationSidebar,
     SearchPage,
 )
+from ui.widgets.dialogue_library_page import DialogueLibraryPage
+from ui.widgets.image_gallery_page import ImageGalleryPage
 from ui.widgets.understanding_page import UnderstandingEvidencePage
 from ui.widgets.settings import SettingsPage
 from ui.widgets.scaffold import make_runtime_inline_tip
@@ -115,12 +118,12 @@ class MainWindow(
     SearchPanelStateMixin,
     ShotListGuiMixin,
 ):
-    """Sidebar / stacked widget order: local search → library → evidence → link → settings.
+    """Sidebar / stacked widget order: local search → library → gallery → evidence → link → settings.
 
     Optional plugins may insert pages (e.g. after understanding) via ``src.app.plugins``.
     """
 
-    _BUILTIN_NAV_PAGE_ORDER = ("search", "library", "understanding", "link", "settings")
+    _BUILTIN_NAV_PAGE_ORDER = ("search", "library", "dialogue", "gallery", "understanding", "link", "settings")
 
     def __init__(self):
         super().__init__()
@@ -190,7 +193,6 @@ class MainWindow(
         self.understanding_controller.finished.connect(self._finish_understanding_generation)
         self.preview_controller = PreviewController(self)
         self.search_controller = SearchController(self)
-        self.search_page.results_pager.page_changed.connect(self.search_controller.go_to_results_page)
         self.search_page.search_collapsed_changed.connect(self._on_search_card_collapsed)
         self.search_page.preview_collapsed_changed.connect(self._on_preview_card_collapsed)
         self.search_page.results_scale_settled.connect(self._on_results_display_scale_settled)
@@ -285,6 +287,9 @@ class MainWindow(
         self.search_page = SearchPage()
         self.link_page = LinkSearchPage()
         self.library_page = LibraryPage()
+        self.dialogue_page = DialogueLibraryPage()
+        self._alias_dialogue_library_widgets()
+        self.gallery_page = ImageGalleryPage()
         self.understanding_page = UnderstandingEvidencePage()
         self.understanding_services_dialog = self.understanding_page.services_panel
         self.settings_page = SettingsPage()
@@ -309,6 +314,8 @@ class MainWindow(
         builtin_widgets = {
             "search": lambda: self._build_scroll_page(self.search_page, pin_to_viewport=True),
             "library": lambda: self._build_scroll_page(self.library_page),
+            "dialogue": lambda: self._build_scroll_page(self.dialogue_page),
+            "gallery": lambda: self._build_scroll_page(self.gallery_page),
             "understanding": lambda: self._build_scroll_page(self.understanding_page),
             "link": lambda: self._build_scroll_page(self.link_page),
             "settings": lambda: self.settings_page,
@@ -378,7 +385,10 @@ class MainWindow(
         self.sidebar.btn_page_search.clicked.connect(lambda: self.switch_page("search"))
         self.sidebar.btn_page_link.clicked.connect(lambda: self.switch_page("link"))
         self.sidebar.btn_page_library.clicked.connect(lambda: self.switch_page("library"))
+        self.sidebar.btn_page_dialogue.clicked.connect(lambda: self.switch_page("dialogue"))
+        self.sidebar.btn_page_gallery.clicked.connect(lambda: self.switch_page("gallery"))
         self.sidebar.btn_page_understanding.clicked.connect(lambda: self.switch_page("understanding"))
+        self.image_gallery_controller = ImageGalleryController(self)
         self.sidebar.btn_page_settings.clicked.connect(lambda: self.switch_page("settings"))
         self.sidebar.btn_theme.clicked.connect(self.toggle_theme)
         self.sidebar.btn_donate.clicked.connect(self.show_donate)
@@ -446,6 +456,8 @@ class MainWindow(
 
         self.library_page.btn_add_lib.clicked.connect(self.select_video_folder)
         self.library_page.btn_remove_lib.clicked.connect(self.remove_selected_libraries)
+        self.dialogue_page.btn_add_lib.clicked.connect(self.select_video_folder)
+        self.dialogue_page.btn_remove_lib.clicked.connect(self.remove_selected_libraries)
         self.library_page.btn_remove_selected_videos.clicked.connect(
             self.remove_selected_library_videos
         )
@@ -477,7 +489,6 @@ class MainWindow(
         )
         self.library_page.btn_stop_dialogue_index.clicked.connect(self.stop_update_index)
         self.library_page.btn_stop_index.clicked.connect(self.stop_update_index)
-        self.library_page.library_stack.currentChanged.connect(self._on_library_tab_changed)
         self.library_page.btn_index_issues.clicked.connect(self.show_last_index_issue_details)
         self.library_page.btn_fix_missing_vectors.clicked.connect(self.start_fix_missing_vectors)
         self.library_page.btn_cleanup_missing.clicked.connect(self.cleanup_missing_library_vectors)
@@ -974,6 +985,46 @@ class MainWindow(
             if not visible and current == page_id:
                 self.switch_page("search")
 
+    def _alias_dialogue_library_widgets(self) -> None:
+        """Indexing still addresses subtitle controls through the video library page."""
+        dialogue = self.dialogue_page
+        library = self.library_page
+        for name in (
+            "subtitle_video_tree",
+            "dialogue_list",
+            "dialogue_table_title",
+            "dialogue_table_card",
+            "btn_build_dialogue_index",
+            "btn_reembed_dialogue",
+            "btn_clear_dialogue",
+            "btn_import_subtitle_srt",
+            "btn_export_dialogue",
+            "btn_refresh_dialogue_library",
+            "btn_subtitle_sample_advanced",
+            "btn_stop_dialogue_index",
+            "lbl_subtitle_sample_interval",
+            "lbl_subtitle_sample_strategy",
+            "lbl_subtitle_ocr_batch",
+            "input_subtitle_sample_interval",
+            "input_subtitle_sample_strategy",
+            "input_subtitle_ocr_batch",
+            "subtitle_sample_advanced_row",
+        ):
+            setattr(library, name, getattr(dialogue, name))
+
+    def _place_library_progress(self, page_name: str) -> None:
+        """One progress row follows whichever library page is open."""
+        if page_name not in {"library", "dialogue"}:
+            return
+        row = getattr(self.library_page, "progress_status", None)
+        host = self.library_page if page_name == "library" else getattr(self, "dialogue_page", None)
+        layout = getattr(host, "progress_host_layout", None) if host is not None else None
+        anchor = getattr(host, "progress_host", None) if host is not None else None
+        if row is None or layout is None or anchor is None or row.parent() is anchor:
+            return
+        row.setParent(None)
+        layout.addWidget(row)
+
     def switch_page(self, page_name):
         mapping = {name: i for i, name in enumerate(self._nav_page_order)}
         if page_name not in mapping:
@@ -1027,6 +1078,14 @@ class MainWindow(
             self._settle_understanding_page_layout()
         if page_name == "link":
             self._settle_link_page_layout()
+        if page_name in {"library", "dialogue"}:
+            self._place_library_progress(page_name)
+            if hasattr(self, "_on_library_tab_changed"):
+                self._on_library_tab_changed(1 if page_name == "dialogue" else 0)
+        if page_name == "gallery":
+            controller = getattr(self, "image_gallery_controller", None)
+            if controller is not None and not controller.is_busy():
+                controller.refresh()
         for feature in get_registry().features:
             feature.on_page_shown(self, page_name)
 
@@ -1078,6 +1137,7 @@ class MainWindow(
         self._apply_texts_search_page(t)
         self._apply_texts_link_page(t)
         self._apply_texts_library_page(t)
+        self._apply_texts_gallery_page(t)
         self._apply_texts_understanding_page(t)
         self._apply_texts_settings_and_finish(t, config)
 
@@ -1422,6 +1482,10 @@ class MainWindow(
 
         if not self.check_runtime_resources():
             self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
+            return
+
+        if active_tab == self.SEARCH_TAB_GALLERY:
+            self._start_gallery_search()
             return
 
         if active_tab == self.SEARCH_TAB_COMPOSE:
@@ -1788,6 +1852,35 @@ class MainWindow(
         # Kept for any direct signal connections; bridge uses accept_mobile_search_request.
         return self.accept_mobile_search_request(payload)
 
+    def _start_gallery_search(self):
+        if not getattr(self, "_runtime_warmup_ready", False):
+            self.ensure_runtime_warmup(self._start_gallery_search)
+            return
+        form = self.search_page.search_panel.gallery_form
+        if not form.has_content():
+            self.search_page.lbl_status.setText(
+                self.texts.get("gallery_empty_query", self.texts["empty_query"])
+            )
+            return
+        try:
+            query = form.normalized_query()
+        except ValueError:
+            self.search_page.lbl_status.setText(self.texts["query_too_short"])
+            return
+        paths = form.image_paths()
+        if not query and not paths:
+            self.search_page.lbl_status.setText(
+                self.texts.get("gallery_empty_query", self.texts["empty_query"])
+            )
+            return
+        self.switch_page("search")
+        self.image_gallery_controller.start_composed_search(
+            query,
+            paths,
+            form.current_fusion(),
+            self.search_page.search_panel.score_threshold("compose"),
+        )
+
     def _start_compose_search(self):
         if not getattr(self, "_runtime_warmup_ready", False):
             self.ensure_runtime_warmup(self._start_compose_search)
@@ -2122,6 +2215,12 @@ class MainWindow(
         self.search_page.search_panel.clear_dialogue_query()
         self.search_page.search_panel.clear_tags_query()
         self.search_page.search_panel.compose_form.clear()
+        gallery_form = getattr(self.search_page.search_panel, "gallery_form", None)
+        if gallery_form is not None:
+            gallery_form.clear()
+        controller = getattr(self, "image_gallery_controller", None)
+        if controller is not None:
+            controller.clear_results()
         self.search_page.img_label.clear()
         self.search_page.img_label.setText(self.texts["image_drop_hint"])
         self.search_controller.clear_results()
@@ -2432,6 +2531,12 @@ class MainWindow(
             self.search_page.search_panel.compose_form.add_image(path)
             self.switch_page("search")
             self._set_search_query_tab(self.SEARCH_TAB_COMPOSE)
+            self._refresh_search_panel_state()
+            return
+        if self._search_active_tab() == self.SEARCH_TAB_GALLERY:
+            self.search_page.search_panel.gallery_form.add_image(path)
+            self.switch_page("search")
+            self._set_search_query_tab(self.SEARCH_TAB_GALLERY)
             self._refresh_search_panel_state()
             return
         self._set_image_query(path, clear_text=False)

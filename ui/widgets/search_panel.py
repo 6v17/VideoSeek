@@ -551,6 +551,7 @@ class SearchPanel(VSCard):
         self.search_mode_options_stack.addWidget(self.dialogue_search_mode_cluster)
 
         self.compose_form = SearchComposeFormWidget(fill_text=True, inline_bar=True)
+        self.gallery_form = SearchComposeFormWidget(fill_text=True, inline_bar=True)
 
         self.query_stack = QStackedWidget()
         self.query_stack.setObjectName("SearchQueryStack")
@@ -560,6 +561,7 @@ class SearchPanel(VSCard):
             self._image_query_slot,
             self.text_search,
             self.compose_form,
+            self.gallery_form,
             self.dialogue_search,
             self.tags_form,
         ):
@@ -575,7 +577,7 @@ class SearchPanel(VSCard):
         tab_bar.setExpanding(False)
         tab_bar.setDrawBase(False)
         tab_bar.setFixedHeight(32)
-        for _name in ("image", "text", "compose", "dialogue", "tags"):
+        for _name in ("image", "text", "compose", "gallery", "dialogue", "tags"):
             placeholder = QWidget()
             placeholder.setMaximumHeight(0)
             self.search_query_tabs.addTab(placeholder, "")
@@ -995,6 +997,7 @@ class SearchPanel(VSCard):
             editor.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tags_form.apply_bar_height(height)
         self.compose_form.apply_inline_height(height)
+        self.gallery_form.apply_inline_height(height)
         self.img_label.apply_bar_height(height)
         self.lbl_image_path.setFixedHeight(min(32, height))
 

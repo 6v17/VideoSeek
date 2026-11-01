@@ -717,6 +717,12 @@ QPushButton:disabled {
     border-color: __ACCENT__;
     color: __ACCENT__;
 }
+#GhostButton:disabled,
+#GhostButton:hover:disabled {
+    background: __FIELD__;
+    border-color: __LINE__;
+    color: __MUTED__;
+}
 #GhostButton[chrome="filterToggle"] {
     background: __BUTTON_SOFT__;
     border: 1px solid __LINE_STRONG__;
@@ -774,6 +780,16 @@ QPushButton:disabled {
 }
 #PreviewTransportSlider::handle:horizontal:hover {
     background: __ACCENT_HOVER__;
+}
+#PreviewTransportSlider::groove:horizontal:disabled {
+    background: __LINE__;
+}
+#PreviewTransportSlider::sub-page:horizontal:disabled {
+    background: __LINE__;
+}
+#PreviewTransportSlider::handle:horizontal:disabled {
+    background: __MUTED__;
+    border-color: __LINE__;
 }
 #SearchScoreSlider,
 #ResultSizeSlider {
@@ -909,47 +925,6 @@ QPushButton:disabled {
 }
 #SearchResultsActions {
     background: transparent;
-}
-#SearchResultsPager {
-    background: transparent;
-}
-#GhostButton[chrome="pager"] {
-    background-color: transparent;
-    border: 1px solid __ACCENT__;
-    border-radius: __RADIUS_MD__;
-    color: __ACCENT__;
-    font-weight: 600;
-    font-size: __FS_XS__;
-    padding: 0 __SPACE_2__;
-    min-height: 22px;
-    max-height: 24px;
-}
-#GhostButton[chrome="pager"]:hover:enabled {
-    background-color: __ACCENT_SOFT__;
-    border-color: __ACCENT_HOVER__;
-    color: __ACCENT_HOVER__;
-}
-#GhostButton[chrome="pager"]:pressed:enabled {
-    background-color: __ACCENT_SOFT__;
-    border-color: __ACCENT__;
-    padding-top: 1px;
-}
-#GhostButton[chrome="pager"]:disabled {
-    background-color: transparent;
-    border-color: __ACCENT__;
-    color: __MUTED__;
-    font-weight: 600;
-}
-#SearchResultsPagerInfo {
-    background-color: transparent;
-    border: 1px solid __ACCENT__;
-    border-radius: __RADIUS_MD__;
-    padding: 0 __SPACE_3__;
-    min-height: 22px;
-    max-height: 24px;
-    color: __HEADLINE__;
-    font-weight: 600;
-    font-size: __FS_XS__;
 }
 #PresetImageThumb {
     background: __FIELD__;
@@ -1993,10 +1968,17 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
     border: 1px solid __LINE__;
     border-radius: __RADIUS_MD__;
 }
-#PreviewHost, #PreviewVideoSurface {
+#PreviewHost, #PreviewVideoSurface, #GalleryBoardWell {
     background: __VIDEO_BG__;
     border: none;
     border-radius: 0;
+}
+#GalleryBoardWell {
+    border-radius: __RADIUS_MD__;
+}
+#GalleryBoardImage {
+    background: transparent;
+    color: __MUTED__;
 }
 #PreviewTimeLabel {
     color: __MUTED__;

@@ -4,7 +4,7 @@ from dataclasses import replace
 from PySide6.QtCore import QObject
 
 from src.app.logging_utils import get_logger
-from src.app.search_results_paging import slice_search_results_page, visible_end_index
+from src.app.search_results_paging import visible_end_index
 from src.domain.search_hit import coerce_search_hit
 from src.storage.config_store import (
     SEARCH_CANDIDATE_LIMIT,
@@ -59,7 +59,6 @@ class SearchController(QObject):
         self._grid_group_focus = None
         self._group_return = None
         self._group_hooks = False
-        self._current_page = 0
         self._last_search_duration = 0.0
         self._result_display_context = {}
         self._more_worker = None
@@ -234,44 +233,12 @@ class SearchController(QObject):
         self._expanded_group_ids = set()
         self._grid_group_focus = None
         self._group_return = None
-        self._current_page = 0
         self._result_display_context = {}
         self._result_view().clear()
         self._set_group_return(None)
         self._pin_top_guard = True
         self._reset_result_scroll()
         self._pin_top_guard = False
-        self._sync_results_pager()
-
-    def _results_page_size(self) -> int:
-        """Mount the whole hit list. The result view scrolls; a short fixed page looks empty on a large screen."""
-        return max(1, len(self._all_results))
-
-    def go_to_results_page(self, page_index: int) -> None:
-        if not self._all_results:
-            return
-        page_size = self._results_page_size()
-        pages = max(1, (len(self._all_results) + page_size - 1) // page_size)
-        self._current_page = max(0, min(int(page_index), pages - 1))
-        self._render_current_page()
-        result_view = self._result_view()
-        if result_view.view_mode == "grid":
-            if result_view.grid.count() > 0:
-                result_view.grid.verticalScrollBar().setValue(0)
-        else:
-            table = result_view.table
-            if table.rowCount() > 0:
-                table.scrollToTop()
-
-    def _sync_results_pager(self) -> None:
-        pager = getattr(self.parent_window.search_page, "results_pager", None)
-        if pager is None:
-            return
-        pager.configure(
-            total_count=len(self._all_results),
-            current_page=self._current_page,
-            page_size=self._results_page_size(),
-        )
 
     def shutdown(self):
         self._is_shutdown = True
@@ -478,7 +445,6 @@ class SearchController(QObject):
             highlight_query=str(context.get("highlight_query") or ""),
             dialogue_match_mode=str(context.get("dialogue_match_mode") or ""),
         )
-        self._sync_results_pager()
 
     def _disconnect_search_worker(self, worker):
         if worker is None:
@@ -656,7 +622,6 @@ class SearchController(QObject):
         self._grid_group_focus = None
         self._group_return = None
         self._all_results = list(self._source_hits)
-        self._current_page = 0
         self._last_search_duration = max(0.0, time.time() - self.start_time)
         self._search_config = getattr(self.worker, "config", None)
         self._arm_result_window()
@@ -666,7 +631,6 @@ class SearchController(QObject):
             self._result_display_context = {}
             result_view.clear()
             self._set_group_return(None)
-            self._sync_results_pager()
             status = self._resolve_empty_search_status()
             self.parent_window.search_page.lbl_status.setText(status)
             empty_message = status
@@ -841,7 +805,6 @@ class SearchController(QObject):
         results = self._all_results
         if not results:
             self._result_view().clear()
-            self._sync_results_pager()
             return
         self._suppress_window_growth = True
         self._pin_top_on_resume = bool(pin_top)
@@ -877,16 +840,9 @@ class SearchController(QObject):
     def _paint_current_page(self, results) -> None:
         texts = self.parent_window.texts
         context = dict(self._result_display_context or {})
-        page_size = self._results_page_size()
-        page_results = slice_search_results_page(
-            results,
-            self._current_page,
-            page_size,
-        )
-        rank_offset = self._current_page * page_size
         result_view = self._result_view()
         result_view.populate_local(
-            page_results,
+            results,
             self.parent_window.handle_play,
             self.parent_window.open_result_in_explorer,
             self.parent_window.handle_export_clip,
@@ -895,11 +851,10 @@ class SearchController(QObject):
             on_add_to_shot_list=getattr(self.parent_window, "add_hit_to_shot_list", None),
             clip_score_mode=bool(context.get("clip_score_mode")),
             low_confidence_score=context.get("low_confidence_score"),
-            rank_offset=rank_offset,
+            rank_offset=0,
             highlight_query=str(context.get("highlight_query") or ""),
             dialogue_match_mode=str(context.get("dialogue_match_mode") or ""),
         )
-        self._sync_results_pager()
         self._update_results_status_text(results, context)
         self._ensure_visible_thumbnails()
         self._sync_embedded_preview_strip()

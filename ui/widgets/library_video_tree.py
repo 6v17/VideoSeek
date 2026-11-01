@@ -7,12 +7,13 @@ on expand.
 
 from __future__ import annotations
 
+import math
 import os
 from collections import defaultdict
 from typing import Any, Iterable
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QSize, Signal
-from PySide6.QtGui import QColor, QIcon
+from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QSize, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStyle,
+    QStyleOptionButton,
     QTableView,
     QToolButton,
     QVBoxLayout,
@@ -69,6 +71,144 @@ def expanded_library_list_height(
     if cap < 1:
         cap = viewport
     return min(content, cap)
+
+
+def _library_icon_ink(button: QPushButton, option: QStyleOptionButton) -> QColor:
+    from PySide6.QtWidgets import QApplication
+
+    from ui.widgets.styles import THEME_COLORS_DARK, THEME_COLORS_LIGHT
+
+    app = QApplication.instance()
+    dark = False
+    if app is not None:
+        dark = app.palette().color(app.palette().ColorRole.Window).lightness() < 128
+    colors = THEME_COLORS_DARK if dark else THEME_COLORS_LIGHT
+    hovered = bool(option.state & (QStyle.StateFlag.State_MouseOver | QStyle.StateFlag.State_Sunken))
+    key = "TEXT" if button.isEnabled() and hovered else "MUTED"
+    color = QColor(str(colors.get(key) or "#6b6b6b"))
+    if not button.isEnabled():
+        color.setAlpha(110)
+    return color
+
+
+def _paint_library_glyph(painter: QPainter, rect, color: QColor, kind: str) -> None:
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    pen = QPen(color, 1.5)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    center = rect.center()
+    if kind == "refresh":
+        radius = 6.0
+        # Clockwise arc, open at the upper right. The arrow continues along that direction.
+        end_deg = 55
+        sweep_deg = 292
+        start_deg = end_deg + sweep_deg
+        painter.drawArc(
+            int(round(center.x() - radius)),
+            int(round(center.y() - radius)),
+            int(round(radius * 2)),
+            int(round(radius * 2)),
+            int(start_deg * 16),
+            int(-sweep_deg * 16),
+        )
+        end = math.radians(end_deg)
+        tangent_x = math.sin(end)
+        tangent_y = math.cos(end)
+        normal_x = -tangent_y
+        normal_y = tangent_x
+        tip_x = center.x() + radius * math.cos(end) + tangent_x * 3.2
+        tip_y = center.y() - radius * math.sin(end) + tangent_y * 3.2
+        base_x = center.x() + radius * math.cos(end) - tangent_x * 0.4
+        base_y = center.y() - radius * math.sin(end) - tangent_y * 0.4
+        wing = 2.6
+        head = QPainterPath()
+        head.moveTo(tip_x, tip_y)
+        head.lineTo(base_x + normal_x * wing, base_y + normal_y * wing)
+        head.lineTo(base_x - normal_x * wing, base_y - normal_y * wing)
+        head.closeSubpath()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        painter.drawPath(head)
+    else:
+        left = center.x() - 8
+        top = center.y() - 6
+        path = QPainterPath()
+        path.moveTo(left, top + 4)
+        path.lineTo(left, top + 2)
+        path.lineTo(left + 6, top + 2)
+        path.lineTo(left + 8, top + 4)
+        path.lineTo(left + 16, top + 4)
+        path.lineTo(left + 16, top + 13)
+        path.lineTo(left, top + 13)
+        path.closeSubpath()
+        painter.drawPath(path)
+    painter.restore()
+
+
+class LibraryIconButton(QPushButton):
+    """Icon-only library action. The tooltip keeps the word."""
+
+    def __init__(self, kind: str, parent=None):
+        super().__init__(parent)
+        self._kind = str(kind or "folder")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        if self._kind == "refresh":
+            self._apply_refresh_size()
+
+    def _refresh_side(self) -> int:
+        """Match the height of a text toolbar button, then stay square."""
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)
+        return max(1, int(QPushButton.sizeHint(self).height()))
+
+    def _apply_refresh_size(self) -> None:
+        if self._kind != "refresh" or getattr(self, "_sizing", False):
+            return
+        self._sizing = True
+        try:
+            side = self._refresh_side()
+            if self.width() != side or self.height() != side or self.minimumHeight() != side:
+                self.setFixedSize(side, side)
+        finally:
+            self._sizing = False
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        if self._kind != "refresh":
+            return super().sizeHint()
+        if self.minimumHeight() > 0 and self.minimumHeight() == self.maximumHeight():
+            side = int(self.minimumHeight())
+        else:
+            side = max(1, int(QPushButton.sizeHint(self).height()))
+        return QSize(side, side)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        if self._kind != "refresh":
+            return super().minimumSizeHint()
+        return self.sizeHint()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._apply_refresh_size()
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.StyleChange, QEvent.Type.FontChange, QEvent.Type.Polish):
+            self._apply_refresh_size()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        del event
+        painter = QPainter(self)
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = ""
+        option.icon = QIcon()
+        self.style().drawControl(QStyle.ControlElement.CE_PushButton, option, painter, self)
+        _paint_library_glyph(painter, option.rect, _library_icon_ink(self, option), self._kind)
+        painter.end()
 
 
 class _ClickLabel(QLabel):
@@ -368,6 +508,7 @@ class LibraryGroupedVideoTree(QWidget):
         self._action_col_w = _ACTION_COL_MIN
         self._find_hits: list[ListFindHit] = []
         self._find_index = -1
+        self._row_icon = QIcon()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -448,6 +589,10 @@ class LibraryGroupedVideoTree(QWidget):
     def find_bar(self) -> ListFindBar:
         return self._find_bar
 
+    def set_row_icon(self, icon: QIcon) -> None:
+        """Row decoration. Video libraries keep the theme video icon when this is empty."""
+        self._row_icon = QIcon(icon) if icon is not None else QIcon()
+
     def set_action_texts(
         self,
         *,
@@ -474,7 +619,9 @@ class LibraryGroupedVideoTree(QWidget):
             self._open_text = open_text
             for block in self._blocks:
                 if block.open_button is not None:
-                    block.open_button.setText(open_text)
+                    block.open_button.setText("")
+                    block.open_button.setToolTip(open_text)
+                    block.open_button.setAccessibleName(open_text)
         if status_template:
             self._status_template = status_template
             for block in self._blocks:
@@ -892,6 +1039,11 @@ class LibraryGroupedVideoTree(QWidget):
             if w is not None:
                 w.deleteLater()
 
+    def _row_file_icon(self, view: QWidget) -> QIcon:
+        if not self._row_icon.isNull():
+            return self._row_icon
+        return self._video_icon(view)
+
     @staticmethod
     def _video_icon(view: QWidget) -> QIcon:
         st = view.style()
@@ -958,8 +1110,10 @@ class LibraryGroupedVideoTree(QWidget):
         count_label.setMinimumWidth(28)
         block.count_label = count_label
 
-        btn_open = QPushButton(self._open_text)
+        btn_open = LibraryIconButton("folder")
         btn_open.setObjectName("LibraryLibAction")
+        btn_open.setToolTip(self._open_text)
+        btn_open.setAccessibleName(self._open_text)
         btn_open.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_open.clicked.connect(lambda _=False, p=lib_path: self.open_library_requested.emit(p))
         block.open_button = btn_open
@@ -979,7 +1133,7 @@ class LibraryGroupedVideoTree(QWidget):
         body_l.setSpacing(0)
 
         model = LibraryVideoTableModel(body)
-        model.set_video_icon(self._video_icon(body))
+        model.set_video_icon(self._row_file_icon(body))
         block.model = model
 
         view = QTableView(body)

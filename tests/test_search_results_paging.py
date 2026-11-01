@@ -58,38 +58,5 @@ class SearchWindowGrowthTests(unittest.TestCase):
         self.assertEqual(next_result_window(400, 299, loaded_count=399), 500)
 
 
-class SearchResultsPagerLabelTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        from PySide6.QtWidgets import QApplication
-
-        if QApplication.instance() is None:
-            cls._app = QApplication([])
-
-    def test_english_previous_label_is_not_clipped(self):
-        from ui.widgets.search_results_pager import SearchResultsPager
-
-        pager = SearchResultsPager()
-        pager.set_texts(
-            {
-                "search_results_prev_page": "Previous",
-                "search_results_next_page": "Next",
-                "search_results_page_info": "{page}/{pages} · {total}",
-            }
-        )
-        needed = pager.btn_prev.fontMetrics().horizontalAdvance("Previous") + 16
-        self.assertGreaterEqual(pager.btn_prev.width(), needed)
-        self.assertEqual(pager.btn_prev.width(), pager.btn_next.width())
-
-    def test_pager_hides_when_one_page_holds_every_result(self):
-        from ui.widgets.search_results_pager import SearchResultsPager
-
-        pager = SearchResultsPager()
-        pager.configure(total_count=48, current_page=0, page_size=48)
-        self.assertFalse(pager.isVisible())
-        pager.configure(total_count=48, current_page=0, page_size=20)
-        self.assertTrue(pager.isVisible())
-
-
 if __name__ == "__main__":
     unittest.main()

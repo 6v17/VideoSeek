@@ -53,6 +53,8 @@ class SearchDefaultPathPolishTests(unittest.TestCase):
             self.assertTrue(str(texts.get("search_empty_try_text_enhance") or "").strip())
             self.assertTrue(str(texts.get("search_empty_try_image_mode") or "").strip())
             self.assertTrue(str(texts.get("search_empty_try_clearer_image") or "").strip())
+            self.assertTrue(str(texts.get("search_idle_hint") or "").strip())
+            self.assertNotIn("未找到", str(texts.get("search_idle_hint") or ""))
 
     def test_settings_notes_refer_to_image_mode_not_old_toggle(self):
         zh = TEXTS["zh"]
@@ -65,6 +67,33 @@ class SearchDefaultPathPolishTests(unittest.TestCase):
         self.assertIn("Best per video", en["settings_section_fast_image_search_note"])
         self.assertIn("Deep search", en["settings_section_precise_search_note"])
         self.assertNotIn("Deep search is OFF", en["settings_section_fast_image_search_note"])
+
+    def test_idle_hint_does_not_replace_a_finished_empty_search(self):
+        from ui.windows.gui_apply_texts import ApplyTextsGuiMixin
+
+        class _View:
+            def __init__(self, text: str) -> None:
+                self._empty_message = text
+
+            def set_empty_message(self, text: str) -> None:
+                self._empty_message = text
+
+        mixin = ApplyTextsGuiMixin()
+        mixin.search_page = types.SimpleNamespace(result_view=_View(""))
+        mixin._apply_search_idle_hint({"search_idle_hint": "Try a phrase: a rainy street"})
+        self.assertEqual(mixin.search_page.result_view._empty_message, "Try a phrase: a rainy street")
+
+        mixin.search_page.result_view._empty_message = "No results · Try Enhance"
+        mixin._apply_search_idle_hint({"search_idle_hint": "Try a phrase: a rainy street"})
+        self.assertEqual(mixin.search_page.result_view._empty_message, "No results · Try Enhance")
+
+    def test_disabled_ghost_button_is_styled(self):
+        from pathlib import Path
+
+        styles = Path(__file__).resolve().parents[1].joinpath("ui", "widgets", "styles.py").read_text(encoding="utf-8")
+        self.assertIn("#GhostButton:disabled", styles)
+        self.assertIn("#GhostButton:hover:disabled", styles)
+        self.assertIn("#PreviewTransportSlider::handle:horizontal:disabled", styles)
 
 
 @unittest.skipUnless(_HAS_PYSIDE, "PySide6 required for SearchController method tests")

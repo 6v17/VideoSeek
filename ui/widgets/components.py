@@ -23,14 +23,14 @@ from PySide6.QtWidgets import (
 )
 
 from ui.widgets.flow_layout import FlowLayout
+from ui.widgets.image_gallery_page import ImageGalleryBoard
 from ui.widgets.layout import (
     COMPONENT_SIZES,
     layout_viewport_height,
     result_table_min_height,
 )
 from ui.widgets.preview_panel import PreviewPanel
-from ui.widgets.search_results_pager import SearchResultsPager
-from ui.widgets.result_view import ResultView
+from ui.widgets.result_view import VIEW_GRID, ResultView
 from ui.widgets.scaffold import (
     PageScaffold,
     VSCard,
@@ -40,7 +40,7 @@ from ui.widgets.scaffold import (
 from ui.widgets.search_panel import SearchPanel
 from ui.widgets.button_roles import set_button_role
 from ui.widgets.styles import repolish_widget
-from ui.widgets.library_video_tree import LibraryGroupedVideoTree
+from ui.widgets.library_video_tree import LibraryGroupedVideoTree, LibraryIconButton
 from ui.widgets.video_download_page import VideoDownloadPage
 
 LinkSearchPage = VideoDownloadPage
@@ -313,12 +313,16 @@ class NavigationSidebar(QWidget):
         self._nav_buttons: dict[str, QPushButton] = {}
         self.btn_page_search = self._build_nav_button("Search", checked=True)
         self.btn_page_library = self._build_nav_button("Libraries")
+        self.btn_page_dialogue = self._build_nav_button("Subtitles")
+        self.btn_page_gallery = self._build_nav_button("Gallery")
         self.btn_page_understanding = self._build_nav_button("Evidence")
         self.btn_page_link = self._build_nav_button("Link Match")
         self.btn_page_settings = self._build_nav_button("Settings")
         for page_id, button in (
             ("search", self.btn_page_search),
             ("library", self.btn_page_library),
+            ("dialogue", self.btn_page_dialogue),
+            ("gallery", self.btn_page_gallery),
             ("understanding", self.btn_page_understanding),
             ("link", self.btn_page_link),
             ("settings", self.btn_page_settings),
@@ -711,14 +715,18 @@ class SearchPage(QWidget):
         results_toolbar.addWidget(self.results_size_cluster, 0)
         results_toolbar.addWidget(self.results_actions, 0)
 
-        self.results_pager = SearchResultsPager()
         self.result_view = ResultView(min_table_height=result_table_min_height())
         self.result_table = self.result_view.table
         results_layout.addWidget(self.results_title)
         results_layout.addLayout(results_toolbar)
-        results_layout.addWidget(self.results_pager, 0, Qt.AlignmentFlag.AlignHCenter)
         results_layout.setSpacing(8)
         results_layout.addWidget(self.result_view, 1)
+        self.gallery_results = ResultView(min_table_height=result_table_min_height(), view_mode=VIEW_GRID)
+        self.gallery_results.hide()
+        self.gallery_results.set_display_scale(self.results_size_slider.value())
+        results_layout.addWidget(self.gallery_results, 1)
+        self._gallery_results_active = False
+        self._group_back_before_gallery = False
 
         self.results_slot_layout.addWidget(self.results_card, 1)
 
@@ -775,7 +783,10 @@ class SearchPage(QWidget):
         self.btn_preview_restore.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_preview_restore.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.btn_preview_restore.hide()
+        self.gallery_board = ImageGalleryBoard(self.preview_column)
+        self.gallery_board.hide()
         preview_column_layout.addWidget(self.preview_panel, 1)
+        preview_column_layout.addWidget(self.gallery_board, 1)
         preview_column_layout.addWidget(self.btn_preview_restore, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
 
         self.compare_splitter.addWidget(self._original_column)
@@ -795,16 +806,63 @@ class SearchPage(QWidget):
         self._viewport_budget_timer.timeout.connect(self._apply_viewport_budget)
         QTimer.singleShot(0, self._apply_viewport_budget)
 
+    def _sync_docked_preview_face(self) -> None:
+        """Pictures uses the still board. Every other search tab keeps the player."""
+        board = getattr(self, "gallery_board", None)
+        gallery = bool(getattr(self, "_gallery_results_active", False))
+        hidden = bool(self._preview_collapsed) or bool(getattr(self, "_preview_column_yielded", False))
+        self.preview_panel.setVisible((not gallery) and not hidden)
+        if board is None:
+            return
+        board.setVisible(gallery and not hidden)
+        if gallery and not hidden:
+            QTimer.singleShot(0, board.refit)
+
+    def set_gallery_results_active(self, active: bool) -> None:
+        """Swap the video result table for the still grid while 找图 is the query tab."""
+        active = bool(active)
+        if active == getattr(self, "_gallery_results_active", False):
+            return
+        self._gallery_results_active = active
+        if active:
+            self._group_back_before_gallery = self.btn_group_back.isVisible()
+            self.btn_group_back.hide()
+        for widget in (
+            self.result_view,
+            self.results_view_segment,
+            self.btn_shot_list,
+            self.btn_export_tasks,
+        ):
+            widget.setVisible(not active)
+        self.results_size_cluster.show()
+        self.gallery_results.setVisible(active)
+        if active:
+            self.gallery_results.set_display_scale(self.results_size_slider.value())
+        if not active and getattr(self, "_group_back_before_gallery", False):
+            self.btn_group_back.show()
+            self._group_back_before_gallery = False
+        if active and self.browse_stack.currentWidget() is not self.results_slot:
+            self.browse_stack.setCurrentWidget(self.results_slot)
+        self._sync_docked_preview_face()
+        board = getattr(self, "gallery_board", None)
+        if active and board is not None and board.isVisible():
+            QTimer.singleShot(0, board.refit)
+
     def set_group_return(self, label: str, tip: str = "") -> None:
         """Show a compact back chip in the results status row, or hide it."""
         text = str(label or "").strip()
         button = self.btn_group_back
         if not text:
+            self._group_back_before_gallery = False
             button.hide()
             button.setToolTip("")
             return
         button.setText(text)
         button.setToolTip(str(tip or "").strip())
+        if getattr(self, "_gallery_results_active", False):
+            self._group_back_before_gallery = True
+            button.hide()
+            return
         button.show()
 
     def resizeEvent(self, event):  # noqa: N802
@@ -883,6 +941,9 @@ class SearchPage(QWidget):
         self.preview_panel.btn_collapse.clicked.connect(
             lambda: self.set_preview_collapsed(not self._preview_collapsed)
         )
+        board = getattr(self, "gallery_board", None)
+        if board is not None:
+            board.btn_collapse.clicked.connect(lambda: self.set_preview_collapsed(not self._preview_collapsed))
         self.btn_preview_restore.clicked.connect(lambda: self.set_preview_collapsed(False))
         self.results_size_slider.valueChanged.connect(self._on_results_size_slider)
         self.results_size_slider.sliderReleased.connect(self._on_results_size_released)
@@ -926,6 +987,9 @@ class SearchPage(QWidget):
             if len(sizes) == 2 and int(sizes[1]) > 80:
                 self._preview_width_before_collapse = int(sizes[1])
             self.preview_panel.hide()
+            board = getattr(self, "gallery_board", None)
+            if board is not None:
+                board.hide()
             self.btn_preview_restore.show()
             column.setMinimumWidth(36)
             column.setMaximumWidth(36)
@@ -936,7 +1000,7 @@ class SearchPage(QWidget):
             self.btn_preview_restore.hide()
             column.setMinimumWidth(320)
             column.setMaximumWidth(16777215)
-            self.preview_panel.show()
+            self._sync_docked_preview_face()
             sizes = splitter.sizes()
             total = max(int(splitter.width()), sum(int(part) for part in sizes))
             target = max(320, int(self._preview_width_before_collapse or _DOCKED_PREVIEW_WIDTH))
@@ -957,6 +1021,9 @@ class SearchPage(QWidget):
         if yielded:
             if getattr(self, "_preview_column_yielded", False):
                 self.preview_panel.hide()
+                board = getattr(self, "gallery_board", None)
+                if board is not None:
+                    board.hide()
                 self.btn_preview_restore.hide()
                 return
             sizes = splitter.sizes()
@@ -964,6 +1031,9 @@ class SearchPage(QWidget):
             self._preview_column_width_before_yield = int(sizes[1]) if len(sizes) == 2 else 0
             self._preview_column_collapsed_before_yield = bool(self._preview_collapsed)
             self.preview_panel.hide()
+            board = getattr(self, "gallery_board", None)
+            if board is not None:
+                board.hide()
             self.btn_preview_restore.hide()
             column.setMinimumWidth(0)
             column.setMaximumWidth(0)
@@ -972,8 +1042,7 @@ class SearchPage(QWidget):
             self._schedule_video_follow()
             return
         if not getattr(self, "_preview_column_yielded", False):
-            if not self._preview_collapsed:
-                self.preview_panel.show()
+            self._sync_docked_preview_face()
             return
         self._preview_column_yielded = False
         if self._preview_column_collapsed_before_yield:
@@ -981,8 +1050,8 @@ class SearchPage(QWidget):
             return
         column.setMinimumWidth(320)
         column.setMaximumWidth(16777215)
-        self.preview_panel.show()
         self.btn_preview_restore.hide()
+        self._sync_docked_preview_face()
         width = int(getattr(self, "_preview_column_width_before_yield", 0) or 0)
         if width < 320:
             width = _DOCKED_PREVIEW_WIDTH
@@ -1000,6 +1069,9 @@ class SearchPage(QWidget):
         slider.blockSignals(False)
         self.results_size_value.setText(f"{percent}%")
         self.result_view.set_display_scale(percent)
+        gallery = getattr(self, "gallery_results", None)
+        if gallery is not None:
+            gallery.set_display_scale(percent)
         if emit:
             self.results_scale_settled.emit(percent)
 
@@ -1083,39 +1155,6 @@ class LibraryPage(QWidget):
         chrome_row.setSpacing(10)
         chrome_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        mode_block = QVBoxLayout()
-        mode_block.setContentsMargins(0, 0, 0, 0)
-        mode_block.setSpacing(2)
-        self.lbl_mode_caption = QLabel()
-        self.lbl_mode_caption.setObjectName("LibraryChromeCaption")
-        mode_block.addWidget(self.lbl_mode_caption)
-
-        self.mode_segment = QFrame()
-        self.mode_segment.setObjectName("LibraryModeSegment")
-        mode_row = QHBoxLayout(self.mode_segment)
-        mode_row.setContentsMargins(2, 2, 2, 2)
-        mode_row.setSpacing(2)
-        mode_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self.btn_tab_visual = QPushButton()
-        set_button_role(self.btn_tab_visual, "GhostButton", chrome="modeSegment")
-        self.btn_tab_visual.setCheckable(True)
-        self.btn_tab_visual.setChecked(True)
-        self.btn_tab_visual.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_tab_visual.setMinimumWidth(108)
-        self.btn_tab_dialogue = QPushButton()
-        set_button_role(self.btn_tab_dialogue, "GhostButton", chrome="modeSegment")
-        self.btn_tab_dialogue.setCheckable(True)
-        self.btn_tab_dialogue.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_tab_dialogue.setMinimumWidth(108)
-        mode_row.addWidget(self.btn_tab_visual)
-        mode_row.addWidget(self.btn_tab_dialogue)
-        self._library_mode_group = QButtonGroup(self)
-        self._library_mode_group.setExclusive(True)
-        self._library_mode_group.addButton(self.btn_tab_visual, 0)
-        self._library_mode_group.addButton(self.btn_tab_dialogue, 1)
-        self._library_mode_group.idClicked.connect(self.set_library_mode)
-        mode_block.addWidget(self.mode_segment, 0)
-
         action_block = QVBoxLayout()
         action_block.setContentsMargins(0, 0, 0, 0)
         action_block.setSpacing(2)
@@ -1141,8 +1180,6 @@ class LibraryPage(QWidget):
         action_row.addWidget(self.btn_remove_lib)
         action_block.addLayout(action_row)
 
-        chrome_row.addLayout(mode_block, 0)
-        chrome_row.addWidget(_toolbar_divider())
         chrome_row.addLayout(action_block, 0)
         chrome_row.addStretch(1)
         shared_outer.addLayout(chrome_row)
@@ -1156,10 +1193,6 @@ class LibraryPage(QWidget):
         self.lbl_shared_library_hint.hide()
         shared_outer.addWidget(self.lbl_shared_library_hint)
         page_body.addWidget(self.shared_toolbar_card)
-        self.library_stack = QStackedWidget()
-        self.library_stack.setObjectName("LibraryStack")
-        # Compatibility alias: older code used QTabWidget APIs.
-        self.library_tabs = self.library_stack
 
         # --- Panel: visual video library (one card: actions + tree) ---
         self.visual_tab = QWidget()
@@ -1180,7 +1213,7 @@ class LibraryPage(QWidget):
         toolbar = FlowLayout(toolbar_host, spacing=8)
         self.btn_sync_db = QPushButton()
         self.btn_sync_db.setObjectName("PrimaryButton")
-        self.btn_refresh_visual_library = QPushButton()
+        self.btn_refresh_visual_library = LibraryIconButton("refresh")
         self.btn_refresh_visual_library.setObjectName("GhostButton")
         self.btn_stop_index = QPushButton()
         self.btn_stop_index.setObjectName("DangerGhostButton")
@@ -1232,132 +1265,15 @@ class LibraryPage(QWidget):
         table_layout.addWidget(self.visual_video_tree, 1)
         self.visual_video_tree.find_bar.install_shortcuts(self.table_card)
         visual_layout.addWidget(self.table_card, 1)
+        page_body.addWidget(self.visual_tab, 1)
 
-        # --- Panel: subtitle library (one card) ---
-        self.dialogue_tab = QWidget()
-        dialogue_layout = QVBoxLayout(self.dialogue_tab)
-        dialogue_layout.setContentsMargins(0, 8, 0, 0)
-        dialogue_layout.setSpacing(0)
-
-        self.dialogue_table_card = VSCard(margins=(16, 14, 16, 14), spacing=12)
-        self.dialogue_toolbar_card = self.dialogue_table_card
-        dialogue_table_layout = self.dialogue_table_card.content_layout
-
-        self.dialogue_table_title = QLabel()
-        self.dialogue_table_title.setObjectName("CardTitle")
-        dialogue_table_layout.addWidget(self.dialogue_table_title)
-
-        dialogue_toolbar_host = QWidget()
-        dialogue_toolbar_host.setObjectName("LibraryToolbarFlow")
-        dialogue_toolbar = FlowLayout(dialogue_toolbar_host, spacing=8)
-        self.btn_build_dialogue_index = QPushButton()
-        self.btn_build_dialogue_index.setObjectName("PrimaryButton")
-        self.btn_reembed_dialogue = QPushButton()
-        self.btn_reembed_dialogue.setObjectName("AccentGhostButton")
-        self.btn_clear_dialogue = QPushButton()
-        self.btn_clear_dialogue.setObjectName("GhostButton")
-        self.btn_import_subtitle_srt = QPushButton()
-        self.btn_import_subtitle_srt.setObjectName("GhostButton")
-        self.btn_export_dialogue = QPushButton()
-        self.btn_export_dialogue.setObjectName("GhostButton")
-        self.btn_refresh_dialogue_library = QPushButton()
-        self.btn_refresh_dialogue_library.setObjectName("GhostButton")
-        self.btn_subtitle_sample_advanced = QPushButton()
-        self.btn_subtitle_sample_advanced.setObjectName("GhostButton")
-        self.btn_subtitle_sample_advanced.setCheckable(True)
-        self.btn_subtitle_sample_advanced.setChecked(False)
-        self.lbl_subtitle_sample_interval = QLabel()
-        self.lbl_subtitle_sample_interval.setObjectName("CardHint")
-        self.lbl_subtitle_sample_interval.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        self.input_subtitle_sample_interval = NoWheelDoubleSpinBox()
-        self.input_subtitle_sample_interval.setRange(0.1, 6.0)
-        self.input_subtitle_sample_interval.setSingleStep(0.1)
-        self.input_subtitle_sample_interval.setDecimals(1)
-        self.input_subtitle_sample_interval.setValue(1.2)
-        self.input_subtitle_sample_interval.setSuffix(" s")
-        self.input_subtitle_sample_interval.setMinimumWidth(88)
-        self.input_subtitle_sample_interval.setMaximumWidth(110)
-        self.lbl_subtitle_sample_strategy = QLabel()
-        self.lbl_subtitle_sample_strategy.setObjectName("CardHint")
-        self.lbl_subtitle_sample_strategy.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        self.input_subtitle_sample_strategy = NoWheelComboBox()
-        self.input_subtitle_sample_strategy.setObjectName("SearchModeSelect")
-        self.input_subtitle_sample_strategy.setMinimumWidth(120)
-        self.input_subtitle_sample_strategy.setMaximumWidth(160)
-        self.lbl_subtitle_ocr_batch = QLabel()
-        self.lbl_subtitle_ocr_batch.setObjectName("CardHint")
-        self.lbl_subtitle_ocr_batch.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        self.input_subtitle_ocr_batch = NoWheelSpinBox()
-        self.input_subtitle_ocr_batch.setRange(1, 6)
-        self.input_subtitle_ocr_batch.setSingleStep(1)
-        self.input_subtitle_ocr_batch.setValue(6)
-        self.input_subtitle_ocr_batch.setMinimumWidth(64)
-        self.input_subtitle_ocr_batch.setMaximumWidth(80)
-        self.btn_stop_dialogue_index = QPushButton()
-        self.btn_stop_dialogue_index.setObjectName("DangerGhostButton")
-        self.btn_stop_dialogue_index.setEnabled(False)
-        self.btn_stop_dialogue_index.setVisible(False)
-
-        self.subtitle_video_tree = LibraryGroupedVideoTree()
-        self.subtitle_video_tree.setMinimumHeight(280)
-        self.dialogue_list = self.subtitle_video_tree
-
-        dialogue_toolbar.addWidget(self.btn_build_dialogue_index)
-        dialogue_toolbar.addWidget(self.btn_reembed_dialogue)
-        dialogue_toolbar.addWidget(self.btn_clear_dialogue)
-        dialogue_toolbar.addWidget(self.btn_import_subtitle_srt)
-        dialogue_toolbar.addWidget(self.btn_export_dialogue)
-        dialogue_toolbar.addWidget(self.btn_refresh_dialogue_library)
-        dialogue_toolbar.addWidget(self.btn_subtitle_sample_advanced)
-        dialogue_toolbar.addWidget(self.subtitle_video_tree.find_bar)
-        dialogue_toolbar.addWidget(self.btn_stop_dialogue_index)
-        dialogue_table_layout.addWidget(dialogue_toolbar_host)
-
-        self.subtitle_sample_advanced_row = QWidget()
-        advanced_row = QHBoxLayout(self.subtitle_sample_advanced_row)
-        advanced_row.setContentsMargins(0, 0, 0, 0)
-        advanced_row.setSpacing(8)
-        advanced_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        advanced_row.addWidget(self.lbl_subtitle_sample_strategy, 0, Qt.AlignmentFlag.AlignVCenter)
-        advanced_row.addWidget(self.input_subtitle_sample_strategy, 0, Qt.AlignmentFlag.AlignVCenter)
-        advanced_row.addWidget(self.lbl_subtitle_sample_interval, 0, Qt.AlignmentFlag.AlignVCenter)
-        advanced_row.addWidget(self.input_subtitle_sample_interval, 0, Qt.AlignmentFlag.AlignVCenter)
-        advanced_row.addWidget(self.lbl_subtitle_ocr_batch, 0, Qt.AlignmentFlag.AlignVCenter)
-        advanced_row.addWidget(self.input_subtitle_ocr_batch, 0, Qt.AlignmentFlag.AlignVCenter)
-        advanced_row.addStretch(1)
-        self.subtitle_sample_advanced_row.setVisible(False)
-        self.btn_subtitle_sample_advanced.toggled.connect(self.subtitle_sample_advanced_row.setVisible)
-        dialogue_table_layout.addWidget(self.subtitle_sample_advanced_row)
-
-        dialogue_table_layout.addWidget(self.subtitle_video_tree, 1)
-        self.subtitle_video_tree.find_bar.install_shortcuts(self.dialogue_table_card)
-        dialogue_layout.addWidget(self.dialogue_table_card, 1)
-
-        self.library_stack.addWidget(self.visual_tab)
-        self.library_stack.addWidget(self.dialogue_tab)
-        page_body.addWidget(self.library_stack, 1)
-
-        # Shared progress row (visual indexing + dialogue jobs)
         self.progress_status = VSProgressStatusRow()
         self.progress_bar = self.progress_status.progress_bar
         self.lbl_status = self.progress_status.status_label
-        page_body.addWidget(self.progress_status)
-
-        self.set_library_mode(0)
-
-    def set_library_mode(self, index: int) -> None:
-        idx = 0 if int(index) <= 0 else 1
-        if self.library_stack.currentIndex() != idx:
-            self.library_stack.setCurrentIndex(idx)
-        self.btn_tab_visual.setChecked(idx == 0)
-        self.btn_tab_dialogue.setChecked(idx == 1)
-
-    def library_mode(self) -> int:
-        return int(self.library_stack.currentIndex())
+        self.progress_host = QWidget()
+        self.progress_host_layout = QVBoxLayout(self.progress_host)
+        self.progress_host_layout.setContentsMargins(0, 0, 0, 0)
+        self.progress_host_layout.setSpacing(0)
+        self.progress_host_layout.addWidget(self.progress_status)
+        page_body.addWidget(self.progress_host)
 

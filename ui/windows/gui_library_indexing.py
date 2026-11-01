@@ -317,17 +317,43 @@ class LibraryIndexingGuiMixin:
             self.show_error_dialog(self.texts.get("library_load_failed", "Library load failed"), exc)
 
     def _is_subtitle_library_mode(self) -> bool:
-        return int(self.library_page.library_mode()) == 1
+        try:
+            index = int(self.pages.currentIndex())
+            order = tuple(getattr(self, "_nav_page_order", ()) or ())
+        except Exception:
+            return False
+        return 0 <= index < len(order) and order[index] == "dialogue"
 
     def _refresh_library_action_hints(self):
-        page = self.library_page
-        subtitle_mode = self._is_subtitle_library_mode()
+        self._label_library_actions(self.library_page, subtitle=False)
+        dialogue = getattr(self, "dialogue_page", None)
+        if dialogue is not None:
+            self._label_library_actions(dialogue, subtitle=True)
+
+        # Team-client chrome owns the hint text when active.
+        try:
+            from src.services.team_mode_service import is_team_client_mode
+
+            if is_team_client_mode():
+                return
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:364")
+            pass
+
+        for page in (self.library_page, dialogue):
+            hint = getattr(page, "lbl_shared_library_hint", None) if page is not None else None
+            if hint is not None:
+                hint.hide()
+
+    def _label_library_actions(self, page, *, subtitle: bool) -> None:
+        if page is None:
+            return
         add_btn = getattr(page, "btn_add_lib", None)
         remove_btn = getattr(page, "btn_remove_lib", None)
-        hint = getattr(page, "lbl_shared_library_hint", None)
-
         if add_btn is not None:
-            if subtitle_mode:
+            if subtitle:
                 add_btn.setText(
                     self.texts.get(
                         "add_subtitle_library",
@@ -341,9 +367,8 @@ class LibraryIndexingGuiMixin:
                         self.texts.get("add_folder", "Add Library"),
                     )
                 )
-
         if remove_btn is not None:
-            if subtitle_mode:
+            if subtitle:
                 remove_btn.setText(
                     self.texts.get(
                         "remove_subtitle_library",
@@ -370,44 +395,32 @@ class LibraryIndexingGuiMixin:
                     )
                 )
 
-        # Team-client chrome owns the hint text when active.
-        try:
-            from src.services.team_mode_service import is_team_client_mode
-
-            if is_team_client_mode():
-                return
-        except Exception as exc:
-            from src.app.logging_utils import note_swallowed
-
-            note_swallowed(exc, "ui/windows/gui_library_indexing.py:364")
-            pass
-
-        if hint is not None:
-            hint.hide()
-
     def _active_library_tree(self):
-        page = self.library_page
-        if int(page.library_mode()) == 1:
-            return page.subtitle_video_tree
-        return page.visual_video_tree
+        if self._is_subtitle_library_mode():
+            return self.library_page.subtitle_video_tree
+        return self.library_page.visual_video_tree
 
     def _refresh_remove_library_button(self):
-        btn = getattr(self.library_page, "btn_remove_lib", None)
-        if btn is None:
-            return
-        if (
+        busy = (
             getattr(self, "_remove_library_running", False)
             or self._remove_library_worker_running()
             or getattr(self, "_remove_selected_videos_running", False)
             or self._remove_selected_videos_worker_running()
             or self.indexing_controller.is_busy()
             or self._dialogue_index_running()
-        ):
-            btn.setEnabled(False)
-            self._refresh_remove_selected_videos_button()
-            return
-        tree = self._active_library_tree()
-        btn.setEnabled(bool(tree.collect_checked_library_paths()))
+        )
+        pairs = (
+            (self.library_page, "visual_video_tree"),
+            (getattr(self, "dialogue_page", None), "subtitle_video_tree"),
+        )
+        for page, tree_name in pairs:
+            if page is None:
+                continue
+            btn = getattr(page, "btn_remove_lib", None)
+            tree = getattr(page, tree_name, None)
+            if btn is None or tree is None:
+                continue
+            btn.setEnabled(False if busy else bool(tree.collect_checked_library_paths()))
         self._refresh_remove_selected_videos_button()
 
     def _refresh_remove_selected_videos_button(self):
@@ -603,10 +616,18 @@ class LibraryIndexingGuiMixin:
             "btn_debug_gpu_oom": (not client) and debug_enabled,
             "btn_debug_system_oom": (not client) and debug_enabled,
         }
-        for name, visible in visibility.items():
-            widget = getattr(page, name, None)
-            if widget is not None:
-                widget.setVisible(bool(visible))
+        pages = [page]
+        dialogue = getattr(self, "dialogue_page", None)
+        if dialogue is not None:
+            pages.append(dialogue)
+        for host in pages:
+            for name, visible in visibility.items():
+                widget = getattr(host, name, None)
+                if widget is not None:
+                    widget.setVisible(bool(visible))
+            action_caption = getattr(host, "lbl_action_caption", None)
+            if action_caption is not None:
+                action_caption.setVisible(not client)
         if client:
             advanced = getattr(page, "btn_subtitle_sample_advanced", None)
             if advanced is not None:
@@ -614,25 +635,23 @@ class LibraryIndexingGuiMixin:
             row = getattr(page, "subtitle_sample_advanced_row", None)
             if row is not None:
                 row.setVisible(False)
-        action_caption = getattr(page, "lbl_action_caption", None)
-        if action_caption is not None:
-            action_caption.setVisible(not client)
-        # Subtitle tab stays available on 用户机 (read-only shared view).
-        if getattr(page, "btn_tab_dialogue", None) is not None:
-            page.btn_tab_dialogue.setEnabled(True)
         hint = getattr(page, "lbl_shared_library_hint", None)
-        if hint is None:
+        dialogue_hint = getattr(dialogue, "lbl_shared_library_hint", None) if dialogue is not None else None
+        if hint is None and dialogue_hint is None:
             return
-        if client:
-            hint.setText(
-                self.texts.get(
-                    "library_team_shared_hint",
-                    "用户机：显示服务机共享库与字幕库（只读）。索引请在服务机完成；可用范围搜索限定片源。",
-                )
-            )
-            hint.show()
-        else:
-            hint.hide()
+        shared_hint = self.texts.get(
+            "library_team_shared_hint",
+            "用户机：显示服务机共享库与字幕库（只读）。索引请在服务机完成；可用范围搜索限定片源。",
+        )
+        for label in (hint, dialogue_hint):
+            if label is None:
+                continue
+            if client:
+                label.setText(shared_hint)
+                label.show()
+            else:
+                label.hide()
+        if not client:
             self._refresh_library_action_hints()
         self._refresh_remove_selected_videos_button()
         self._apply_index_issue_button_state(bool(getattr(self, "_last_index_issues", ())))
@@ -2016,7 +2035,7 @@ class LibraryIndexingGuiMixin:
             list_dialogue_transcript_summaries,
         )
 
-        self.library_page.set_library_mode(1)
+        self.switch_page("dialogue")
         mode_value = str(mode or "auto").strip().lower() or "auto"
 
         selected_ids = {

@@ -272,7 +272,9 @@ class SearchScopeGuiMixin:
         self._refresh_search_scope_entries(force=force_entries)
         show_scope = self._search_scope_picker_available()
         # Keep the cluster in layout so tab switches do not jump the panel.
-        self.search_page.search_scope_cluster.setVisible(True)
+        # 找图 does not search videos, so that row stays out of the way.
+        gallery_tab = self._search_active_tab() == getattr(self, "SEARCH_TAB_GALLERY", "")
+        self.search_page.search_scope_cluster.setVisible(not gallery_tab)
 
         cache = self._search_scope_entries_cache_for_kind()
         known_paths = self._known_scope_paths(cache)

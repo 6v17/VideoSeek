@@ -11,6 +11,7 @@ class SearchPanelStateMixin:
     SEARCH_TAB_IMAGE = "image"
     SEARCH_TAB_TEXT = "text"
     SEARCH_TAB_COMPOSE = "compose"
+    SEARCH_TAB_GALLERY = "gallery"
     SEARCH_TAB_DIALOGUE = "dialogue"
     SEARCH_TAB_TAGS = "tags"
 
@@ -45,21 +46,34 @@ class SearchPanelStateMixin:
             return False
         return compose_form.has_content()
 
+    def _search_has_gallery_query(self) -> bool:
+        if not hasattr(self, "search_page"):
+            return False
+        gallery_form = getattr(self.search_page.search_panel, "gallery_form", None)
+        if gallery_form is None:
+            return False
+        return gallery_form.has_content()
+
+    def _search_query_tab_order(self) -> tuple[str, ...]:
+        return (
+            self.SEARCH_TAB_IMAGE,
+            self.SEARCH_TAB_TEXT,
+            self.SEARCH_TAB_COMPOSE,
+            self.SEARCH_TAB_GALLERY,
+            self.SEARCH_TAB_DIALOGUE,
+            self.SEARCH_TAB_TAGS,
+        )
+
     def _search_active_tab(self) -> str:
         if not hasattr(self, "search_page"):
             return self.SEARCH_TAB_IMAGE
         tabs = getattr(self.search_page, "search_query_tabs", None)
         if tabs is None:
             return self.SEARCH_TAB_IMAGE
+        order = self._search_query_tab_order()
         index = int(tabs.currentIndex())
-        if index == 1:
-            return self.SEARCH_TAB_TEXT
-        if index == 2:
-            return self.SEARCH_TAB_COMPOSE
-        if index == 3:
-            return self.SEARCH_TAB_DIALOGUE
-        if index == 4:
-            return self.SEARCH_TAB_TAGS
+        if 0 <= index < len(order):
+            return order[index]
         return self.SEARCH_TAB_IMAGE
 
     def _set_search_query_tab(self, tab: str) -> None:
@@ -69,16 +83,8 @@ class SearchPanelStateMixin:
         if tabs is None:
             return
         normalized = str(tab or "").strip().lower()
-        if normalized == self.SEARCH_TAB_TEXT:
-            target = 1
-        elif normalized == self.SEARCH_TAB_COMPOSE:
-            target = 2
-        elif normalized == self.SEARCH_TAB_DIALOGUE:
-            target = 3
-        elif normalized == self.SEARCH_TAB_TAGS:
-            target = 4
-        else:
-            target = 0
+        order = self._search_query_tab_order()
+        target = order.index(normalized) if normalized in order else 0
         if tabs.currentIndex() != target:
             tabs.setCurrentIndex(target)
 
@@ -88,6 +94,8 @@ class SearchPanelStateMixin:
             return "text" if self._search_has_text_query() else "empty"
         if tab == self.SEARCH_TAB_COMPOSE:
             return "compose" if self._search_has_compose_query() else "empty"
+        if tab == self.SEARCH_TAB_GALLERY:
+            return "gallery" if self._search_has_gallery_query() else "empty"
         if tab == self.SEARCH_TAB_DIALOGUE:
             return "dialogue" if self._search_has_dialogue_query() else "empty"
         if tab == self.SEARCH_TAB_TAGS:
@@ -358,25 +366,20 @@ class SearchPanelStateMixin:
         tabs = getattr(page, "search_query_tabs", None)
         active_tab = self._search_active_tab()
         if tabs is not None:
-            tabs.setTabText(0, texts.get("search_tab_image", "Image"))
-            tabs.setTabText(1, texts.get("search_tab_text", "Text"))
-            tabs.setTabText(2, texts.get("search_tab_compose", "Compose"))
-            if tabs.count() > 3:
-                tabs.setTabText(3, texts.get("search_tab_dialogue", "Subs"))
-                tabs.setTabToolTip(
-                    3,
-                    texts.get(
-                        "search_tab_dialogue_tip",
-                        texts.get("search_tab_dialogue", "Subtitles"),
-                    ),
-                )
-            if tabs.count() > 4:
-                tabs.setTabText(4, texts.get("search_tab_tags", "Tags"))
-                tabs.setTabToolTip(4, texts.get("search_tab_tags", "Tags"))
-            for index in (0, 1, 2):
-                if tabs.count() > index:
-                    tabs.setTabToolTip(index, tabs.tabText(index))
-            # Prefer fitting all five tabs in the narrow search pane (especially EN labels).
+            tab_labels = (
+                ("search_tab_image", "Image", ""),
+                ("search_tab_text", "Text", ""),
+                ("search_tab_compose", "Compose", ""),
+                ("search_tab_gallery", "Pictures", "search_tab_gallery_tip"),
+                ("search_tab_dialogue", "Subs", "search_tab_dialogue_tip"),
+                ("search_tab_tags", "Tags", "search_tab_tags"),
+            )
+            for index, (key, fallback, tip_key) in enumerate(tab_labels):
+                if tabs.count() <= index:
+                    break
+                tabs.setTabText(index, texts.get(key, fallback))
+                tip = texts.get(tip_key, "") if tip_key else ""
+                tabs.setTabToolTip(index, tip or tabs.tabText(index))
             bar = tabs.tabBar()
             if bar is not None:
                 bar.setUsesScrollButtons(False)
@@ -384,6 +387,29 @@ class SearchPanelStateMixin:
         compose_form = getattr(page.search_panel, "compose_form", None)
         if compose_form is not None:
             compose_form.set_texts(texts)
+        gallery_form = getattr(page.search_panel, "gallery_form", None)
+        if gallery_form is not None:
+            gallery_form.set_texts(texts)
+            gallery_form.input_description.setPlaceholderText(
+                texts.get(
+                    "search_tab_gallery_placeholder",
+                    texts.get("gallery_query_placeholder", ""),
+                )
+            )
+        board = getattr(page, "gallery_board", None)
+        if board is not None:
+            board.set_texts(texts)
+        gallery_results = getattr(page, "gallery_results", None)
+        if gallery_results is not None and not gallery_results.grid.count():
+            gallery_results.set_empty_message(texts.get("gallery_results_empty", ""))
+        if hasattr(page, "set_gallery_results_active"):
+            page.set_gallery_results_active(active_tab == self.SEARCH_TAB_GALLERY)
+        if active_tab == self.SEARCH_TAB_GALLERY:
+            page.results_title.setText(
+                texts.get("search_gallery_results_title", texts.get("results_panel", ""))
+            )
+        elif texts.get("results_panel"):
+            page.results_title.setText(texts.get("results_panel", ""))
 
         btn_save_preset = getattr(page.search_panel, "btn_save_preset", None)
         if btn_save_preset is not None:
@@ -395,9 +421,13 @@ class SearchPanelStateMixin:
         if hasattr(page.search_panel, "show_score_kind"):
             page.search_panel.show_score_kind(self._active_search_score_kind())
 
+        gallery_tab = active_tab == self.SEARCH_TAB_GALLERY
         mode_stack = getattr(page, "search_mode_options_stack", None)
         if mode_stack is not None:
-            if active_tab in {self.SEARCH_TAB_TEXT, self.SEARCH_TAB_COMPOSE}:
+            mode_stack.setVisible(not gallery_tab)
+            if gallery_tab:
+                mode_stack.setCurrentIndex(2)
+            elif active_tab in {self.SEARCH_TAB_TEXT, self.SEARCH_TAB_COMPOSE}:
                 # Compose only needs frame/chunk granularity (same control as text).
                 mode_stack.setCurrentIndex(0)
             elif active_tab == self.SEARCH_TAB_IMAGE:
@@ -406,6 +436,8 @@ class SearchPanelStateMixin:
                 mode_stack.setCurrentIndex(3)
             else:
                 mode_stack.setCurrentIndex(2)
+        page.skip_edges_cluster.setVisible(not gallery_tab)
+        page.result_grouping_cluster.setVisible(not gallery_tab)
 
         if active_tab in {self.SEARCH_TAB_TEXT, self.SEARCH_TAB_COMPOSE}:
             page.search_mode_label.setText(texts.get("setting_search_mode", ""))
@@ -519,7 +551,7 @@ class SearchPanelStateMixin:
                 search_kind="dialogue",
                 search_mode=self._dialogue_match_mode_from_ui(),
             )
-        if active == self.SEARCH_TAB_COMPOSE:
+        if active in {self.SEARCH_TAB_COMPOSE, self.SEARCH_TAB_GALLERY}:
             return resolve_search_score_kind(search_kind="compose")
         if active == self.SEARCH_TAB_TEXT:
             return resolve_search_score_kind(is_text=True)
@@ -570,9 +602,13 @@ class SearchPanelStateMixin:
             return
         texts = getattr(self, "texts", {}) or {}
         parts: list[str] = []
+        active = self._search_active_tab()
+        gallery_tab = active == self.SEARCH_TAB_GALLERY
         try:
             scope_is_default = self._search_scope_is_global()
         except Exception:
+            scope_is_default = True
+        if gallery_tab:
             scope_is_default = True
         if not scope_is_default:
             scope = str(page.search_scope_select.toolTip() or "").splitlines()
@@ -581,14 +617,14 @@ class SearchPanelStateMixin:
                 scope_text = page.search_scope_select.currentText().strip()
             if scope_text:
                 parts.append(scope_text)
-        skip = page.btn_skip_edges.currentText().strip()
-        skip_defaults = {
-            str(texts.get("search_skip_edges_off") or "").strip(),
-            str(texts.get("setting_skip_edges_empty") or "").strip(),
-        }
-        if skip and skip not in skip_defaults:
-            parts.append(skip)
-        active = self._search_active_tab()
+        if not gallery_tab:
+            skip = page.btn_skip_edges.currentText().strip()
+            skip_defaults = {
+                str(texts.get("search_skip_edges_off") or "").strip(),
+                str(texts.get("setting_skip_edges_empty") or "").strip(),
+            }
+            if skip and skip not in skip_defaults:
+                parts.append(skip)
         if active in {self.SEARCH_TAB_TEXT, self.SEARCH_TAB_COMPOSE}:
             if self._text_search_mode_from_ui() != "chunk":
                 mode = page.search_mode.currentText().strip()
@@ -610,14 +646,15 @@ class SearchPanelStateMixin:
                 mode = combo.currentText().strip() if combo is not None else ""
                 if mode:
                     parts.append(mode)
-        grouping = getattr(page, "result_grouping", None)
-        grouping_choice = str(grouping.currentData() or "") if grouping is not None else ""
-        if grouping_choice == "off":
-            parts.append(str(texts.get("search_result_grouping_off_summary") or "聚组关"))
-        elif grouping_choice in {"loose", "strict"}:
-            label = grouping.currentText().strip() if grouping is not None else ""
-            if label:
-                parts.append(label)
+        if not gallery_tab:
+            grouping = getattr(page, "result_grouping", None)
+            grouping_choice = str(grouping.currentData() or "") if grouping is not None else ""
+            if grouping_choice == "off":
+                parts.append(str(texts.get("search_result_grouping_off_summary") or "聚组关"))
+            elif grouping_choice in {"loose", "strict"}:
+                label = grouping.currentText().strip() if grouping is not None else ""
+                if label:
+                    parts.append(label)
         score_kind = self._active_search_score_kind()
         if score_kind is not None:
             from src.app.config import DEFAULT_CONFIG
@@ -902,6 +939,20 @@ class SearchPanelStateMixin:
             self._ensure_tag_suggest_timer().start()
         if hasattr(self, "_refresh_search_scope_ui"):
             self._refresh_search_scope_ui(force_entries=True)
+        controller = getattr(self, "image_gallery_controller", None)
+        if self._search_active_tab() == self.SEARCH_TAB_GALLERY:
+            if getattr(self, "_search_preview_embedded", False):
+                self._leave_search_preview_layer()
+            page = getattr(self, "search_page", None)
+            stack = getattr(page, "browse_stack", None) if page is not None else None
+            slot = getattr(page, "results_slot", None) if page is not None else None
+            if stack is not None and slot is not None and stack.currentWidget() is not slot:
+                stack.setCurrentWidget(slot)
+            preview = getattr(self, "preview_controller", None)
+            if preview is not None:
+                preview.stop_preview()
+        elif controller is not None:
+            controller.clear_still()
 
     def open_compose_search_tab(self) -> None:
         self.switch_page("search")
