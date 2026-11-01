@@ -1857,6 +1857,27 @@ class PreviewGuiMixin:
                 "AccentGhostButton" if has_export_tasks else "GhostButton",
             )
         self._sync_preview_layer_actions()
+        # Wire before the search-tab handler so the player leaves first.
+        if not getattr(self, "_gallery_preview_tab_wired", False):
+            tabs = getattr(getattr(self, "search_page", None), "search_query_tabs", None)
+            if tabs is not None:
+                tabs.currentChanged.connect(self._release_preview_on_gallery_tab)
+                self._gallery_preview_tab_wired = True
+
+    def _search_gallery_tab_selected(self) -> bool:
+        page = getattr(self, "search_page", None)
+        panel = getattr(page, "search_panel", None)
+        stack = getattr(panel, "query_stack", None)
+        form = getattr(panel, "gallery_form", None)
+        if stack is None or form is None:
+            return False
+        return stack.currentWidget() is form
+
+    def _release_preview_on_gallery_tab(self, _index: int = 0) -> None:
+        if not self._search_gallery_tab_selected():
+            return
+        if getattr(self, "_search_preview_embedded", False):
+            self._leave_search_preview_layer()
 
     def _sync_preview_layer_actions(self) -> None:
         page = getattr(self, "search_page", None)

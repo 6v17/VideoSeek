@@ -320,7 +320,10 @@ class LibraryIndexingGuiMixin:
         try:
             index = int(self.pages.currentIndex())
             order = tuple(getattr(self, "_nav_page_order", ()) or ())
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:_is_subtitle_library_mode")
             return False
         return 0 <= index < len(order) and order[index] == "dialogue"
 

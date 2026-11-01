@@ -941,8 +941,6 @@ class SearchPanelStateMixin:
             self._refresh_search_scope_ui(force_entries=True)
         controller = getattr(self, "image_gallery_controller", None)
         if self._search_active_tab() == self.SEARCH_TAB_GALLERY:
-            if getattr(self, "_search_preview_embedded", False):
-                self._leave_search_preview_layer()
             page = getattr(self, "search_page", None)
             stack = getattr(page, "browse_stack", None) if page is not None else None
             slot = getattr(page, "results_slot", None) if page is not None else None

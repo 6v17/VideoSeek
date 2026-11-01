@@ -180,7 +180,10 @@ def vector_dimension(root: str) -> int:
             return 0
         try:
             sample = table.search().select(["vector"]).limit(1).to_arrow()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/storage/image_gallery_store.py:vector_dimension")
             return 0
         if sample is None or sample.num_rows <= 0 or "vector" not in sample.column_names:
             return 0

@@ -94,12 +94,6 @@ class ApplyTextsGuiMixin:
         apply_preview = getattr(preview_dialog, "apply_texts", None)
         if callable(apply_preview):
             apply_preview(t)
-        if self._search_active_tab() == self.SEARCH_TAB_GALLERY:
-            self.search_page.results_title.setText(
-                t.get("search_gallery_results_title", t["results_panel"])
-            )
-        else:
-            self.search_page.results_title.setText(t["results_panel"])
         table_tip = t.get("results_view_table_tip", "") or t.get("results_view_table", "列表")
         grid_tip = t.get("results_view_grid_tip", "") or t.get("results_view_grid", "网格")
         self.search_page.btn_results_view_table.setText("")

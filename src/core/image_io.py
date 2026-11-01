@@ -100,7 +100,10 @@ def image_pixel_size(path: str) -> tuple[int, int] | None:
     try:
         with Image.open(target) as image:
             width, height = image.size
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/core/image_io.py:image_pixel_size")
         return None
     if int(width) <= 0 or int(height) <= 0:
         return None
