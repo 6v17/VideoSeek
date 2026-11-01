@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QObject, Qt
+from PySide6.QtCore import QObject
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFileDialog
 
@@ -355,7 +355,6 @@ class ImageGalleryController(QObject):
     def _on_preview(self, path: str, image) -> None:
         if str(path or "") != self._preview_path:
             return
-        grid = self._result_grid()
         score = self._hit_scores.get(path)
         self._show_still(image, path, score)
 
