@@ -25,8 +25,8 @@ def get_video_stream_info(path):
 
     return _impl(path)
 
-# Software decode + CPU filters; FFmpeg outputs 224×224 BGR (geometry from profile lock).
-_FRAME_SIZE = 224 * 224 * 3
+# Software decode + CPU filters. Square CLIP profiles output 224×224 BGR.
+# FG-CLIP2 keeps aspect and snaps to a 16px patch grid (at most 256 patches).
 _DEFAULT_READ_TIMEOUT_SEC = 600.0
 _DECODE_BACKEND_CPU = "cpu"
 _DECODE_BACKEND_D3D11VA = "d3d11va"
@@ -123,7 +123,33 @@ def _build_frame_vf(fps):
     )
 
 
-def _build_cpu_extract_command(video_path, fps):
+def _resolve_frame_layout(video_path, fps, config):
+    """Return ``(height, width, vf)`` for one video.
+
+    Square CLIP profiles stay 224. FG-CLIP2 scales to the NaFlex patch grid so
+    the rawvideo pipe has a constant size without stretching the frame to a square.
+    """
+    from src.storage.config_store import get_active_model_profile
+
+    provider = str(get_active_model_profile(config=config).get("provider") or "")
+    if provider != "fgclip2_onnx":
+        return 224, 224, _build_frame_vf(fps)
+
+    info = get_video_stream_info(video_path) or {}
+    src_w = int(info.get("width") or 0)
+    src_h = int(info.get("height") or 0)
+    if src_w > 0 and src_h > 0:
+        from src.core.fgclip2_preprocess import naflex_pixel_size
+
+        height, width = naflex_pixel_size(src_h, src_w)
+    else:
+        logger.info("FG-CLIP2 frame size fell back to 224 square; video dimensions were unavailable")
+        height, width = 224, 224
+    vf = f"fps={float(fps):.6f},scale={int(width)}:{int(height)}:flags=bilinear"
+    return int(height), int(width), vf
+
+
+def _build_cpu_extract_command(video_path, fps, vf=None):
     ffmpeg_bin = get_ffmpeg_path()
     return [
         ffmpeg_bin,
@@ -135,7 +161,7 @@ def _build_cpu_extract_command(video_path, fps):
         "-i",
         video_path,
         "-vf",
-        _build_frame_vf(fps),
+        vf or _build_frame_vf(fps),
         "-sn",
         "-f",
         "image2pipe",
@@ -147,7 +173,7 @@ def _build_cpu_extract_command(video_path, fps):
     ]
 
 
-def _build_d3d11va_extract_command(video_path, fps, *, ten_bit=False):
+def _build_d3d11va_extract_command(video_path, fps, *, ten_bit=False, vf=None):
     ffmpeg_bin = get_ffmpeg_path()
     prefix = (
         "hwdownload,format=p010le,format=yuv420p,"
@@ -168,7 +194,7 @@ def _build_d3d11va_extract_command(video_path, fps, *, ten_bit=False):
         "-i",
         video_path,
         "-vf",
-        prefix + _build_frame_vf(fps),
+        prefix + (vf or _build_frame_vf(fps)),
         "-sn",
         "-f",
         "image2pipe",
@@ -180,12 +206,12 @@ def _build_d3d11va_extract_command(video_path, fps, *, ten_bit=False):
     ]
 
 
-def _build_extract_command(video_path, fps, *, decode_backend=_DECODE_BACKEND_CPU):
+def _build_extract_command(video_path, fps, *, decode_backend=_DECODE_BACKEND_CPU, vf=None):
     if decode_backend == _DECODE_BACKEND_D3D11VA_10BIT:
-        return _build_d3d11va_extract_command(video_path, fps, ten_bit=True)
+        return _build_d3d11va_extract_command(video_path, fps, ten_bit=True, vf=vf)
     if decode_backend == _DECODE_BACKEND_D3D11VA:
-        return _build_d3d11va_extract_command(video_path, fps, ten_bit=False)
-    return _build_cpu_extract_command(video_path, fps)
+        return _build_d3d11va_extract_command(video_path, fps, ten_bit=False, vf=vf)
+    return _build_cpu_extract_command(video_path, fps, vf=vf)
 
 
 def is_experimental_hw_decode_enabled(config=None):
@@ -431,6 +457,7 @@ def _stream_rawvideo_frames(
     read_timeout_sec=None,
     command=None,
     decode_backend=_DECODE_BACKEND_CPU,
+    frame_hw=(224, 224),
 ):
     """Single FFmpeg rawvideo pipe reader (library indexing + remix).
 
@@ -448,6 +475,8 @@ def _stream_rawvideo_frames(
     process = None
     timeout_sec = _resolve_read_timeout_sec() if read_timeout_sec is None else read_timeout_sec
     try:
+        frame_h, frame_w = int(frame_hw[0]), int(frame_hw[1])
+        frame_size = frame_h * frame_w * 3
         process = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
@@ -468,15 +497,15 @@ def _stream_rawvideo_frames(
 
             in_bytes = _read_pipe_bytes(
                 process.stdout,
-                _FRAME_SIZE,
+                frame_size,
                 timeout_sec=timeout_sec,
                 should_stop=should_stop,
                 process=process,
             )
-            if len(in_bytes) != _FRAME_SIZE:
+            if len(in_bytes) != frame_size:
                 break
 
-            frame = np.frombuffer(in_bytes, np.uint8).reshape((224, 224, 3))
+            frame = np.frombuffer(in_bytes, np.uint8).reshape((frame_h, frame_w, 3))
             timestamp = count / float(fps)
             count += 1
             yield frame, timestamp
@@ -557,10 +586,11 @@ def _stream_frames_with_decode_fallback(
     process_holder=None,
     read_timeout_sec=None,
 ):
+    frame_h, frame_w, vf = _resolve_frame_layout(video_path, fps, config)
     backends = _resolve_decode_backends(video_path, config=config)
     last_error = None
     for index, decode_backend in enumerate(backends):
-        command = _build_extract_command(video_path, fps, decode_backend=decode_backend)
+        command = _build_extract_command(video_path, fps, decode_backend=decode_backend, vf=vf)
         try:
             yield from _stream_rawvideo_frames(
                 video_path,
@@ -570,6 +600,7 @@ def _stream_frames_with_decode_fallback(
                 read_timeout_sec=read_timeout_sec,
                 command=command,
                 decode_backend=decode_backend,
+                frame_hw=(frame_h, frame_w),
             )
             return
         except InterruptedError:
@@ -598,7 +629,9 @@ def stream_frames_with_ffmpeg(
     process_holder=None,
     read_timeout_sec=None,
 ):
-    """Stream 224×224 BGR frames + timestamps from ``video_path``.
+    """Stream BGR frames + timestamps from ``video_path``.
+
+    Square CLIP profiles are 224×224. FG-CLIP2 keeps aspect on the NaFlex grid.
 
     If ``fps_override`` is set (remix / explicit sampling), it is used as the ``fps=`` filter rate.
     Otherwise the active config sampling rules are used (library indexing).

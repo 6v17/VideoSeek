@@ -41,6 +41,12 @@ PROVIDER_REQUIRED_MODEL_FILES = {
         "tokenizer.json",
         "tokenizer_config.json",
     ],
+    "fgclip2_onnx": [
+        "fgclip2_vision_fp16.onnx",
+        "fgclip2_text_fp16.onnx",
+        "position_embedding_weight.npz",
+        "tokenizer.json",
+    ],
 }
 
 
@@ -402,7 +408,46 @@ def _safe_extract_zip(zip_path, output_dir):
         archive.extractall(output_dir)
 
 
+def _materialize_fgclip2_packages(extracted_root):
+    """Turn a raw FG-CLIP2 export tree into a folder that carries model_manifest.json.
+
+    The shipped zip keeps ONNX, the position table, and tokenizer.json in separate
+    subfolders and does not include a VideoSeek manifest.
+    """
+    wanted = {
+        "fgclip2_vision_fp16.onnx",
+        "fgclip2_text_fp16.onnx",
+        "position_embedding_weight.npz",
+        "tokenizer.json",
+    }
+    found = {}
+    root = os.path.normpath(os.path.abspath(os.fspath(extracted_root)))
+    for current_root, dirs, files in os.walk(root):
+        dirs[:] = [name for name in dirs if name != "_fgclip2_pack"]
+        for name in files:
+            if name in wanted and name not in found:
+                found[name] = os.path.join(current_root, name)
+    if set(found) != wanted:
+        return
+    vision_dir = os.path.dirname(found["fgclip2_vision_fp16.onnx"])
+    if os.path.isfile(os.path.join(vision_dir, "model_manifest.json")):
+        return
+    stage = os.path.join(root, "_fgclip2_pack")
+    if os.path.isdir(stage):
+        shutil.rmtree(stage)
+    os.makedirs(stage, exist_ok=True)
+    for name, src in found.items():
+        shutil.copy2(src, os.path.join(stage, name))
+    from src.core.fgclip2_provider import build_fgclip2_profile_manifest
+
+    manifest_path = os.path.join(stage, "model_manifest.json")
+    with open(manifest_path, "w", encoding="utf-8") as handle:
+        json.dump(build_fgclip2_profile_manifest(), handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+
+
 def _install_extracted_packages(extracted_root, model_root):
+    _materialize_fgclip2_packages(extracted_root)
     manifests = _discover_manifest_files(extracted_root)
     if not manifests:
         return 0, []
@@ -580,6 +625,13 @@ def import_model_packages(model_root, manifest_files=None):
                     "tokenizer_vocab": "vocab.txt",
                     "preprocessor_config": "preprocessor_config.json",
                     "model_config": "config.json",
+                }
+            elif provider == "fgclip2_onnx":
+                files_map = {
+                    "vision_model": "fgclip2_vision_fp16.onnx",
+                    "text_model": "fgclip2_text_fp16.onnx",
+                    "position_embedding": "position_embedding_weight.npz",
+                    "tokenizer_json": "tokenizer.json",
                 }
 
         runtime = {

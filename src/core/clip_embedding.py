@@ -1268,6 +1268,14 @@ def _register_default_inference_engines():
 
     register_inference_engine("chinese_clip_onnx", _chinese_clip_factory)
 
+    def _fgclip2_factory():
+        from src.core.fgclip2_provider import Fgclip2OnnxEngine
+
+        runtime_config = load_config()
+        return Fgclip2OnnxEngine(get_active_model_resource_dir(config=runtime_config))
+
+    register_inference_engine("fgclip2_onnx", _fgclip2_factory)
+
     def _cloud_vl_factory():
         from src.core.cloud_vl_embedding import CloudVlEmbeddingEngine
 

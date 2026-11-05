@@ -30,6 +30,12 @@ PROVIDER_REQUIRED_MODEL_FILES = {
         "tokenizer.json",
         "tokenizer_config.json",
     ],
+    "fgclip2_onnx": [
+        "fgclip2_vision_fp16.onnx",
+        "fgclip2_text_fp16.onnx",
+        "position_embedding_weight.npz",
+        "tokenizer.json",
+    ],
 }
 
 

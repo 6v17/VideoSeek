@@ -8,6 +8,7 @@ from src.services.model_profile_display import (
 
 def test_resolve_provider_text_language():
     assert resolve_provider_text_language("chinese_clip_onnx") == "zh"
+    assert resolve_provider_text_language("fgclip2_onnx") == "zh"
     assert resolve_provider_text_language("clip_onnx") == "en"
     assert resolve_provider_text_language("siglip2_onnx") == "multilingual"
     assert resolve_provider_text_language("qwen3_vl_embedding_cloud") == "multilingual"

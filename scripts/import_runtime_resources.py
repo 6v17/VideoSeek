@@ -94,7 +94,7 @@ def _model_root_from_config(config: dict, app_data: str) -> str:
         root = os.path.join(app_data, "models")
     root = os.path.abspath(root)
     provider_leaf = os.path.basename(os.path.dirname(root)).strip().lower()
-    if provider_leaf in {"openai-clip", "siglip2", "chinese-clip", "chinese-clip-onnx"}:
+    if provider_leaf in {"openai-clip", "siglip2", "chinese-clip", "chinese-clip-onnx", "fgclip2-onnx"}:
         parent = os.path.dirname(os.path.dirname(root))
         if parent:
             root = parent
@@ -171,6 +171,13 @@ def _default_files_map(provider: str, manifest: dict) -> dict:
             "tokenizer_vocab": "vocab.txt",
             "preprocessor_config": "preprocessor_config.json",
             "model_config": "config.json",
+        }
+    if provider == "fgclip2_onnx":
+        return {
+            "vision_model": "fgclip2_vision_fp16.onnx",
+            "text_model": "fgclip2_text_fp16.onnx",
+            "position_embedding": "position_embedding_weight.npz",
+            "tokenizer_json": "tokenizer.json",
         }
     return {}
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from src.storage.config_store import get_active_embedding_spec, get_active_model_profile
 
 _ENGLISH_ORIENTED_PROVIDERS = frozenset({"clip_onnx"})
-_CHINESE_ORIENTED_PROVIDERS = frozenset({"chinese_clip_onnx"})
+_CHINESE_ORIENTED_PROVIDERS = frozenset({"chinese_clip_onnx", "fgclip2_onnx"})
 _MULTILINGUAL_PROVIDERS = frozenset({"siglip2_onnx", "qwen3_vl_embedding_cloud"})
 _CLIP_ONNX_LEGACY_DISPLAY_NAMES = frozenset({"CLIP ONNX", "clip_onnx_default"})
 

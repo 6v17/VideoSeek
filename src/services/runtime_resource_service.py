@@ -54,7 +54,15 @@ def _resolve_runtime_model_root_dir(config):
     # Fallback heuristic: if path itself looks like "<root>/<provider>/<variant>", trim to "<root>".
     # This protects against stale configs that accidentally persist a profile leaf as model_dir.
     provider_leaf = os.path.basename(os.path.dirname(model_root_dir)).strip().lower()
-    if provider_leaf in {"openai-clip", "siglip2", "chinese-clip", "chinese-clip-onnx", "clip-onnx", "siglip2-onnx"}:
+    if provider_leaf in {
+        "openai-clip",
+        "siglip2",
+        "chinese-clip",
+        "chinese-clip-onnx",
+        "clip-onnx",
+        "siglip2-onnx",
+        "fgclip2-onnx",
+    }:
         candidate = os.path.dirname(os.path.dirname(model_root_dir))
         if candidate:
             model_root_dir = candidate
