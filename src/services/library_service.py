@@ -263,8 +263,12 @@ def register_library_videos(*, config=None, library_path: str | None = None) -> 
     """Discover videos under CLIP-profile libraries and ensure meta file records exist.
 
     Assigns ``video_id`` without building CLIP vectors. Newly seen files get
-    ``asset_state=missing_asset``. Existing ready/failed states are left unchanged
-    when the source still exists. Subtitle folders use ``register_subtitle_library_videos``.
+    ``asset_state=pending`` (not yet synced). A library that has never been
+    scanned stays ``index_state=pending``; rows there that were stored as
+    ``missing_asset`` are rewritten to ``pending`` so the repair button stays
+    for videos that lost vectors after a sync. Existing ready/failed states are
+    left unchanged when the source still exists. Subtitle folders use
+    ``register_subtitle_library_videos``.
     """
     from src.utils import get_video_hash
 
@@ -322,8 +326,10 @@ def register_library_videos(*, config=None, library_path: str | None = None) -> 
                 registered += 1
 
             state = str(previous.get("asset_state", "") or "").strip().lower()
-            if state in {"", "missing_source"}:
-                state = "missing_asset"
+            library_pending = str(lib_data.get("index_state") or "").strip().lower() == "pending"
+            # First sight, or a library that has never been synced: not a repair.
+            if state in {"", "missing_source"} or (library_pending and state == "missing_asset"):
+                state = "pending"
 
             next_info = dict(previous)
             next_info["vid"] = video_id
@@ -420,6 +426,7 @@ def list_library_video_entries(*, config=None, register: bool = True) -> list[di
             video_path = os.path.normpath(os.path.join(root_path, str(rel_path or "")))
             source_exists = os.path.isfile(video_path)
             stored_state = str(info.get("asset_state", "") or "").strip().lower()
+            library_index_state = str(lib_data.get("index_state") or "").strip().lower()
             if lance_video_ids is None:
                 asset_state = stored_state
             else:
@@ -440,6 +447,12 @@ def list_library_video_entries(*, config=None, register: bool = True) -> list[di
                     vector_ok=True,
                     lance_ready=lance_ready,
                 )
+            asset_state = _unsynced_library_display_state(
+                asset_state,
+                stored_state,
+                library_index_state,
+            )
+            if lance_video_ids is not None:
                 # Persist stale ready→missing_asset so list and search scope stay honest.
                 if (
                     stored_state == "ready"
@@ -569,8 +582,10 @@ def reconcile_ready_assets_with_lance(meta, *, config=None) -> int:
 def collect_reindexable_missing_video_ids(*, config=None, entries=None) -> list[str]:
     """Video ids that need vector rebuild and still have a source file on disk.
 
-    Includes ``missing_asset`` / ``broken_asset``. Skips ``missing_source`` /
-    ``sync_failed``. Existing ready libraries are never force-queued for rebuild.
+    Includes ``missing_asset`` / ``broken_asset``. Skips ``pending`` (added but
+    never synced), ``missing_source``, and ``sync_failed``. Existing ready
+    libraries are never force-queued for rebuild. Use the normal sync action
+    for ``pending`` videos.
     """
     cfg = config or load_config()
     rows = entries if entries is not None else list_library_video_entries(config=cfg, register=False)
@@ -826,8 +841,28 @@ def remove_library_videos(entries, delete_video_data, progress_callback=None) ->
     }
 
 
+def _unsynced_library_display_state(asset_state: str, stored_state: str, library_index_state: str) -> str:
+    """A library that has never been scanned is not a vector-repair case.
+
+    Older registers stored those rows as ``missing_asset``. Keep showing them as
+    ``pending`` until the first sync, which is what moves ``index_state`` off
+    ``pending``.
+    """
+    if str(asset_state or "").strip().lower() != "missing_asset":
+        return asset_state
+    if str(stored_state or "").strip().lower() != "missing_asset":
+        return asset_state
+    if str(library_index_state or "").strip().lower() != "pending":
+        return asset_state
+    return "pending"
+
+
 def _effective_asset_state(info, source_exists, vector_exists, vector_ok, lance_ready):
-    """Ready only when Lance has the video. Legacy npy alone is broken/migration pending."""
+    """Ready only when Lance has the video. Legacy npy alone is broken/migration pending.
+
+    ``pending`` means the file was registered and has never been synced. Absence
+    from Lance is expected there, and must not look like a lost index.
+    """
     stored_state = str(info.get("asset_state", "")).strip().lower()
     if not source_exists:
         return "missing_source"
@@ -836,6 +871,8 @@ def _effective_asset_state(info, source_exists, vector_exists, vector_ok, lance_
     if not lance_ready:
         if vector_exists:
             return "broken_asset"
+        if stored_state in {"", "pending"}:
+            return "pending"
         return "missing_asset"
     if not vector_ok:
         return "broken_asset"
@@ -934,10 +971,17 @@ def list_local_vector_details(validate_contents=False, *, include_storage_stats=
                     asset_state = "sync_failed"
                 elif not lance_ready and legacy_npy_exists:
                     asset_state = "broken_asset"
+                elif not lance_ready and stored_state in {"", "pending"}:
+                    asset_state = "pending"
                 elif not lance_ready:
                     asset_state = "missing_asset"
                 else:
                     asset_state = "ready"
+            asset_state = _unsynced_library_display_state(
+                asset_state,
+                stored_state,
+                str(library_data.get("index_state") or ""),
+            )
             entries.append(
                 {
                     "library_path": library_path,

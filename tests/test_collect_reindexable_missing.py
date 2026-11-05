@@ -2,7 +2,11 @@ import unittest
 from unittest.mock import patch
 
 import tests.services_test_support  # noqa: F401 - cv2/faiss stubs
-from src.services.library_service import collect_reindexable_missing_video_ids
+from src.services.library_service import (
+    _effective_asset_state,
+    _unsynced_library_display_state,
+    collect_reindexable_missing_video_ids,
+)
 
 
 class CollectReindexableMissingTests(unittest.TestCase):
@@ -16,6 +20,7 @@ class CollectReindexableMissingTests(unittest.TestCase):
             {"video_id": "d", "source_exists": True, "asset_state": "missing_source"},
             {"video_id": "e", "source_exists": True, "asset_state": "sync_failed"},
             {"video_id": "f", "source_exists": True, "asset_state": "ready"},
+            {"video_id": "g", "source_exists": True, "asset_state": "pending"},
             {"video_id": "a", "source_exists": True, "asset_state": "missing_asset"},
             {"video_id": "", "source_exists": True, "asset_state": "missing_asset"},
             "skip-me",
@@ -45,6 +50,36 @@ class CollectReindexableMissingTests(unittest.TestCase):
             {"video_id": "ok", "source_exists": True, "asset_state": "ready"},
         ]
         self.assertEqual(collect_reindexable_missing_video_ids(), [])
+
+    def test_pending_is_not_a_lost_index(self):
+        self.assertEqual(
+            _effective_asset_state(
+                {"asset_state": "pending"},
+                source_exists=True,
+                vector_exists=False,
+                vector_ok=True,
+                lance_ready=False,
+            ),
+            "pending",
+        )
+        self.assertEqual(
+            _effective_asset_state(
+                {"asset_state": "ready"},
+                source_exists=True,
+                vector_exists=False,
+                vector_ok=True,
+                lance_ready=False,
+            ),
+            "missing_asset",
+        )
+        self.assertEqual(
+            _unsynced_library_display_state("missing_asset", "missing_asset", "pending"),
+            "pending",
+        )
+        self.assertEqual(
+            _unsynced_library_display_state("missing_asset", "missing_asset", "ready"),
+            "missing_asset",
+        )
 
 
 if __name__ == "__main__":
