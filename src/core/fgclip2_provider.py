@@ -33,9 +33,6 @@ from src.storage.config_store import get_effective_prefer_gpu
 
 logger = get_logger("fgclip2_provider")
 
-# Square CLIP engines use image_size as the NCHW side. FG-CLIP2 never builds that tensor.
-PATCH_SIZE_SENTINEL = 16
-
 FGCLIP2_REQUIRED_FILES = [
     "fgclip2_vision_fp16.onnx",
     "fgclip2_text_fp16.onnx",
@@ -79,6 +76,25 @@ def build_fgclip2_profile_manifest(variant="base", *, embedding_dimension=EMBEDD
             "tokenizer_json": "tokenizer.json",
         },
     }
+
+
+def assert_text_seq_len(nodes, expected=TEXT_SEQ_LEN):
+    """Raise when the text graph's fixed sequence length is not the tokenizer length."""
+    for node in nodes or []:
+        if getattr(node, "name", "") != "input_ids":
+            continue
+        shape = list(getattr(node, "shape", None) or [])
+        if len(shape) < 2:
+            return
+        try:
+            dim = int(shape[1])
+        except (TypeError, ValueError):
+            return
+        if dim > 0 and dim != int(expected):
+            raise RuntimeError(
+                f"FG-CLIP2 text graph sequence length is {dim}, expected {int(expected)}"
+            )
+        return
 
 
 def _cast_feed(array: np.ndarray, node) -> np.ndarray:
@@ -144,16 +160,23 @@ class Fgclip2OnnxEngine(OnnxVisionBatchMixin):
         self.init_vision_batch_state(
             visual_session=self.vision_session,
             embedding_batch_size=resolve_embedding_batch_size(runtime_config),
-            image_size=PATCH_SIZE_SENTINEL,
+            image_size=224,
             using_gpu=self.using_gpu,
             backend_label=backend,
             active_providers=self.active_providers,
         )
         self._vision_inputs = list(self.vision_session.get_inputs())
         self._text_inputs = list(self.text_session.get_inputs())
+        assert_text_seq_len(self._text_inputs)
 
     def visual_model_path(self):
         return self._vision_path
+
+    def preprocess_into(self, img_bgr, out_chw):
+        raise RuntimeError("FG-CLIP2 encodes NaFlex patches, not a square NCHW tensor")
+
+    def _preprocess_frames_to_batches(self, frames):
+        raise RuntimeError("FG-CLIP2 encodes NaFlex patches, not a square NCHW tensor")
 
     def _on_visual_session_recreated(self):
         self.vision_session = self.visual_session
@@ -207,16 +230,16 @@ class Fgclip2OnnxEngine(OnnxVisionBatchMixin):
         return features
 
     def encode_images(self, frames):
+        frames = list(frames or [])
         prepared = []
-        for frame in frames or []:
+        for index, frame in enumerate(frames):
             image = self.imread_chinese(frame) if isinstance(frame, str) else frame
             if image is None:
-                continue
+                raise RuntimeError(f"FG-CLIP2 could not read frame {index}")
             try:
                 prepared.append(patchify_bgr(image))
             except ValueError as exc:
-                logger.info("Skipping FG-CLIP2 frame: %s", exc)
-                continue
+                raise RuntimeError(f"FG-CLIP2 could not patchify frame {index}: {exc}") from exc
         if not prepared:
             feature_dim = int(self._feature_dim or EMBEDDING_DIM)
             return np.empty((0, feature_dim), dtype=np.float32)
@@ -236,6 +259,10 @@ class Fgclip2OnnxEngine(OnnxVisionBatchMixin):
             for pixels, pos, mask in batches:
                 embeddings.append(self._run_vision_batch(pixels, pos, mask))
         features = np.vstack(embeddings).astype(np.float32, copy=False)
+        if features.shape[0] != len(frames):
+            raise RuntimeError(
+                f"FG-CLIP2 encoded {features.shape[0]} frames from {len(frames)} inputs"
+            )
         features /= np.linalg.norm(features, axis=-1, keepdims=True) + 1e-10
         self._feature_dim = int(features.shape[1])
         return features

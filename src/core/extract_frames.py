@@ -143,7 +143,7 @@ def _resolve_frame_layout(video_path, fps, config):
 
         height, width = naflex_pixel_size(src_h, src_w)
     else:
-        logger.info("FG-CLIP2 frame size fell back to 224 square; video dimensions were unavailable")
+        logger.warning("FG-CLIP2 frame size fell back to 224 square; video dimensions were unavailable")
         height, width = 224, 224
     vf = f"fps={float(fps):.6f},scale={int(width)}:{int(height)}:flags=bilinear"
     return int(height), int(width), vf

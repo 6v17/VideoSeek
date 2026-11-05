@@ -12,7 +12,11 @@ from src.core.fgclip2_preprocess import (
     resize_bilinear_aa,
     resize_positional_embeddings,
 )
-from src.core.fgclip2_provider import Fgclip2OnnxEngine, configure_fgclip2_tokenizer
+from src.core.fgclip2_provider import (
+    Fgclip2OnnxEngine,
+    assert_text_seq_len,
+    configure_fgclip2_tokenizer,
+)
 
 
 def test_naflex_size_keeps_aspect_and_patch_budget():
@@ -112,6 +116,45 @@ def test_encode_images_follows_embedding_batch_size():
     assert seen == [2, 2, 1]
     assert vectors.shape == (5, 768)
     assert np.allclose(np.linalg.norm(vectors, axis=1), 1.0)
+
+
+def test_encode_images_does_not_drop_a_bad_frame():
+    engine = Fgclip2OnnxEngine.__new__(Fgclip2OnnxEngine)
+    engine.embedding_batch_size = 4
+    good = np.zeros((32, 48, 3), dtype=np.uint8)
+    empty = np.zeros((0, 0, 3), dtype=np.uint8)
+    try:
+        engine.encode_images([good, empty])
+    except RuntimeError as exc:
+        assert "frame 1" in str(exc)
+    else:
+        raise AssertionError("bad frame was dropped")
+
+
+def test_square_preprocess_is_rejected():
+    engine = Fgclip2OnnxEngine.__new__(Fgclip2OnnxEngine)
+    try:
+        engine.preprocess_into(np.zeros((8, 8, 3), dtype=np.uint8), np.zeros((3, 16, 16), np.float32))
+    except RuntimeError as exc:
+        assert "NaFlex" in str(exc)
+    else:
+        raise AssertionError("square preprocess ran")
+
+
+def test_text_seq_len_must_match_the_graph():
+    class _Node:
+        def __init__(self, name, shape):
+            self.name = name
+            self.shape = shape
+
+    assert_text_seq_len([_Node("input_ids", ["batch", 64])])
+    assert_text_seq_len([_Node("input_ids", ["batch", "sequence"])])
+    try:
+        assert_text_seq_len([_Node("input_ids", [1, 77])])
+    except RuntimeError as exc:
+        assert "77" in str(exc)
+    else:
+        raise AssertionError("wrong text length was accepted")
 
 
 def test_zip_without_manifest_imports_as_fgclip2_profile():
