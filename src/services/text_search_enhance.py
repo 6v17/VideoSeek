@@ -14,6 +14,11 @@ MAX_TEXT_SEARCH_ROUTES = 4
 MAX_EXTRA_ROUTES = 3
 MAX_SYNONYMS_PER_TERM = 2
 RRF_K = 60
+# Route 0 is the original sentence. Extra phrases must not outvote it.
+ROUTE_WEIGHT_PRIMARY = 2.0
+ROUTE_WEIGHT_EXTRA = 1.0
+# 1 fps indexes land on neighboring seconds. Treat that as one shot.
+FUSION_MERGE_GAP_SEC = 2.0
 MIN_PHRASE_CHARS = 1
 MIN_LATIN_TOKEN_CHARS = 2
 MAX_CJK_NGRAM = 4
@@ -332,13 +337,20 @@ def default_text_embed_fn(text: str):
     return get_text_embedding(text)
 
 
-def search_hit_fusion_key(hit: SearchHit) -> tuple[str, str, float, float]:
-    return (
-        str(hit.video_id or ""),
-        str(hit.video_path or ""),
-        round(float(hit.start_sec or 0.0), 3),
-        round(float(hit.end_sec or 0.0), 3),
-    )
+def _fusion_video_key(hit: SearchHit) -> str:
+    video_id = str(hit.video_id or "").strip()
+    if video_id:
+        return video_id
+    return str(hit.video_path or "")
+
+
+def _matching_cluster(clusters: list[dict], video_key: str, start: float, gap: float) -> dict | None:
+    for cluster in clusters:
+        if cluster["video"] != video_key:
+            continue
+        if abs(start - float(cluster["anchor"])) <= gap:
+            return cluster
+    return None
 
 
 def rrf_fuse_search_hits(
@@ -346,30 +358,68 @@ def rrf_fuse_search_hits(
     top_k: int,
     *,
     rrf_k: int = RRF_K,
+    merge_gap_sec: float = FUSION_MERGE_GAP_SEC,
 ) -> list[SearchHit]:
-    """Reciprocal rank fusion across multi-route ANN lists."""
+    """Fuse multi-route lists.
+
+    The first list is the original sentence and counts double. Hits of the same
+    video within ``merge_gap_sec`` are one shot: a later route adds its vote,
+    but the same route does not vote twice for neighboring frames. The shown
+    frame is the one with the higher cosine. Order follows the fused rank.
+    The score stays on the cosine scale: the winning shot keeps its real
+    similarity, and the rest scale down with their fused rank so a later sort
+    by score does not undo it.
+    """
     keep = max(1, int(top_k or 1))
     k = max(1, int(rrf_k or RRF_K))
-    scores: dict[tuple[str, str, float, float], float] = {}
-    best: dict[tuple[str, str, float, float], SearchHit] = {}
-    for hits in route_hit_lists:
+    gap = max(0.0, float(merge_gap_sec))
+    clusters: list[dict] = []
+
+    for route_index, hits in enumerate(route_hit_lists):
+        weight = ROUTE_WEIGHT_PRIMARY if route_index == 0 else ROUTE_WEIGHT_EXTRA
+        voted: list[dict] = []
         for rank, hit in enumerate(hits or [], start=1):
             if not isinstance(hit, SearchHit):
                 continue
-            key = search_hit_fusion_key(hit)
-            scores[key] = scores.get(key, 0.0) + 1.0 / float(k + rank)
-            prev = best.get(key)
-            if prev is None or float(hit.score or 0.0) > float(prev.score or 0.0):
-                best[key] = hit
-    ordered = sorted(scores.items(), key=lambda item: (-item[1], -float(best[item[0]].score or 0.0)))
+            video_key = _fusion_video_key(hit)
+            start = float(hit.start_sec or 0.0)
+            cosine = float(hit.score or 0.0)
+            already = _matching_cluster(voted, video_key, start, gap)
+            if already is not None:
+                if cosine > float(already["cosine"]):
+                    already["hit"] = hit
+                    already["cosine"] = cosine
+                continue
+            cluster = _matching_cluster(clusters, video_key, start, gap)
+            if cluster is None:
+                cluster = {
+                    "video": video_key,
+                    "rrf": 0.0,
+                    "hit": hit,
+                    "anchor": start,
+                    "cosine": cosine,
+                }
+                clusters.append(cluster)
+            elif cosine > float(cluster["cosine"]):
+                cluster["hit"] = hit
+                cluster["cosine"] = cosine
+            cluster["rrf"] += weight / float(k + rank)
+            voted.append(cluster)
+
+    if not clusters:
+        return []
+    clusters.sort(key=lambda item: (-float(item["rrf"]), -float(item["cosine"])))
+    top_rrf = float(clusters[0]["rrf"]) or 1.0
+    top_cosine = max(0.0, float(clusters[0]["cosine"]))
     out: list[SearchHit] = []
-    for key, fused in ordered[:keep]:
-        hit = best[key]
+    for cluster in clusters[:keep]:
+        hit = cluster["hit"]
+        scaled = top_cosine * (float(cluster["rrf"]) / top_rrf)
         out.append(
             SearchHit(
                 start_sec=hit.start_sec,
                 end_sec=hit.end_sec,
-                score=round(float(fused), 6),
+                score=round(scaled, 6),
                 video_path=hit.video_path,
                 match_kind=hit.match_kind,
                 video_id=hit.video_id,

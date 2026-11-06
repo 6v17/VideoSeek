@@ -64,6 +64,30 @@ class TextSearchEnhanceTests(unittest.TestCase):
         fused = rrf_fuse_search_hits([[b, a], [c]], top_k=2)
         self.assertEqual(len(fused), 2)
         self.assertEqual(fused[0].video_path, "a.mp4")
+        self.assertAlmostEqual(fused[0].score, 0.9, places=3)
+
+    def test_rrf_merges_nearby_frames_and_keeps_query_route_ahead(self):
+        shot_a = SearchHit(10.0, 11.0, 0.4, "a.mp4", match_kind="frame", video_id="v1")
+        shot_a_neighbor = SearchHit(11.0, 12.0, 0.35, "a.mp4", match_kind="frame", video_id="v1")
+        other = SearchHit(40.0, 41.0, 0.9, "b.mp4", match_kind="frame", video_id="v2")
+        fused = rrf_fuse_search_hits([[other, shot_a], [shot_a_neighbor]], top_k=3)
+        self.assertEqual(fused[0].video_id, "v1")
+        self.assertEqual(fused[0].start_sec, 10.0)
+        self.assertEqual(sum(1 for hit in fused if hit.video_id == "v1"), 1)
+
+        query_only = SearchHit(1.0, 2.0, 0.3, "q.mp4", match_kind="frame", video_id="q")
+        extra_only = SearchHit(5.0, 6.0, 0.95, "e.mp4", match_kind="frame", video_id="e")
+        ordered = rrf_fuse_search_hits([[query_only], [extra_only]], top_k=2)
+        self.assertEqual(ordered[0].video_id, "q")
+        self.assertAlmostEqual(ordered[0].score, 0.3, places=3)
+        self.assertLess(ordered[1].score, ordered[0].score)
+
+        lead = SearchHit(40.0, 41.0, 0.5, "b.mp4", match_kind="frame", video_id="v2")
+        neighbor = SearchHit(10.0, 11.0, 0.2, "a.mp4", match_kind="frame", video_id="v1")
+        neighbor_next = SearchHit(11.0, 12.0, 0.19, "a.mp4", match_kind="frame", video_id="v1")
+        single_route = rrf_fuse_search_hits([[lead, neighbor, neighbor_next]], top_k=2)
+        self.assertEqual(single_route[0].video_id, "v2")
+        self.assertEqual(sum(1 for hit in single_route if hit.video_id == "v1"), 1)
 
     def test_should_enhance_gates(self):
         self.assertFalse(
