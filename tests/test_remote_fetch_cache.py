@@ -118,6 +118,28 @@ class RemoteFetchCacheTests(unittest.TestCase):
         self.assertIsNone(payload)
         mock_urlopen.assert_not_called()
 
+    @patch("src.services.remote_fetch_cache.get_app_data_dir")
+    def test_text_decode_strips_utf8_bom(self, mock_get_app_data_dir):
+        mock_get_app_data_dir.return_value = self.temp_dir
+        url = "https://cdn.example.com/version.json"
+        body_path, meta_path = remote_fetch_cache._cache_paths(remote_fetch_cache._cache_dir(), url)
+        os.makedirs(os.path.dirname(body_path), exist_ok=True)
+        with open(body_path, "wb") as handle:
+            handle.write(b'\xef\xbb\xbf{"version": "1.0.93"}\n')
+        with open(meta_path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "url": url,
+                    "fetched_at": time.time(),
+                    "expires_at": time.time() + 3600,
+                },
+                handle,
+            )
+
+        text = remote_fetch_cache.fetch_cached_text(url, kind="json")
+        self.assertTrue(text.startswith("{"))
+        self.assertEqual(json.loads(text)["version"], "1.0.93")
+
 
 if __name__ == "__main__":
     unittest.main()

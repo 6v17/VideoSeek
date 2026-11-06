@@ -111,7 +111,9 @@ def fetch_cached_text(url, *, kind="json", **kwargs):
     if payload is None:
         return None
     try:
-        return payload.decode("utf-8")
+        # utf-8-sig drops a leading BOM. version.json on OSS is saved with one,
+        # and json.loads rejects that prefix.
+        return payload.decode("utf-8-sig")
     except UnicodeDecodeError:
         logger.warning("Cached payload for %s is not valid UTF-8 text", url)
         return None
