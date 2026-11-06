@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 
 _lock = threading.Lock()
 _index_sync_in_progress = False
+_index_prepare_in_progress = False
 _index_sync_target_library_path: Optional[str] = None
 _index_sync_progress_current = 0
 _index_sync_progress_total = 0
@@ -20,12 +21,13 @@ class IndexSyncBusyError(RuntimeError):
 def try_acquire_index_sync(target_library_path: Optional[str] = None) -> bool:
     """Claim the process-wide index-sync slot. Returns False if already held."""
     with _lock:
-        global _index_sync_in_progress, _index_sync_target_library_path
+        global _index_sync_in_progress, _index_prepare_in_progress, _index_sync_target_library_path
         global _index_sync_progress_current, _index_sync_progress_total
         global _index_sync_active_library_path
         if _index_sync_in_progress:
             return False
         _index_sync_in_progress = True
+        _index_prepare_in_progress = False
         target = str(target_library_path or "").strip()
         _index_sync_target_library_path = target or None
         _index_sync_progress_current = 0
@@ -56,12 +58,25 @@ def set_index_sync_progress(
             _index_sync_active_library_path = active
 
 
+def set_index_prepare_running(active: bool, target_library_path: Optional[str] = None) -> None:
+    """Scan-before-index phase. Reported as syncing, but does not hold the index slot."""
+    with _lock:
+        global _index_prepare_in_progress, _index_sync_target_library_path
+        _index_prepare_in_progress = bool(active)
+        if active:
+            target = str(target_library_path or "").strip()
+            _index_sync_target_library_path = target or None
+        elif not _index_sync_in_progress:
+            _index_sync_target_library_path = None
+
+
 def clear_index_sync_running() -> None:
     with _lock:
-        global _index_sync_in_progress, _index_sync_target_library_path
+        global _index_sync_in_progress, _index_prepare_in_progress, _index_sync_target_library_path
         global _index_sync_progress_current, _index_sync_progress_total
         global _index_sync_active_library_path
         _index_sync_in_progress = False
+        _index_prepare_in_progress = False
         _index_sync_target_library_path = None
         _index_sync_progress_current = 0
         _index_sync_progress_total = 0
@@ -71,7 +86,7 @@ def clear_index_sync_running() -> None:
 def get_index_sync_status() -> Dict[str, Any]:
     with _lock:
         return {
-            "index_sync_in_progress": bool(_index_sync_in_progress),
+            "index_sync_in_progress": bool(_index_sync_in_progress or _index_prepare_in_progress),
             "index_sync_target_library_path": _index_sync_target_library_path,
             "index_sync_progress_current": int(_index_sync_progress_current),
             "index_sync_progress_total": int(_index_sync_progress_total),

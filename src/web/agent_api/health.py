@@ -179,7 +179,20 @@ def _build_capabilities(
         "timeline_export": True,
         "nle_xml_export": True,
         "jianying_draft": _jianying_draft_available(),
+        "index_sync": _index_sync_available(),
     }
+
+
+def _index_sync_available() -> bool:
+    try:
+        from src.services.agent_index_sync import agent_index_sync_available
+
+        return bool(agent_index_sync_available())
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(_swallowed, "src/web/agent_api/health.py:index_sync")
+        return False
 
 
 def _jianying_draft_available() -> bool:
@@ -233,6 +246,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
     tag_ready = bool(tag_stats.get("tag_index_ready"))
     from src.services.clip_export_service import export_path_guard_strict, list_export_allowed_roots
     from src.services.search_edge_filter import get_search_skip_ranges_text
+    from src.services.search_skip_ranges import search_skip_ranges_display
 
     export_strict = bool(export_path_guard_strict(config))
     export_roots = list_export_allowed_roots(config)
@@ -290,6 +304,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "tag_match_modes": ["exact", "fuzzy"],
         "text_search_enhance_enabled": bool(get_text_search_enhance_enabled(config)),
         "search_skip_ranges": skip_ranges,
+        "search_skip_ranges_display": search_skip_ranges_display(skip_ranges),
         "team": _build_team_health(config),
         "export_path_guard_strict": export_strict,
         "export_allowed_roots": export_roots,

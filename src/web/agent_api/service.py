@@ -29,7 +29,11 @@ from .schemas import (
     AgentBatchExportClipsRequest,
     AgentBatchFrameExtractRequest,
     AgentBatchSearchRequest,
+    AgentAddLibraryRequest,
     AgentExportClipRequest,
+    AgentIncludeVideosRequest,
+    AgentIndexSyncRequest,
+    AgentLibraryRefreshRequest,
     AgentFrameExtractRequest,
     AgentManifestRequest,
     AgentSearchRequest,
@@ -79,6 +83,10 @@ class AgentApiService:
         self.app.get("/api/v1/agent-starter")(self._agent_starter)
         self.app.get("/api/v1/agent-doc")(self._agent_doc)
         self.app.get("/api/v1/libraries")(self._libraries)
+        self.app.post("/api/v1/libraries")(self._add_library)
+        self.app.post("/api/v1/libraries/include")(self._include_videos)
+        self.app.post("/api/v1/libraries/refresh")(self._refresh_libraries)
+        self.app.post("/api/v1/index/sync")(self._index_sync)
         self.app.get("/api/v1/libraries/videos")(self._library_videos)
         self.app.get("/api/v1/videos")(self._videos)
         self.app.get("/api/v1/subtitle-libraries")(self._subtitle_libraries)
@@ -264,6 +272,61 @@ class AgentApiService:
         except Exception as exc:
             logger.exception("Agent library list failed.")
             raise_api_error(500, "query_failed", str(exc))
+
+    async def _add_library(self, body: AgentAddLibraryRequest):
+        from src.services.agent_index_sync import AgentIndexSyncRejected, execute_agent_add_library
+
+        library_path = str(getattr(body, "library_path", "") or "").strip()
+        try:
+            return await asyncio.to_thread(execute_agent_add_library, library_path)
+        except AgentIndexSyncRejected as exc:
+            raise_api_error(exc.status_code, exc.code, exc.message)
+        except Exception as exc:
+            logger.exception("Agent add library failed.")
+            raise_api_error(500, "failed", str(exc))
+
+    async def _include_videos(self, body: AgentIncludeVideosRequest):
+        from src.services.agent_index_sync import AgentIndexSyncRejected, execute_agent_include_videos
+
+        video_paths = list(getattr(body, "video_paths", None) or [])
+        try:
+            return await asyncio.to_thread(execute_agent_include_videos, video_paths)
+        except AgentIndexSyncRejected as exc:
+            raise_api_error(exc.status_code, exc.code, exc.message)
+        except Exception as exc:
+            logger.exception("Agent include videos failed.")
+            raise_api_error(500, "failed", str(exc))
+
+    async def _refresh_libraries(self, body: Optional[AgentLibraryRefreshRequest] = None):
+        from src.services.agent_index_sync import AgentIndexSyncRejected, execute_agent_library_refresh
+
+        library_path = str(getattr(body, "library_path", "") or "").strip() or None
+        try:
+            return await asyncio.to_thread(execute_agent_library_refresh, library_path)
+        except AgentIndexSyncRejected as exc:
+            raise_api_error(exc.status_code, exc.code, exc.message)
+        except Exception as exc:
+            logger.exception("Agent library refresh failed.")
+            raise_api_error(500, "failed", str(exc))
+
+    async def _index_sync(self, body: Optional[AgentIndexSyncRequest] = None):
+        from src.services.agent_index_sync import AgentIndexSyncRejected, execute_agent_index_sync
+
+        library_path = str(getattr(body, "library_path", "") or "").strip() or None
+        video_ids = getattr(body, "video_ids", None)
+        video_paths = getattr(body, "video_paths", None)
+        try:
+            return await asyncio.to_thread(
+                execute_agent_index_sync,
+                library_path,
+                video_ids,
+                video_paths,
+            )
+        except AgentIndexSyncRejected as exc:
+            raise_api_error(exc.status_code, exc.code, exc.message)
+        except Exception as exc:
+            logger.exception("Agent index sync failed.")
+            raise_api_error(500, "failed", str(exc))
 
     async def _subtitle_libraries(self):
         try:

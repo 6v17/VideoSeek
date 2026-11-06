@@ -767,6 +767,311 @@ class LibraryIndexingGuiMixin:
             self._end_library_register_ui()
             self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
 
+    def start_agent_library_sync(self, library_paths, video_ids=None):
+        """Register then index libraries, or index the given videos only."""
+        from src.services.indexing_runtime_status import set_index_prepare_running
+        from src.services.team_mode_service import is_team_client_mode
+
+        paths = [str(path or "").strip() for path in (library_paths or []) if str(path or "").strip()]
+        if is_team_client_mode():
+            return {"accepted": False, "reason": "team_client"}
+        if self.is_startup_migration_busy():
+            return {"accepted": False, "reason": "migration_busy"}
+        if not self.check_runtime_resources(show_dialog=False):
+            return {"accepted": False, "reason": "model_unavailable"}
+        if (
+            self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+            or self._remove_selected_videos_worker_running()
+        ):
+            return {"accepted": False, "reason": "already_running"}
+        if not paths:
+            return {"accepted": False, "reason": "no_libraries"}
+
+        ids = [str(item).strip() for item in (video_ids or []) if str(item or "").strip()]
+        target = paths[0] if len(paths) == 1 else None
+        if ids:
+            set_index_prepare_running(True, target)
+            started = self._start_index_update(
+                target_lib=target,
+                rebuild_global_assets=False,
+                video_ids=ids,
+            )
+            if not started:
+                return {"accepted": False, "reason": "already_running"}
+            return {
+                "accepted": True,
+                "reason": "started",
+                "library_paths": paths,
+                "video_ids": ids,
+            }
+
+        set_index_prepare_running(True, target)
+        self._begin_library_register_ui()
+        started = self.indexing_controller.start_register(
+            paths,
+            then_index=True,
+            index_kwargs={
+                "target_lib": target,
+                "rebuild_global_assets": False,
+                "video_ids": None,
+            },
+        )
+        if not started:
+            set_index_prepare_running(False)
+            self._end_library_register_ui()
+            return {"accepted": False, "reason": "already_running"}
+        return {"accepted": True, "reason": "started", "library_paths": paths}
+
+    def start_agent_library_refresh(self, library_paths):
+        """Rescan libraries into the video list. Does not index. GUI thread. No dialogs."""
+        from src.services.indexing_runtime_status import set_index_prepare_running
+        from src.services.team_mode_service import is_team_client_mode
+
+        paths = [str(path or "").strip() for path in (library_paths or []) if str(path or "").strip()]
+        if is_team_client_mode():
+            return {"accepted": False, "reason": "team_client"}
+        if self.is_startup_migration_busy():
+            return {"accepted": False, "reason": "migration_busy"}
+        if (
+            self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+            or self._remove_selected_videos_worker_running()
+        ):
+            return {"accepted": False, "reason": "already_running"}
+        if not paths:
+            return {"accepted": False, "reason": "no_libraries"}
+
+        target = paths[0] if len(paths) == 1 else None
+        set_index_prepare_running(True, target)
+        self._begin_library_register_ui()
+        started = self.indexing_controller.start_register(
+            paths,
+            then_index=False,
+            context={"finish_kind": "refresh"},
+        )
+        if not started:
+            set_index_prepare_running(False)
+            self._end_library_register_ui()
+            return {"accepted": False, "reason": "already_running"}
+        return {"accepted": True, "reason": "started", "library_paths": paths}
+
+    def start_agent_include_videos(self, plan):
+        """Add or refresh the folders behind the user's videos, then index those videos."""
+        from src.services.indexing_runtime_status import set_index_prepare_running
+        from src.services.library_service import add_library
+        from src.services.team_mode_service import is_team_client_mode
+
+        plan = dict(plan or {})
+        accepted = [dict(item) for item in (plan.get("accepted_videos") or []) if isinstance(item, dict)]
+        rejected = [dict(item) for item in (plan.get("rejected") or []) if isinstance(item, dict)]
+        if is_team_client_mode():
+            return {"accepted": False, "reason": "team_client"}
+        if self.is_startup_migration_busy():
+            return {"accepted": False, "reason": "migration_busy"}
+        if not self.check_runtime_resources(show_dialog=False):
+            return {"accepted": False, "reason": "model_unavailable"}
+        if (
+            self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+            or self._remove_selected_videos_worker_running()
+        ):
+            return {"accepted": False, "reason": "already_running"}
+
+        added_paths = []
+        failed_folders = set()
+        for folder in list(plan.get("libraries_to_add") or []):
+            try:
+                result = add_library(folder)
+            except Exception as exc:
+                failed_folders.add(os.path.normcase(os.path.normpath(str(folder))))
+                for item in accepted:
+                    if os.path.normcase(os.path.normpath(str(item.get("library_path") or ""))) == os.path.normcase(
+                        os.path.normpath(str(folder))
+                    ):
+                        rejected.append(
+                            {
+                                "video_path": item.get("video_path") or "",
+                                "reason": "failed",
+                                "message": str(exc),
+                            }
+                        )
+                continue
+            folder_key = os.path.normcase(os.path.normpath(str(folder)))
+            if result.get("added") or str(result.get("reason") or "") == "exists":
+                added_paths.append(str(result.get("path") or folder))
+                canonical = str(result.get("path") or folder)
+                for item in accepted:
+                    if os.path.normcase(os.path.normpath(str(item.get("library_path") or ""))) == folder_key:
+                        item["library_path"] = canonical
+                continue
+            failed_folders.add(folder_key)
+            conflict = str(result.get("conflict_path") or "").strip()
+            for item in list(accepted):
+                if os.path.normcase(os.path.normpath(str(item.get("library_path") or ""))) != folder_key:
+                    continue
+                row = {"video_path": item.get("video_path") or "", "reason": "library_overlap"}
+                if conflict:
+                    row["conflict_path"] = conflict
+                rejected.append(row)
+        if failed_folders:
+            accepted = [
+                item
+                for item in accepted
+                if os.path.normcase(os.path.normpath(str(item.get("library_path") or ""))) not in failed_folders
+            ]
+        video_paths = [str(item.get("video_path") or "") for item in accepted if str(item.get("video_path") or "").strip()]
+        if not video_paths:
+            return {
+                "accepted": False,
+                "reason": "rejected",
+                "rejected": rejected,
+                "video_paths": [],
+                "library_paths": [],
+                "libraries_added": added_paths,
+            }
+
+        register_paths = []
+        known_ids = []
+        for item in accepted:
+            library_path = str(item.get("library_path") or "").strip()
+            video_id = str(item.get("video_id") or "").strip()
+            if item.get("action") in {"refresh", "add"} and library_path and library_path not in register_paths:
+                register_paths.append(library_path)
+            if video_id:
+                known_ids.append(video_id)
+        library_paths = []
+        for item in accepted:
+            library_path = str(item.get("library_path") or "").strip()
+            if library_path and library_path not in library_paths:
+                library_paths.append(library_path)
+
+        if not register_paths:
+            target = library_paths[0] if len(library_paths) == 1 else None
+            set_index_prepare_running(True, target)
+            started = self._start_index_update(
+                target_lib=target,
+                rebuild_global_assets=False,
+                video_ids=known_ids,
+            )
+            if not started:
+                return {"accepted": False, "reason": "already_running", "rejected": rejected}
+            return {
+                "accepted": True,
+                "reason": "started",
+                "video_paths": video_paths,
+                "video_ids": known_ids,
+                "library_paths": library_paths,
+                "libraries_added": added_paths,
+                "rejected": rejected,
+            }
+
+        target = register_paths[0] if len(register_paths) == 1 else None
+        set_index_prepare_running(True, target)
+        self._begin_library_register_ui()
+        started = self.indexing_controller.start_register(
+            register_paths,
+            then_index=False,
+            context={"finish_kind": "include", "include_video_paths": video_paths},
+        )
+        if not started:
+            set_index_prepare_running(False)
+            self._end_library_register_ui()
+            return {"accepted": False, "reason": "already_running", "rejected": rejected}
+        return {
+            "accepted": True,
+            "reason": "started",
+            "video_paths": video_paths,
+            "library_paths": library_paths,
+            "libraries_added": added_paths,
+            "rejected": rejected,
+        }
+
+    def _start_include_index(self, video_paths):
+        from src.services.agent_index_sync import _catalog_videos
+        from src.services.indexing_runtime_status import set_index_prepare_running
+        from src.services.search_scope import normalize_scope_path
+
+        _by_id, by_path = _catalog_videos()
+        ids = []
+        libraries = []
+        for raw in video_paths or []:
+            hit = by_path.get(normalize_scope_path(str(raw or "")))
+            if not hit:
+                continue
+            video_id, library_path = hit
+            if video_id and video_id not in ids:
+                ids.append(video_id)
+            if library_path and library_path not in libraries:
+                libraries.append(library_path)
+        if not ids:
+            set_index_prepare_running(False)
+            self.library_page.lbl_status.setText(self.texts.get("index_updated_empty", ""))
+            return
+        target = libraries[0] if len(libraries) == 1 else None
+        self._start_index_update(
+            target_lib=target,
+            rebuild_global_assets=False,
+            video_ids=ids,
+        )
+
+    def start_agent_add_library(self, library_path):
+        """Add one visual library, then register and index it. GUI thread. No dialogs."""
+        from src.services.indexing_runtime_status import set_index_prepare_running
+        from src.services.library_service import add_library
+        from src.services.team_mode_service import is_team_client_mode
+
+        if is_team_client_mode():
+            return {"accepted": False, "reason": "team_client"}
+        if self.is_startup_migration_busy():
+            return {"accepted": False, "reason": "migration_busy"}
+        if not self.check_runtime_resources(show_dialog=False):
+            return {"accepted": False, "reason": "model_unavailable"}
+        if (
+            self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+            or self._remove_selected_videos_worker_running()
+        ):
+            return {"accepted": False, "reason": "already_running"}
+
+        try:
+            result = add_library(library_path)
+        except Exception as exc:
+            return {"accepted": False, "reason": "failed", "message": str(exc)}
+        path = str(result.get("path") or library_path or "").strip()
+        if not result.get("added"):
+            payload = {
+                "accepted": False,
+                "reason": str(result.get("reason") or "exists"),
+                "library_path": path,
+            }
+            conflict = str(result.get("conflict_path") or "").strip()
+            if conflict:
+                payload["conflict_path"] = conflict
+            return payload
+
+        set_index_prepare_running(True, path)
+        self._begin_library_register_ui()
+        started = self.indexing_controller.start_register(
+            [path],
+            then_index=True,
+            index_kwargs={
+                "target_lib": path,
+                "rebuild_global_assets": False,
+                "video_ids": None,
+            },
+            context={"finish_kind": "library_added"},
+        )
+        if not started:
+            set_index_prepare_running(False)
+            self._end_library_register_ui()
+            return {"accepted": False, "reason": "already_running", "added": True, "library_path": path}
+        return {"accepted": True, "reason": "started", "added": True, "library_path": path}
+
     def _begin_library_register_ui(self):
         self.library_page.btn_sync_db.setEnabled(False)
         self.library_page.btn_refresh_visual_library.setEnabled(False)
@@ -835,6 +1140,15 @@ class LibraryIndexingGuiMixin:
         then_index = bool(result.get("then_index"))
         subtitle_mode = bool(result.get("subtitle_mode")) or str(result.get("mode") or "") == "subtitle"
         finish_kind = str(result.get("finish_kind") or "refresh").strip() or "refresh"
+        include_paths = [
+            str(path).strip()
+            for path in (result.get("include_video_paths") or [])
+            if str(path or "").strip()
+        ]
+        if not success or (not then_index and not include_paths):
+            from src.services.indexing_runtime_status import set_index_prepare_running
+
+            set_index_prepare_running(False)
         if not success:
             self._end_library_register_ui()
             error = str(result.get("error") or "").strip()
@@ -848,6 +1162,10 @@ class LibraryIndexingGuiMixin:
             self._end_library_register_ui()
             index_kwargs = dict(result.get("index_kwargs") or {})
             self.start_update_index(**index_kwargs)
+            return
+        if include_paths:
+            self._end_library_register_ui()
+            self._start_include_index(include_paths)
             return
 
         self._end_library_register_ui()
@@ -2444,9 +2762,12 @@ class LibraryIndexingGuiMixin:
         video_ids=None,
     ):
         try:
+            from src.services.indexing_runtime_status import set_index_prepare_running
+
             if not self.check_runtime_resources():
+                set_index_prepare_running(False)
                 self.library_page.lbl_status.setText(self.texts["model_features_disabled"])
-                return
+                return False
             if not getattr(self, "_runtime_warmup_ready", False):
                 self.ensure_runtime_warmup(
                     lambda: self._start_index_update(
@@ -2459,15 +2780,16 @@ class LibraryIndexingGuiMixin:
                         video_ids=video_ids,
                     )
                 )
-                return
+                return True
             self.switch_page("library")
             if (
                 self.indexing_controller.is_busy()
                 or self._dialogue_index_running()
                 or self._remove_library_worker_running()
             ):
+                set_index_prepare_running(False)
                 self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
-                return
+                return False
             self.library_page.btn_sync_db.setEnabled(False)
             self.library_page.btn_refresh_visual_library.setEnabled(False)
             if hasattr(self.library_page, "btn_fix_missing_vectors"):
@@ -2510,11 +2832,22 @@ class LibraryIndexingGuiMixin:
                 self.ui_state.set_indexing_running(True)
                 if hasattr(self, "_sync_tray_stop_action"):
                     self._sync_tray_stop_action()
+            else:
+                set_index_prepare_running(False)
+                self._refresh_search_session_hint()
+                if hasattr(self, "_refresh_understanding_ui"):
+                    self._refresh_understanding_ui()
+                return False
             self._refresh_search_session_hint()
             if hasattr(self, "_refresh_understanding_ui"):
                 self._refresh_understanding_ui()
+            return True
         except Exception as exc:
+            from src.services.indexing_runtime_status import set_index_prepare_running
+
+            set_index_prepare_running(False)
             self.show_error_dialog(self.texts["index_start_failed"], exc)
+            return False
 
     def stop_update_index(self):
         if self._dialogue_index_running():

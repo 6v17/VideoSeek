@@ -7,6 +7,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.utils import get_resource_path
+from src.services.search_skip_ranges import search_skip_ranges_display
 
 # Relative to VideoSeek install / repo root (same layout for dev and Nuitka output).
 AGENT_DOC_REL = "docs/for-agents.md"
@@ -95,7 +96,10 @@ def _build_user_capability_bullets(
 
     if lang == "en":
         if not health.get("index_ready"):
-            bullets.append("Index not ready — ask the user to sync libraries in VideoSeek first.")
+            bullets.append(
+                "Index not ready — POST /index/sync to sync existing libraries "
+                "(does not add a folder). Results may be incomplete until it finishes."
+            )
         elif health.get("index_sync_in_progress"):
             bullets.append("Library sync running — results may be incomplete until it finishes.")
         else:
@@ -151,7 +155,7 @@ def _build_user_capability_bullets(
         return bullets[:8]
 
     if not health.get("index_ready"):
-        bullets.append("索引未就绪 — 请让用户在 VideoSeek 里先同步视频库。")
+        bullets.append("索引未就绪 — 可 POST /index/sync 同步已有视频库（不新增文件夹），完成前搜索可能不完整。")
     elif health.get("index_sync_in_progress"):
         bullets.append("库正在同步 — 完成前搜索结果可能不完整。")
     else:
@@ -263,23 +267,31 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
     if lang == "en":
         return (
             "## Policy kernel (ONLY binding)\n"
-            f"1. index_ready false → stop; ask user to sync.\n"
+            f"1. User gave video files: POST {api_base}/libraries/include (server picks the parent folder; "
+            "registers the whole folder; indexes only those files). "
+            f"Folder changes: POST {api_base}/libraries/refresh then GET /videos?ready_only=false. "
+            f"Whole library: POST {api_base}/index/sync. Never invent a path.\n"
             f"2. DEFAULT: one POST {batch_url} + export.output_dir for mp4. "
             f"Preset: {preset_body} | Folder: {folder_body}\n"
             "3. preset_id from snapshot or GET /search/presets; video_path only from API — never guess paths.\n"
             "4. Visual text search: YOU may set text_enhance true/false "
-            "(phrase/synonym routes + CLIP pick + RRF; not plot LLM; check meta.text_enhance_applied).\n"
+            "(phrase/synonym routes + CLIP pick + RRF; original query outweighs extras; "
+            "hits within 2s collapse; score stays a similarity; not plot LLM; "
+            "check meta.text_enhance_applied).\n"
             "5. Non-default (user must ask): manifest, precise/preview_anchor_sec, intermediate JSON files.\n"
             f"6. Scope: GET {api_base}/libraries / GET {api_base}/videos when needed."
         )
     return (
         "## Policy kernel（唯一 binding）\n"
-        f"1. index_ready false → 停止，让用户同步索引。\n"
+        f"1. 用户给出视频文件：POST {api_base}/libraries/include（服务端定父目录，整夹登记，只索引这些文件）。"
+        f"文件夹有变动：POST {api_base}/libraries/refresh，再 GET /videos?ready_only=false。"
+        f"整库：POST {api_base}/index/sync。轮询 index_sync_in_progress。禁止猜路径。\n"
         f"2. 默认：一次 POST {batch_url}，要 mp4 同 body 加 export.output_dir。"
         f"Preset：{preset_body} | 截图文件夹：{folder_body}\n"
         "3. preset_id 来自快照或 GET /search/presets；video_path 只来自 API — 禁止猜路径。\n"
         "4. 画面文搜：由你传 text_enhance true/false"
-        "（短语/同义多路 + CLIP 挑选 + RRF；非剧情大模型；看 meta.text_enhance_applied）。\n"
+        "（短语/同义多路 + CLIP 挑选 + RRF；原句优先，2 秒内并成一镜，score 仍是相似度；"
+        "非剧情大模型；看 meta.text_enhance_applied）。\n"
         "5. 非默认（须用户要求）：manifest、precise/preview_anchor_sec、中间 JSON 文件。\n"
         f"6. 缩 scope：GET {api_base}/libraries / GET {api_base}/videos。"
     )
@@ -338,6 +350,10 @@ def build_agent_starter_text(
         "tag_match_modes": health.get("tag_match_modes") or ["exact", "fuzzy"],
         "text_search_enhance_enabled": bool(health.get("text_search_enhance_enabled")),
         "search_skip_ranges": str(health.get("search_skip_ranges") or ""),
+        "search_skip_ranges_display": str(
+            health.get("search_skip_ranges_display")
+            or search_skip_ranges_display(health.get("search_skip_ranges") or "")
+        ),
         "search_presets": preset_summaries,
     }
     if preset_total > len(preset_summaries):

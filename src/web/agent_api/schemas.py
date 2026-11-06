@@ -196,6 +196,32 @@ class AgentBatchExportClipItem(BaseModel):
     encode_mode: Optional[str] = None
 
 
+class AgentAddLibraryRequest(BaseModel):
+    """Add one existing folder as a visual library, then register and index it."""
+
+    library_path: str
+
+
+class AgentIncludeVideosRequest(BaseModel):
+    """Register the folders behind these videos, then index only these files."""
+
+    video_paths: List[str]
+
+
+class AgentLibraryRefreshRequest(BaseModel):
+    """Rescan libraries into the video list. Does not index."""
+
+    library_path: Optional[str] = None
+
+
+class AgentIndexSyncRequest(BaseModel):
+    """Sync libraries, or only the listed videos. Omit both video fields to sync a whole library."""
+
+    library_path: Optional[str] = None
+    video_ids: Optional[List[str]] = None
+    video_paths: Optional[List[str]] = None
+
+
 class AgentBatchExportClipsRequest(BaseModel):
     items: List[AgentBatchExportClipItem] = Field(default_factory=list)
     silent: Optional[bool] = None

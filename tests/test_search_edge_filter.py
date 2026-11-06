@@ -235,6 +235,16 @@ class SearchEdgeFilterTests(unittest.TestCase):
         self.assertEqual(server["summary"], "0:00–1:30")
         self.assertIn("对所有用户生效", server["tooltip"])
 
+    def test_api_meta_exposes_clock_display(self):
+        with patch(
+            "src.services.search_edge_filter.get_search_skip_ranges_text",
+            return_value="0-90; 10:00-12:00",
+        ):
+            meta = skip_edges_api_meta()
+        self.assertEqual(meta["search_skip_ranges"], "0-90; 10:00-12:00")
+        self.assertEqual(meta["search_skip_ranges_display"], "0:00–1:30; 10:00–12:00")
+        self.assertTrue(meta["search_skip_edges_applied"])
+
     def test_from_end_loads_indexed_ends_when_timestamps_were_not_materialized(self):
         cfg = {
             "search_skip_edges_enabled": True,

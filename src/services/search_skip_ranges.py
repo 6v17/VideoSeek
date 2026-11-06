@@ -208,6 +208,12 @@ def _format_clock(seconds) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def search_skip_ranges_display(text: str) -> str:
+    """Clock form of the stored skip rules, for API clients."""
+    parts = [part.strip() for part in str(text or "").split(";") if part.strip()]
+    return "; ".join(friendly_skip_range_label(part) for part in parts)
+
+
 def format_search_skip_range_item(rule: dict) -> str:
     kind = str(rule.get("kind") or "")
     if kind == "from_end":

@@ -13,7 +13,7 @@
 | 前提 | 动作 |
 |------|------|
 | VideoSeek 运行中 | 设置 → **搜索接口** → 选 **本机 Agent API** → 保存 |
-| `index_ready: true` | 否则让用户在软件里同步索引 |
+| `index_ready: true` | 否则可 `POST /index/sync` 同步已有视频库（不新增文件夹） |
 | 基址 | `http://127.0.0.1:8765/api/v1`（仅 `127.0.0.1`，无鉴权） |
 | 与团队模式区分 | **服务机 / 用户机**走局域网共享检索，**不是**本文的本机 Agent HTTP；Agent 仍只连本机 `127.0.0.1`。服务机 LAN 绑定需分享 URL 中的 `?token=`（或 `Authorization: Bearer`），且 `/frames/extract` 仅允许已索引库路径 |
 
@@ -25,6 +25,10 @@
 | GET | `/agent-starter` | 粘贴块 + 实时快照 |
 | GET | `/agent-doc` | 完整本文 |
 | GET | `/libraries` | **画面库**列表 → `scope.library_paths`（CLIP） |
+| POST | `/libraries` | 添加一个已有文件夹为画面库，并接着登记、索引 |
+| POST | `/libraries/include` | 用户给出视频文件：登记所在文件夹，只索引这些文件 |
+| POST | `/libraries/refresh` | 重新扫描已有库，更新视频列表。不索引 |
+| POST | `/index/sync` | 同步整库，或只同步 `video_ids` / `video_paths` 里的视频 |
 | GET | `/videos` | 已同步视频列表（全库；可选 `library_path` 筛选）→ `video_path` / `scope.video_paths` |
 | GET | `/libraries/videos` | 同 `/videos`，兼容旧路径 |
 | GET | `/subtitle-libraries` | **字幕库**列表（全局字幕库，与画面库独立） |
@@ -116,13 +120,13 @@
 `match_mode`（`search_kind=dialogue` 或 `tags`）：`exact` \| `fuzzy`（及 `auto`）；团队用户机也可把同一值放在 `search_mode` 里透传。`fuzzy` 优先完整子字段命中，再按散落命中率排序。  
 `text_enhance`（仅**画面文搜** `query_type=text`）：**由 Agent 按需开关**——`true`/`false` 覆盖本机/服务机面板默认；省略则跟 `/health.text_search_enhance_enabled`。frame 与 chunk 均可。响应看 `meta.text_enhance`（意图）与 `meta.text_enhance_applied`（是否真的跑了增强）。图搜、`query_vector` 预计算、dialogue/tags **不走**增强。
 
-**跳过时段不是请求字段。** 画面搜索（`search_kind=visual`，含 frame/chunk）使用服务机桌面「跳过时段」。这条规则对所有 Agent 和用户机生效，请求体不能单独覆盖。当前规则见 `/health` 的 `search_skip_ranges`（空字符串表示不过滤），画面搜索响应另有 `meta.search_skip_ranges` 与 `meta.search_skip_edges_applied`。台词（`dialogue`）和标签（`tags`）搜索不走这道过滤。
+**跳过时段不是请求字段。** 画面搜索（`search_kind=visual`，含 frame/chunk）使用桌面「跳过时段」。这条规则对所有 Agent 和用户机生效，请求体不能单独覆盖。`search_skip_ranges` 是保存的原文，多段用 `;` 隔开：`0-90` 是每条视频的 0–90 秒，`10:00-12:00` 是 10 分到 12 分。同一段套在每一条视频上；结果和其中任一段有交集就会被去掉。多段彼此重叠会先并成并集。可读时钟见 `search_skip_ranges_display`（如 `0:00–1:30`）。空字符串表示不过滤。某条视频去掉这些时段后剩下不足 30 秒时，这条视频整段保留、不再过滤。台词（`dialogue`）和标签（`tags`）搜索不走这道过滤。
 
 **文搜增强在做什么（预期管理）：**
 
 1. 从查询拆短语，并做有限同义扩展（规则表，不是大模型改写整句）。  
 2. 用 CLIP 在原文与候选短语间挑最多约 **4** 路语义相近且彼此不太重复的查询。  
-3. 各路分别 ANN 检索，再用 **RRF** 融合排序（命中分变成融合分，与单路 CLIP 分数不可直接对比）。  
+3. 各路分别 ANN 检索，再用 **RRF** 融合。原句那一路的权重是其余路的两倍。同一条视频里相距 2 秒以内的命中并成一条，同一路不会给相邻帧投两次票。排序按融合票数。返回的 `score` 仍在相似度尺度上：第一条保留它自己的余弦，后面的按票数比例缩小，按 `score` 排序不会打乱这次顺序。`min_score` 仍是相对本次最高分的差距。  
 
 **适合：** 复合画面描述（多物体/属性/场景）、口语化或同义说法多的查询。  
 **不适合当万能：** 不会理解剧情推理；不会把「找某句台词」变成字幕检索（台词用 `search_kind=dialogue`）；不会把「按标签找」变成画面检索（标签用 `search_kind=tags`）；过短/无有效短语时可能 `text_enhance_applied=false` 退回普通单路文搜；更慢、占更多搜索槽。召回变宽时噪声也可能变多——无结果可开增强重试，已经过噪可 `text_enhance=false`。
@@ -143,12 +147,14 @@
 | `index_sync_in_progress` | 桌面是否正在同步/重建索引；为 true 时搜索结果可能不完整 |
 | `index_sync_target_library_path` | 同步中的库路径；省略表示全库或未知 |
 | `index_stale` / `global_index_state` | 兼容字段；本地搜索实际以 Lance 是否就绪、桌面是否在同步为准 |
-| `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `dialogue_search`, `tag_search`, `subtitle_library_discovery`, `library_discovery`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate`, `frame_extract`, `batch_frame_extract`, `timeline_export`, `nle_xml_export`, `jianying_draft` 等 |
+| `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `dialogue_search`, `tag_search`, `subtitle_library_discovery`, `library_discovery`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate`, `frame_extract`, `batch_frame_extract`, `timeline_export`, `nle_xml_export`, `jianying_draft`, `index_sync` 等 |
+| `index_sync_progress_current` / `index_sync_progress_total` | 索引进度。登记新文件阶段 `index_sync_in_progress` 也会是 true，但进度数还可能是 0 |
 | `dialogue_index_ready` / `dialogue_indexed_videos` / `dialogue_rows` | 硬字幕索引是否可用及规模 |
 | `dialogue_match_modes` | 台词检索可选匹配：`["exact","fuzzy"]` |
 | `tag_index_ready` / `tag_indexed_videos` / `tag_rows` | VLM 标签投影是否可用及规模（权威稿仍在理解页 JSON） |
 | `tag_match_modes` | 标签检索可选匹配：`["exact","fuzzy"]` |
 | `text_search_enhance_enabled` | 服务机默认是否开启画面文搜增强（请求可用 `text_enhance` 覆盖） |
+| `search_skip_ranges` / `search_skip_ranges_display` | 桌面跳过时段原文与可读时钟。空字符串表示不过滤。不是请求字段 |
 | `ffmpeg.ffmpeg_available` | 为 false 则无法导出 |
 | `model`, `provider`, `embedding_space`, `dimension`, `metric` | 当前 embedding |
 | `search_mode_default` / `search_mode_checked` | 默认与本次检查的 mode |
@@ -210,7 +216,86 @@
 
 ---
 
-### 4.4b `GET /subtitle-libraries`
+### 4.4a `POST /libraries`
+
+把用户给出的文件夹加进画面库，然后登记视频并开始索引。字幕库不走这里。用户机不能添加。
+
+**Body：** `{"library_path": "D:/Videos"}`。必须是本机已有的绝对路径文件夹，不要猜路径。
+
+**成功：** `added: true`，`accepted: true`，`library_path` 为保存后的路径。立刻返回。轮询 `GET /health` 的 `index_sync_in_progress`，变成 false 后再搜索。
+
+| 状态 | code | 何时 |
+|------|------|------|
+| 400 | `invalid_library_path` | 不是已存在的绝对路径文件夹 |
+| 403 | `team_client` | 当前是用户机 |
+| 409 | `library_exists` | 已经是库。改调 `POST /index/sync` |
+| 409 | `library_overlap` | 和已有库嵌套。响应说明里带冲突路径 |
+| 409 | `already_running` / `migration_busy` | 已有同步，或启动迁移还没结束 |
+
+---
+
+### 4.4a2 `POST /libraries/include`
+
+用户直接给出视频文件时用这个。父目录由服务端从这些路径算出，代理不要自己挑目录。
+
+**Body：** `{"video_paths": ["D:/Anime/ep01.mp4", "D:/Films/a.mp4"]}`。必须是已存在的绝对路径视频文件。
+
+每条路径：
+
+| 情况 | 做法 |
+|------|------|
+| 已在列表里 | 只索引这几条 |
+| 在已有库下面，但还没登记 | 刷新该库。文件夹里扫到的视频全部登记，然后只索引点名的这几条 |
+| 不在任何已有库下面 | 把视频的直接父目录加为库。同一父目录只加一次。文件夹里全部登记，然后只索引点名的这几条 |
+| 父目录和已有库嵌套 | 这一条放进 `rejected`，带 `conflict_path`。不会改去加更大的目录 |
+| 文件不存在或不是视频 | 这一条放进 `rejected` |
+
+同一次请求可以混着这几种。其余视频留在列表里，状态是 `pending`。整库索引仍用 `POST /index/sync`，不传视频字段。
+
+**成功：** `accepted: true`，`video_paths`，`library_paths`，`libraries_added`，`rejected`。立刻返回。轮询 `index_sync_in_progress`。全部被拒绝时 `accepted: false`，`reason: "rejected"`，HTTP 仍是 200。
+
+---
+
+### 4.4b `POST /libraries/refresh`
+
+重新扫描已有画面库，把磁盘上的增减写进视频列表。不建索引。用户机不能刷新。
+
+视频列表不是每次请求都去读磁盘。`GET /videos` 读的是上一次扫描写进库里的记录。文件夹里新放了视频、或删了文件，代理这边不会自己发现，要先刷新。
+
+**Body：** `{}` 扫描全部画面库；或 `{"library_path": "<GET /libraries 的路径>"}`。
+
+**成功后：** 轮询 `index_sync_in_progress` 变成 false，再 `GET /videos?ready_only=false`。新文件是 `pending`，源文件没了是 `missing_source`。
+
+---
+
+### 4.4c `POST /index/sync`
+
+同步画面库。新文件夹用 `POST /libraries`。用户机不能同步。
+
+**Body：**
+
+| 字段 | 说明 |
+|------|------|
+| 都不传 | 全部画面库：先扫描登记，再索引 |
+| `library_path` | 只处理这一库 |
+| `video_ids` / `video_paths` | 只索引这些视频，最多 2000 条。必须已经在列表里。新文件先 `POST /libraries/refresh` |
+
+`video_path` 用 `GET /videos` 返回的绝对路径。未知视频 → 400 `unknown_video`。
+
+**成功：** `accepted: true`，`library_paths`；按视频同步时还有 `video_ids`。立刻返回。轮询 `index_sync_in_progress` 变成 false 后再搜索。进行中再调一次会 409 `already_running`。
+
+| 状态 | code | 何时 |
+|------|------|------|
+| 400 | `unknown_library` / `unknown_video` / `no_libraries` | 库不存在、视频不在上次扫描里，或还没有任何库 |
+| 403 | `team_client` | 当前是用户机 |
+| 409 | `already_running` / `migration_busy` | 已有同步，或启动迁移还没结束 |
+| 503 | `desktop_unavailable` / `model_unavailable` / `desktop_timeout` | 桌面没接上，或模型运行时还没就绪 |
+
+`capabilities.index_sync` 为 true 表示这个进程的桌面窗口能接同步。
+
+---
+
+### 4.4d `GET /subtitle-libraries`
 
 **全局字幕库探测**（桌面「字幕库」页同一套元数据；可与画面库路径重叠，但状态独立）。
 
@@ -231,7 +316,7 @@
 
 **推荐链路（台词）：** `GET /subtitle-libraries` →（可选）`GET /subtitle-libraries/videos` → `POST /search`（`search_kind=dialogue`）。
 
-### 4.4c `GET /subtitle-libraries/videos`
+### 4.4e `GET /subtitle-libraries/videos`
 
 列出字幕库视频。
 
@@ -248,7 +333,7 @@
 
 ### 4.5 `GET /videos` · `GET /libraries/videos`
 
-列出**已同步且可检索**的视频（默认 `ready_only=true`：`asset_state=ready` 且源文件存在）。
+列出库里**已经扫描到**的视频。这份列表来自上一次扫描的记录，不是当场读磁盘。默认 `ready_only=true`，只返回已索引且源文件还在的视频。要看未索引的新文件，用 `ready_only=false`（`pending` 还没索引，`missing_source` 是文件没了，`missing_asset` 是向量缺了）。文件夹有变动时先 `POST /libraries/refresh`。
 
 **Query：**
 
@@ -257,7 +342,7 @@
 | `library_path` | 省略=全库 | 来自 `/libraries`；指定则只列该库 |
 | `video_id` | — | 精确查单条；未找到 → 404 |
 | `q` | — | 按 `video_rel_path` / 文件名 / `video_id` / 库名子串匹配（不区分大小写） |
-| `ready_only` | `true` | 只返回已同步就绪且源文件存在的视频 |
+| `ready_only` | `true` | `false` 时连未索引和缺失的视频一起返回 |
 | `limit` | 500 | 最大 2000 |
 | `offset` | 0 | 分页 |
 
@@ -360,6 +445,7 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
     "text_enhance": null,
     "text_enhance_applied": false,
     "search_skip_ranges": "0-90",
+    "search_skip_ranges_display": "0:00–1:30",
     "search_skip_edges_applied": true,
     "index_ready": true,
     "global_index_state": "fresh",
@@ -612,6 +698,11 @@ XML 另有 `write_path`；剪映另有 `draft_name` / `draft_path` / `drafts_dir
 
 | 用户意图 | 用什么 | 说明 |
 |----------|--------|------|
+| 用户给出几个视频文件 | `POST /libraries/include` | 登记所在文件夹，只索引这些文件。嵌套或无效的在 `rejected` |
+| 添加一个视频文件夹 | `POST /libraries` | 路径由用户给出；接着登记并索引。已存在则改 `POST /index/sync` |
+| 看库里有没有新视频 | `POST /libraries/refresh`，再 `GET /videos?ready_only=false` | 列表是上次扫描的记录 |
+| 只同步某几条视频 | `POST /index/sync`，带 `video_ids` 或 `video_paths` | 新文件要先刷新才能出现在列表里 |
+| 同步已有库 | `POST /index/sync` | 不传视频字段就是整库。完成后看 `index_sync_in_progress` |
 | 在库里**找**镜头（画面） | `POST /search` 或 `/search/batch`（默认 `search_kind=visual`） | CLIP 画面匹配 → `hits[]` |
 | 按硬字幕/台词找 | `POST /search`（`search_kind=dialogue`） | 需 `dialogue_index_ready`；先探测 `/subtitle-libraries` |
 | 按标签找 | `POST /search`（`search_kind=tags`） | 需 `tag_index_ready`；理解页生成后「同步到搜索」，Agent 不代跑 VLM |

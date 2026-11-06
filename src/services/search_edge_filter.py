@@ -15,6 +15,7 @@ from src.services.search_skip_ranges import (
     normalize_search_skip_ranges_text,
     parse_search_skip_ranges,
     probe_in_skip_intervals,
+    search_skip_ranges_display,
     try_parse_search_skip_ranges,
     resolve_skip_intervals,
 )
@@ -94,6 +95,7 @@ def skip_edges_api_meta(config=None) -> dict[str, str | bool]:
     text = get_search_skip_ranges_text(config)
     return {
         "search_skip_ranges": text,
+        "search_skip_ranges_display": search_skip_ranges_display(text),
         "search_skip_edges_applied": bool(try_parse_search_skip_ranges(text)),
     }
 
