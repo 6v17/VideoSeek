@@ -34,14 +34,16 @@ jobs:
 
       # Do NOT conda-install ffmpeg: its shared DLLs collide with PySide6 on Windows
       # runners (QtCore/QtGui "procedure could not be found" at collection).
-      # Pin a BtbN autobuild (not /latest/) so CI does not drift with master rolls.
+      # Dated autobuild tags are deleted, so a pin 404s. The moving "latest"
+      # release keeps a stable 8.1 win64-gpl name; checksums.sha256 is from
+      # that same release.
       - name: FFmpeg (CI)
         shell: pwsh
         run: |
           $dest = Join-Path $env:RUNNER_TEMP "ffmpeg-ci"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          $tag = "autobuild-2026-10-22-13-06"
-          $name = "ffmpeg-N-127941-g303510f9d1-win64-gpl.zip"
+          $tag = "latest"
+          $name = "ffmpeg-n8.1-latest-win64-gpl-8.1.zip"
           $base = "https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag"
           $zip = Join-Path $dest "ffmpeg.zip"
           $sums = Join-Path $dest "checksums.sha256"
