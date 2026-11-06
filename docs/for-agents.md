@@ -13,9 +13,9 @@
 | 前提 | 动作 |
 |------|------|
 | VideoSeek 运行中 | 设置 → **搜索接口** → 选 **本机 Agent API** → 保存 |
-| `index_ready: true` | 否则可 `POST /index/sync` 同步已有视频库（不新增文件夹） |
+| `index_ready: true` | 否则：已有库用 `POST /index/sync`；用户给出视频文件用 `POST /libraries/include` |
 | 基址 | `http://127.0.0.1:8765/api/v1`（仅 `127.0.0.1`，无鉴权） |
-| 与团队模式区分 | **服务机 / 用户机**走局域网共享检索，**不是**本文的本机 Agent HTTP；Agent 仍只连本机 `127.0.0.1`。服务机 LAN 绑定需分享 URL 中的 `?token=`（或 `Authorization: Bearer`），且 `/frames/extract` 仅允许已索引库路径 |
+| 与团队模式区分 | **服务机 / 用户机**走局域网共享检索，**不是**本文的本机 Agent HTTP；Agent 仍只连本机 `127.0.0.1`。用户机可以文字搜、图片搜服务机已索引的库，图片由服务机按当前模型编码。添加库、收录、刷新、同步只在本机或服务机上做。服务机 LAN 绑定需分享 URL 中的 `?token=`（或 `Authorization: Bearer`），且 `/frames/extract` 仅允许已索引库路径 |
 
 **端点一览：**
 
@@ -236,7 +236,7 @@
 
 ### 4.4a2 `POST /libraries/include`
 
-用户直接给出视频文件时用这个。父目录由服务端从这些路径算出，代理不要自己挑目录。
+用户直接给出视频文件时用这个。父目录由服务端从这些路径算出，代理不要自己挑目录。用户机不能收录。
 
 **Body：** `{"video_paths": ["D:/Anime/ep01.mp4", "D:/Films/a.mp4"]}`。必须是已存在的绝对路径视频文件。
 
@@ -254,6 +254,11 @@
 
 **成功：** `accepted: true`，`video_paths`，`library_paths`，`libraries_added`，`rejected`。立刻返回。轮询 `index_sync_in_progress`。全部被拒绝时 `accepted: false`，`reason: "rejected"`，HTTP 仍是 200。
 
+| 状态 | code | 何时 |
+|------|------|------|
+| 403 | `team_client` | 当前是用户机 |
+| 409 | `already_running` / `migration_busy` | 已有同步，或启动迁移还没结束 |
+
 ---
 
 ### 4.4b `POST /libraries/refresh`
@@ -270,7 +275,7 @@
 
 ### 4.4c `POST /index/sync`
 
-同步画面库。新文件夹用 `POST /libraries`。用户机不能同步。
+同步画面库，按**当前选中的模型**建索引。当前模型是云嵌入时，抽帧会发到该云服务。新文件夹用 `POST /libraries`。用户机不能同步。
 
 **Body：**
 

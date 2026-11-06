@@ -7,9 +7,9 @@
 ## 1. 整体布局结构（`QMainWindow` 如何拆分）
 
 - **根结构**：`MainWindow`（`QMainWindow`，`ui/windows/gui.py`）的 `centralWidget` 为横向 `QHBoxLayout` 容器（`objectName: AppRoot`）。
-- **左侧**：固定宽度的 **`NavigationSidebar`**（宽度见 `ui/widgets/layout.py` 中 `COMPONENT_SIZES["sidebar_width"]`，约 248px）——品牌标题、副标题、工作区说明卡片、**五个**主导航按钮（本地搜索 / 媒体库 / **理解笔录** / 远程链接 / 设置），底部为通知、关于、语言切换、主题切换；可选 **`runtime_hint`**（推理后端简短提示，默认隐藏）。
-- **右侧**：**`ContentArea`** 内为 **`QStackedWidget`**，页面顺序为：本地搜索 → 媒体库 → **理解笔录** → 远程链接 → 设置（`MainWindow._NAV_PAGE_ORDER`）。
-- **页面滚动**：除**设置页**外，搜索 / 媒体库 / 链接 / 理解页均包在 **`QScrollArea`**（`_build_scroll_page`）中，`setWidgetResizable(True)`，整页纵向滚动；设置页直接放入 `QStackedWidget`，无外层 `QScrollArea`。
+- **左侧**：固定宽度的 **`NavigationSidebar`**（宽度见 `ui/widgets/layout.py` 中 `COMPONENT_SIZES["sidebar_width"]`，约 248px）——品牌标题、副标题、工作区说明卡片、**七个**主导航按钮（搜索 / 视频库 / 字幕库 / 图库 / 理解 / 远程链接 / 设置），底部为通知、关于、语言切换、主题切换；可选 **`runtime_hint`**（推理后端简短提示，默认隐藏）。
+- **右侧**：**`ContentArea`** 内为 **`QStackedWidget`**，页面顺序为：搜索 → 视频库 → 字幕库 → 图库 → 理解 → 远程链接 → 设置（`MainWindow._BUILTIN_NAV_PAGE_ORDER`）。
+- **页面滚动**：除**设置页**外，搜索、视频库、字幕库、图库、理解、链接页均包在 **`QScrollArea`**（`_build_scroll_page`）中，`setWidgetResizable(True)`，整页纵向滚动；设置页直接放入 `QStackedWidget`，无外层 `QScrollArea`。
 - **典型「搜索页」纵向层次**（`SearchPage`，`ui/widgets/components.py`）：`PageHeader`（标题、副标题、运行时资源横幅）→ 索引进行中提示条 → 「会话」横条卡片 → **左右分栏**（左：查询与操作；右：内嵌 `QVideoWidget` 预览区，`stretch` 约 5:7）→ 底部「结果」卡片。
 - **典型「理解页」纵向层次**（`UnderstandingEvidencePage`）：`PageHeader` → 步骤条 → **当前一步的卡片** → 页级「上一步 / 下一步」。步骤是选片、语音、说明、剪辑、审稿（标签模式只有选片和说明）。选片卡片里是范围、视频和模型服务；「测试连接」「保存」在**这张卡片底部**，只作用于模型配置。它们不放到卡片外面，避免和「下一步」变成同一层动作。解说剪辑可用片库硬字幕 OCR + 语音 ASR；对白空说话人可用本地 CAM++ 聚声线。
 
@@ -21,14 +21,16 @@
 
 **本地搜索页（`SearchPage`）**
 
-- **查询 Tab**：`#SearchQueryTabs` 三页——图搜（`#ImageDropZone`）、文搜（`QTextEdit` `text_search`）、组合搜（`SearchComposeFormWidget`）。
+- **查询 Tab**：`#SearchQueryTabs` 六页——图搜（`#ImageDropZone`）、文搜（`QTextEdit` `text_search`）、组合搜（`SearchComposeFormWidget`）、找图、字幕、标签。
 - **文搜粒度**：`QComboBox` `search_mode`（`"frame"` / `"chunk"`，仅文搜 Tab）。
 - **搜索范围**：`SearchScopeSelect`（点击打开 `search_scope_editor`）。
-- **图搜深入搜索**：`search_precision_toggle` 与手机传图同一行；仅图搜 Tab 显示（`gui_search_panel_state.py`）。
+- **跳过时段**：搜索栏上的时钟区间。同一段套在每一条视频上。用户机按钮锁住，文案是「服务机」。
+- **图搜深入搜索**：`search_precision_toggle` 与手机传图同一行；仅图搜 Tab 显示（`gui_search_panel_state.py`）。用户机图搜把本机图片发给服务机编码。
 - **组合搜**：临时图文融合搜索；可「保存为预设」。预设 chip / 管理见 `gui_search_presets.py`。
+- **找图**：搜已同步的图片库，入口在搜索页；文件夹和同步在侧栏图库页。
 - **动作**：搜索 / 清空；组合搜 Tab 另有「保存为预设」。
 
-**结论**：图搜、文搜、组合搜（融合向量）三条 pipeline 分离；左右检索区固定等高（`search_compare_baseline_height`）。
+**结论**：图搜、文搜、组合搜、找图、字幕、标签分开走；左右检索区固定等高（`search_compare_baseline_height`）。
 
 **远程链接页（`LinkSearchPage`）** 另有链接输入、`QTextEdit` 批量链接、`QComboBox` 构建模式（下载/流式）等，属于独立的「构建 + 检索」流程。
 
@@ -54,7 +56,7 @@
 | `LibraryPage` | `ui/widgets/components.py` | 媒体库工具条、进度、库列表滚动区 |
 | `UnderstandingEvidencePage` | `ui/widgets/understanding_page.py` | 理解笔录向导。模型配置的测试/保存在选片卡片内；上一步/下一步是唯一的页级动作 |
 | `LinkSearchPage` | `ui/widgets/components.py` | 远程链接构建与检索整页 |
-| `SettingsPage` | `ui/widgets/settings/page.py`（表单行辅助：`form.py`） | 设置表单；五张 `VSCard` 分组 |
+| `SettingsPage` | `ui/widgets/settings/page.py`（表单行辅助：`form.py`） | 设置表单。内容区七张 `VSCard`（运行状态、搜索记录、通用、搜索与预览、索引、模型、路径），卡内用 `#SettingsSectionHeader` 分段；底栏另有保存条 |
 
 **可复用小组件（同文件）**
 
@@ -198,7 +200,7 @@
 | **Phase 2c** | `ResultView` 空结果叠层 + `set_busy`（检索中不闪空态） | ✅ 已落地 |
 | **Phase 2d** | `models_ready` / `resources_ready` 改读 `ui_state`（`MainWindow.models_ready` 为属性别名） | ✅ 已落地 |
 | **Phase 3-A** | `resources/tokens_*.json` → `theme_tokens.py` → `build_style()` | ✅ 已落地（token 子集，其余用默认色） |
-| **Phase 3** | `SettingsPage` → `ui/widgets/settings/`；五张 `VSCard` 分组 | ✅ 已落地 |
+| **Phase 3** | `SettingsPage` → `ui/widgets/settings/`；内容区七张 `VSCard`，卡内分段标题栏 | ✅ 已落地 |
 | **Phase 3-B** | 设置页/表格 QSS 细调；Figma token 补全 | 可选 |
 
 **原则**：Controller / Worker / Service 逻辑不动；只抽 UI 壳与状态展示入口。

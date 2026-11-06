@@ -22,10 +22,11 @@ By default, indexing stays on your machine (ONNX · Lance · FFmpeg) and **media
 ## Features
 
 - **Text & image search** — Natural language or a reference image to find similar shot time ranges  
+- **Picture library** — Sync image folders, then search them from the Search page “Pictures” tab  
 - **Hard-subtitle OCR** — Keyword search over on-screen dialogue  
-- **Libraries & scope** — Multiple libraries, selected videos, search presets  
+- **Libraries & scope** — Multiple libraries, selected videos, search presets. Optional absolute time windows apply to every video  
 - **Preview & export** — Timeline preview; MP4; Jianying draft / Premiere XML / DaVinci FCPXML  
-- **Local-first** — Sync and search stay on this machine unless you turn on Cloud embedding, which sends frames and queries to the service you configure. Optional LAN search and localhost Agent API  
+- **Local-first** — Sync and search stay on this machine unless you turn on Cloud embedding, which sends frames and queries to the service you configure. On a LAN, a user machine can search the server’s indexed library by text or image; sync runs on this machine or the server. Localhost Agent API is separate  
 
 > Optional: video understanding, tag search, multiple CLIP-family models, experimental recap cuts, and more. **Main path: sync → search → export.**
 
