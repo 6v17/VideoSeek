@@ -90,6 +90,24 @@ class SearchEdgeFilterTests(unittest.TestCase):
         )
         self.assertEqual([float(h.start_sec) for h in kept], [800.0])
 
+    def test_span_overlapping_the_window_is_dropped(self):
+        rules = parse_search_skip_ranges("600-720")
+        end_lookup = {"a.mp4": 1400.0}
+        self.assertTrue(
+            hit_in_skipped_edge(
+                SearchHit(500.0, 650.0, 0.9, "a.mp4"),
+                ranges=rules,
+                end_lookup=end_lookup,
+            )
+        )
+        self.assertFalse(
+            hit_in_skipped_edge(
+                SearchHit(730.0, 800.0, 0.9, "a.mp4"),
+                ranges=rules,
+                end_lookup=end_lookup,
+            )
+        )
+
     def test_short_video_is_not_filtered(self):
         rules = parse_search_skip_ranges("0-90; end-90")
         end_lookup = {"short.mp4": 120.0}
@@ -214,7 +232,7 @@ class SearchEdgeFilterTests(unittest.TestCase):
             texts=texts,
         )
         self.assertTrue(server["enabled"])
-        self.assertEqual(server["summary"], "0-90")
+        self.assertEqual(server["summary"], "0:00–1:30")
         self.assertIn("对所有用户生效", server["tooltip"])
 
     def test_from_end_loads_indexed_ends_when_timestamps_were_not_materialized(self):

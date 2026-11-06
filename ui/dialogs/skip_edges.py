@@ -1,14 +1,15 @@
-"""Dialog for optional multi-range skip windows. Empty means no filtering."""
+"""Dialog for optional skip windows. Clocks, not a text format."""
 
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, QTime, Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QHeaderView,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
+    QScrollArea,
+    QSizePolicy,
+    QTimeEdit,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -16,15 +17,82 @@ from src.app.i18n import get_texts
 from src.services.search_skip_ranges import (
     format_search_skip_range_item,
     normalize_search_skip_ranges_text,
-    parse_search_skip_range_item,
-    parse_search_skip_ranges,
+    try_parse_search_skip_ranges,
     validate_search_skip_ranges,
-    format_duration_token as _format_duration_token,
 )
 from ui.widgets.layout import WINDOW_SIZES, apply_dialog_size
 
 from .app_message import AppMessageDialog
 from .shell import VSDialogShell
+
+
+class _NoWheelTimeEdit(QTimeEdit):
+    def wheelEvent(self, event):
+        event.ignore()
+
+
+def _seconds_to_time(seconds) -> QTime:
+    whole = max(0, int(round(float(seconds or 0))))
+    whole = min(whole, 23 * 3600 + 59 * 60 + 59)
+    hours, rem = divmod(whole, 3600)
+    minutes, secs = divmod(rem, 60)
+    return QTime(int(hours), int(minutes), int(secs))
+
+
+def _time_to_seconds(value: QTime) -> int:
+    return int(value.hour()) * 3600 + int(value.minute()) * 60 + int(value.second())
+
+
+class _SkipRangeRow(QWidget):
+    """One absolute window. The same clocks apply on every video."""
+
+    def __init__(self, texts):
+        super().__init__()
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+
+        self.prefix = QLabel(texts["skip_edges_from"])
+        self.prefix.setObjectName("InlineFieldLabel")
+        self.start_edit = self._make_time_edit()
+        self.to_label = QLabel(texts["skip_edges_to"])
+        self.to_label.setObjectName("InlineFieldLabel")
+        self.end_edit = self._make_time_edit()
+
+        self.btn_remove = QPushButton(texts["skip_edges_remove"])
+        self.btn_remove.setObjectName("GhostButton")
+        self.btn_remove.setMinimumHeight(32)
+
+        row.addWidget(self.prefix, 0)
+        row.addWidget(self.start_edit, 0)
+        row.addWidget(self.to_label, 0)
+        row.addWidget(self.end_edit, 0)
+        row.addStretch(1)
+        row.addWidget(self.btn_remove, 0)
+
+    def _make_time_edit(self) -> QTimeEdit:
+        edit = _NoWheelTimeEdit()
+        edit.setDisplayFormat("HH:mm:ss")
+        edit.setTimeRange(QTime(0, 0, 0), QTime(23, 59, 59))
+        edit.setTime(QTime(0, 0, 0))
+        edit.setFixedWidth(108)
+        edit.setMinimumHeight(32)
+        return edit
+
+    def load_rule(self, rule: dict):
+        if str(rule.get("kind") or "") == "from_end":
+            return
+        self.start_edit.setTime(_seconds_to_time(rule.get("start")))
+        self.end_edit.setTime(_seconds_to_time(rule.get("end")))
+
+    def range_text(self) -> str:
+        start = _time_to_seconds(self.start_edit.time())
+        end = _time_to_seconds(self.end_edit.time())
+        if start == 0 and end == 0:
+            return ""
+        if end <= start:
+            raise ValueError("end before start")
+        return format_search_skip_range_item({"kind": "absolute", "start": start, "end": end})
 
 
 class SkipEdgesDialog(VSDialogShell):
@@ -33,6 +101,7 @@ class SkipEdgesDialog(VSDialogShell):
         self.texts = get_texts(language)
         self._is_dark = bool(is_dark)
         self._ranges_text = normalize_search_skip_ranges_text(ranges_text)
+        self._rows: list[_SkipRangeRow] = []
 
         super().__init__(
             parent,
@@ -44,48 +113,34 @@ class SkipEdgesDialog(VSDialogShell):
         )
         apply_dialog_size(
             self,
-            QSize(560, 380),
-            QSize(480, 320),
+            QSize(640, 420),
+            QSize(520, 340),
             WINDOW_SIZES["notice_dialog"]["screen_margin"],
         )
 
-        self.table = QTableWidget(0, 2)
-        self.table.setObjectName("DialogRulesTable")
-        self.table.setHorizontalHeaderLabels(
-            [
-                self.texts["skip_edges_col_start"],
-                self.texts["skip_edges_col_end"],
-            ]
-        )
-        self.table.setAlternatingRowColors(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.setShowGrid(False)
-        self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(36)
-        self.table.setEditTriggers(
-            QAbstractItemView.EditTrigger.DoubleClicked
-            | QAbstractItemView.EditTrigger.EditKeyPressed
-            | QAbstractItemView.EditTrigger.AnyKeyPressed
-        )
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.content_layout.addWidget(self.table, 1)
+        self._rows_host = QWidget()
+        self._rows_layout = QVBoxLayout(self._rows_host)
+        self._rows_layout.setContentsMargins(0, 0, 0, 0)
+        self._rows_layout.setSpacing(8)
+        self._rows_layout.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(self._rows_host)
+        scroll.setMinimumHeight(168)
+        scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.content_layout.addWidget(scroll, 1)
 
         toolbar_host = QWidget()
         toolbar = QHBoxLayout(toolbar_host)
         toolbar.setContentsMargins(0, 0, 0, 0)
         toolbar.setSpacing(8)
-        self.empty_hint = QLabel(self.texts["skip_edges_empty"])
-        self.empty_hint.setObjectName("Hint")
-        self.empty_hint.setWordWrap(True)
-        toolbar.addWidget(self.empty_hint, 1)
+        toolbar.addStretch(1)
         self.btn_add = QPushButton(self.texts["skip_edges_add"])
         self.btn_add.setObjectName("GhostButton")
-        self.btn_remove = QPushButton(self.texts["skip_edges_remove"])
-        self.btn_remove.setObjectName("GhostButton")
         toolbar.addWidget(self.btn_add)
-        toolbar.addWidget(self.btn_remove)
         self.content_layout.addWidget(toolbar_host)
 
         self.add_footer_button(
@@ -100,71 +155,63 @@ class SkipEdgesDialog(VSDialogShell):
             default=True,
         )
 
-        self.btn_add.clicked.connect(lambda: self._append_row("", ""))
-        self.btn_remove.clicked.connect(self._remove_selected_row)
+        self.btn_add.clicked.connect(lambda: self._append_row(None))
         self._load_ranges(self._ranges_text)
 
     def ranges_text(self) -> str:
         return self._ranges_text
 
-    def _append_row(self, start_text, end_text):
-        row = self.table.rowCount()
-        self.table.insertRow(row)
-        self.table.setItem(row, 0, QTableWidgetItem(start_text))
-        self.table.setItem(row, 1, QTableWidgetItem(end_text))
+    def _append_row(self, rule):
+        row = _SkipRangeRow(self.texts)
+        row.btn_remove.clicked.connect(lambda _checked=False, widget=row: self._remove_row(widget))
+        if rule is not None:
+            row.load_rule(rule)
+        insert_at = max(0, self._rows_layout.count() - 1)
+        self._rows_layout.insertWidget(insert_at, row)
+        self._rows.append(row)
+        return row
+
+    def _remove_row(self, row: _SkipRangeRow):
+        if row not in self._rows:
+            return
+        self._rows.remove(row)
+        self._rows_layout.removeWidget(row)
+        row.deleteLater()
+        if not self._rows:
+            self._append_row(None)
 
     def _load_ranges(self, ranges_text):
         normalized = normalize_search_skip_ranges_text(ranges_text)
-        if not normalized:
-            self._append_row("", "")
+        rules = try_parse_search_skip_ranges(normalized) if normalized else []
+        if not rules:
+            self._append_row(None)
             return
-        for rule in parse_search_skip_ranges(normalized):
-            if rule.get("kind") == "from_end":
-                self._append_row("end", _format_duration_token(rule.get("amount")))
-            else:
-                self._append_row(
-                    _format_duration_token(rule.get("start")),
-                    _format_duration_token(rule.get("end")),
-                )
-        if self.table.rowCount() == 0:
-            self._append_row("", "")
-
-    def _remove_selected_row(self):
-        current_row = self.table.currentRow()
-        if current_row >= 0:
-            self.table.removeRow(current_row)
-        if self.table.rowCount() == 0:
-            self._append_row("", "")
+        for rule in rules:
+            if str(rule.get("kind") or "") == "from_end":
+                continue
+            self._append_row(rule)
+        if not self._rows:
+            self._append_row(None)
 
     def _apply(self):
         parts = []
-        for row in range(self.table.rowCount()):
-            start_item = self.table.item(row, 0)
-            end_item = self.table.item(row, 1)
-            start_text = (start_item.text() if start_item else "").strip()
-            end_text = (end_item.text() if end_item else "").strip()
-            if not start_text and not end_text:
-                continue
-            if start_text.lower() == "end":
-                rule_text = f"end-{end_text}"
-            else:
-                rule_text = f"{start_text}-{end_text}"
+        for index, row in enumerate(self._rows):
             try:
-                parse_search_skip_range_item(rule_text, row)
-            except (TypeError, ValueError):
+                text = row.range_text()
+            except ValueError:
                 AppMessageDialog(
                     self.texts["skip_edges_title"],
-                    self.texts["skip_edges_invalid_row"].format(row=row + 1),
+                    self.texts["skip_edges_invalid_row"].format(row=index + 1),
                     kind="warning",
                     parent=self,
                     is_dark=self._is_dark,
                     language=self.language,
                 ).exec()
                 return
-            parts.append(format_search_skip_range_item(parse_search_skip_range_item(rule_text, row)))
-
+            if text:
+                parts.append(text)
         normalized = normalize_search_skip_ranges_text("; ".join(parts))
-        ok, _ = validate_search_skip_ranges(normalized)
+        ok, _detail = validate_search_skip_ranges(normalized)
         if not ok:
             AppMessageDialog(
                 self.texts["skip_edges_title"],

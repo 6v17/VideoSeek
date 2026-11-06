@@ -181,6 +181,33 @@ def try_parse_search_skip_ranges(rules_text) -> list[dict]:
         return []
 
 
+def friendly_skip_range_label(item: str, texts=None) -> str:
+    """Clock range for the search control. Unknown text stays as stored."""
+    del texts
+    raw = str(item or "").strip()
+    if not raw:
+        return ""
+    try:
+        rule = parse_search_skip_range_item(raw, 0)
+    except (TypeError, ValueError):
+        return raw
+    if str(rule.get("kind") or "") == "from_end":
+        return raw
+    return (
+        f"{_format_clock(rule.get('start', 0))}"
+        f"–{_format_clock(rule.get('end', 0))}"
+    )
+
+
+def _format_clock(seconds) -> str:
+    whole = int(round(max(0.0, float(seconds or 0.0))))
+    hours, rem = divmod(whole, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
 def format_search_skip_range_item(rule: dict) -> str:
     kind = str(rule.get("kind") or "")
     if kind == "from_end":

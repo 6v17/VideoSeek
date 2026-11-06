@@ -43,6 +43,7 @@ class SettingsFormMixin:
     def _create_settings_section(self, title_label):
         card = QFrame()
         card.setObjectName("SubPanelCard")
+        card.setProperty("settingsBand", True)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -50,15 +51,16 @@ class SettingsFormMixin:
         title_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         title_wrap = QWidget()
         title_wrap.setObjectName("SettingsSectionHeader")
+        title_wrap.setProperty("sectionRole", "lead")
         title_wrap_layout = QHBoxLayout(title_wrap)
-        title_wrap_layout.setContentsMargins(14, 12, 14, 12)
-        title_wrap_layout.setSpacing(0)
+        title_wrap_layout.setContentsMargins(16, 10, 16, 10)
+        title_wrap_layout.setSpacing(8)
         title_wrap_layout.addWidget(title_label)
         title_wrap_layout.addStretch()
         layout.addWidget(title_wrap)
         form = QGridLayout()
-        # Indent rows under the section title so parameters don't sit flush with the header.
-        form.setContentsMargins(28, 4, 14, 8)
+        # Indent rows under the section title so the title reads as the layer above.
+        form.setContentsMargins(28, 8, 16, 12)
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(0)
         # Keep label column modest so the page can shrink to the scroll viewport.
@@ -67,6 +69,12 @@ class SettingsFormMixin:
         form.setColumnStretch(1, 1)
         layout.addLayout(form)
         return card, form
+
+    def set_settings_section_role(self, card, role: str) -> None:
+        header = card.findChild(QWidget, "SettingsSectionHeader")
+        if header is None:
+            return
+        header.setProperty("sectionRole", role)
 
     def _add_setting_row(
         self,
@@ -160,9 +168,9 @@ class SettingsFormMixin:
         field_row = QHBoxLayout()
         field_row.setContentsMargins(0, 0, 0, 0)
         field_row.setSpacing(0)
-        stretch = 1 if field.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding else 0
-        field_row.addWidget(field, stretch, Qt.AlignLeft)
-        if not stretch:
+        expanding = field.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
+        field_row.addWidget(field, 1 if expanding else 0, Qt.AlignLeft | Qt.AlignVCenter)
+        if not expanding:
             field_row.addStretch(1)
         layout.addLayout(field_row)
         return row

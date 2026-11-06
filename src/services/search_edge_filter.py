@@ -10,6 +10,7 @@ from src.domain.search_hit import SearchHit
 from src.services.search_scope import normalize_scope_path
 from src.services.search_skip_ranges import (
     covered_skip_seconds,
+    friendly_skip_range_label,
     migrate_legacy_skip_edges_to_ranges,
     normalize_search_skip_ranges_text,
     parse_search_skip_ranges,
@@ -118,12 +119,14 @@ def resolve_skip_edges_chrome(
             or copy.get("setting_skip_edges_empty")
             or ""
         )
+        tip = str(copy.get("skip_edges_hint") or summary)
     elif len(parts) == 1:
-        summary = parts[0]
+        summary = friendly_skip_range_label(parts[0], copy)
+        tip = summary
     else:
         template = str(copy.get("search_skip_edges_count") or "{count}")
         summary = template.format(count=len(parts))
-    tip = str(ranges_text or "").strip() or str(copy.get("skip_edges_hint") or summary)
+        tip = "\n".join(friendly_skip_range_label(part, copy) for part in parts)
     if mode == "server":
         note = str(copy.get("search_skip_edges_team_server_hint") or "").strip()
         if note:
@@ -156,12 +159,18 @@ def resolve_result_pool_k(
     return want
 
 
-def _hit_probe_sec(hit: SearchHit) -> float:
-    start = float(getattr(hit, "start_sec", 0.0) or 0.0)
+def _hit_overlaps_skip(hit: SearchHit, intervals: list[tuple[float, float]]) -> bool:
+    """True when the hit and a skip window share any time."""
+    start = max(0.0, float(getattr(hit, "start_sec", 0.0) or 0.0))
     end = float(getattr(hit, "end_sec", start) or start)
-    if end > start + 0.5:
-        return (start + end) / 2.0
-    return start
+    if end < start:
+        end = start
+    if end <= start + 1e-6:
+        return probe_in_skip_intervals(start, intervals)
+    for left, right in intervals or []:
+        if start < right and end > left:
+            return True
+    return False
 
 
 def _normalized_end_lookup(end_lookup: Mapping[str, float] | None) -> dict[str, float]:
@@ -182,7 +191,6 @@ def hit_in_skipped_edge(
     end_lookup: Mapping[str, float] | None = None,
 ) -> bool:
     path = normalize_scope_path(getattr(hit, "video_path", "") or "")
-    probe = max(0.0, _hit_probe_sec(hit))
     rules = list(ranges or [])
     if not rules and (intro_sec is not None or outro_sec is not None):
         legacy = migrate_legacy_skip_edges_to_ranges(intro_sec or 0, outro_sec or 0)
@@ -205,7 +213,7 @@ def hit_in_skipped_edge(
         remaining = max(0.0, float(end) - covered_skip_seconds(intervals))
         if remaining < _MIN_KEEP_SPAN_SEC:
             return False
-    return probe_in_skip_intervals(probe, intervals)
+    return _hit_overlaps_skip(hit, intervals)
 
 
 def _rules_need_video_end(rules) -> bool:

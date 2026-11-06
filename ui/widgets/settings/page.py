@@ -96,7 +96,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         content_layout = QVBoxLayout(self.scroll_content)
         # Small gutter between card edge and the always-on scrollbar track.
         content_layout.setContentsMargins(0, 0, 10, 0)
-        content_layout.setSpacing(10)
+        content_layout.setSpacing(16)
         return content_layout, shell_layout
 
     def _init_settings_status_headers(self):
@@ -107,7 +107,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.runtime_status_title.setObjectName("CardTitle")
         self.runtime_status_header = QWidget()
         runtime_status_header_layout = QHBoxLayout(self.runtime_status_header)
-        runtime_status_header_layout.setContentsMargins(0, 0, 0, 0)
+        self.runtime_status_header.setObjectName("SettingsSectionHeader")
+        self.runtime_status_header.setProperty("sectionRole", "lead")
+        runtime_status_header_layout.setContentsMargins(16, 10, 12, 10)
         runtime_status_header_layout.setSpacing(8)
         self.runtime_status_backend = QLabel()
         self.runtime_status_backend.setObjectName("StatusHint")
@@ -141,7 +143,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_search_telemetry_collapse.setCursor(Qt.CursorShape.PointingHandCursor)
         self.search_telemetry_header = QWidget()
         search_telemetry_header_layout = QHBoxLayout(self.search_telemetry_header)
-        search_telemetry_header_layout.setContentsMargins(0, 0, 0, 0)
+        self.search_telemetry_header.setObjectName("SettingsSectionHeader")
+        self.search_telemetry_header.setProperty("sectionRole", "lead")
+        search_telemetry_header_layout.setContentsMargins(16, 10, 12, 10)
         search_telemetry_header_layout.setSpacing(8)
         self.btn_refresh_search_telemetry = QPushButton()
         self.btn_refresh_search_telemetry.setObjectName("AccentGhostButton")
@@ -159,7 +163,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.search_telemetry_file.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.search_telemetry_body_widget = QWidget()
         search_telemetry_body_layout = QVBoxLayout(self.search_telemetry_body_widget)
-        search_telemetry_body_layout.setContentsMargins(0, 0, 0, 0)
+        search_telemetry_body_layout.setContentsMargins(16, 10, 16, 14)
         search_telemetry_body_layout.setSpacing(8)
         search_telemetry_body_layout.addWidget(self.search_telemetry_body)
         search_telemetry_body_layout.addWidget(self.search_telemetry_file)
@@ -626,6 +630,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
 
         self.input_sampling_bundle = QWidget()
         self.input_sampling_bundle.setObjectName("SamplingBundle")
+        self.input_sampling_bundle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         sampling_bundle_layout = QHBoxLayout(self.input_sampling_bundle)
         sampling_bundle_layout.setContentsMargins(0, 0, 0, 0)
         sampling_bundle_layout.setSpacing(8)
@@ -638,6 +643,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_sampling_fps_rules.hide()
 
         self.input_chunk_policy_bundle.setObjectName("ChunkPolicyBundle")
+        self.input_chunk_policy_bundle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         chunk_policy_bundle_layout = QHBoxLayout(self.input_chunk_policy_bundle)
         chunk_policy_bundle_layout.setContentsMargins(0, 0, 0, 0)
         chunk_policy_bundle_layout.setSpacing(10)
@@ -653,6 +659,12 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.section_precise_search_title
         )
         self.section_preview_card, self.section_preview_form = self._create_settings_section(self.section_preview_title)
+        for card in (
+            self.section_fast_image_search_card,
+            self.section_precise_search_card,
+            self.section_preview_card,
+        ):
+            self.set_settings_section_role(card, "follow")
         self.section_indexing_card, self.section_indexing_form = self._create_settings_section(self.section_indexing_title)
         self.chunk_advanced_form = QGridLayout(self.chunk_advanced_body)
         self.chunk_advanced_form.setContentsMargins(20, 8, 12, 10)
@@ -665,7 +677,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.section_paths_card, self.section_paths_form = self._create_settings_section(self.section_paths_title)
         self.section_general_form_host = QWidget()
         self.section_general_form = QGridLayout(self.section_general_form_host)
-        self.section_general_form.setContentsMargins(14, 0, 0, 0)
+        self.section_general_form.setContentsMargins(28, 8, 16, 12)
         self.section_general_form.setHorizontalSpacing(16)
         self.section_general_form.setVerticalSpacing(0)
         self.section_general_form.setColumnMinimumWidth(0, 248)
@@ -917,48 +929,64 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.hint_pc_migrate,
         )
 
+    def _settings_card(self):
+        return VSCard(margins=(0, 0, 0, 0), spacing=0)
+
     def _assemble_settings_page(self, content_layout, shell_layout):
-        self.card_general = VSCard()
-        self.card_general.content_layout.addWidget(self.general_title)
+        general_header = QWidget()
+        general_header.setObjectName("SettingsSectionHeader")
+        general_header.setProperty("sectionRole", "lead")
+        general_header_layout = QHBoxLayout(general_header)
+        general_header_layout.setContentsMargins(16, 10, 16, 10)
+        general_header_layout.setSpacing(8)
+        general_header_layout.addWidget(self.general_title, 1)
+
+        self.card_general = self._settings_card()
+        self.card_general.content_layout.addWidget(general_header)
         self.card_general.content_layout.addWidget(self.section_general_form_host)
 
-        self.card_search_preview = VSCard()
+        self.card_search_preview = self._settings_card()
         search_preview_host = QWidget()
         search_preview_layout = QVBoxLayout(search_preview_host)
         search_preview_layout.setContentsMargins(0, 0, 0, 0)
-        search_preview_layout.setSpacing(12)
+        search_preview_layout.setSpacing(0)
         search_preview_layout.addWidget(self.section_search_card)
         search_preview_layout.addWidget(self.section_fast_image_search_card)
         search_preview_layout.addWidget(self.section_precise_search_card)
         search_preview_layout.addWidget(self.section_preview_card)
         self.card_search_preview.content_layout.addWidget(search_preview_host)
 
-        self.card_indexing = VSCard()
+        self.card_indexing = self._settings_card()
         indexing_host = QWidget()
         indexing_layout = QVBoxLayout(indexing_host)
         indexing_layout.setContentsMargins(0, 0, 0, 0)
-        indexing_layout.setSpacing(12)
+        indexing_layout.setSpacing(0)
         indexing_layout.addWidget(self.section_indexing_card)
         self.card_indexing.content_layout.addWidget(indexing_host)
 
-        self.card_model_gpu = VSCard()
+        self.card_model_gpu = self._settings_card()
         model_gpu_host = QWidget()
         model_gpu_layout = QVBoxLayout(model_gpu_host)
         model_gpu_layout.setContentsMargins(0, 0, 0, 0)
-        model_gpu_layout.setSpacing(12)
+        model_gpu_layout.setSpacing(0)
         model_gpu_layout.addWidget(self.section_model_gpu_card)
         self.card_model_gpu.content_layout.addWidget(model_gpu_host)
 
-        self.card_paths = VSCard()
+        self.card_paths = self._settings_card()
         self.card_paths.content_layout.addWidget(self.section_paths_card)
 
-        self.card_runtime_status = VSCard()
+        runtime_body = QWidget()
+        runtime_body_layout = QVBoxLayout(runtime_body)
+        runtime_body_layout.setContentsMargins(16, 10, 16, 14)
+        runtime_body_layout.setSpacing(6)
+        runtime_body_layout.addWidget(self.runtime_status_backend)
+        runtime_body_layout.addWidget(self.runtime_status_ffmpeg)
+        runtime_body_layout.addWidget(self.runtime_status_data)
+        self.card_runtime_status = self._settings_card()
         self.card_runtime_status.content_layout.addWidget(self.runtime_status_header)
-        self.card_runtime_status.content_layout.addWidget(self.runtime_status_backend)
-        self.card_runtime_status.content_layout.addWidget(self.runtime_status_ffmpeg)
-        self.card_runtime_status.content_layout.addWidget(self.runtime_status_data)
+        self.card_runtime_status.content_layout.addWidget(runtime_body)
 
-        self.card_search_telemetry = VSCard()
+        self.card_search_telemetry = self._settings_card()
         self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_header)
         self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_body_widget)
 

@@ -144,14 +144,26 @@ QMenu::separator {
 }
 #SettingsSectionHeader {
     background: __FIELD__;
+    border: none;
     border-bottom: 1px solid __LINE__;
+    border-radius: 0;
+}
+#SettingsSectionHeader[sectionRole="lead"] {
     border-top-left-radius: __RADIUS_LG__;
     border-top-right-radius: __RADIUS_LG__;
+}
+#SettingsSectionHeader[sectionRole="follow"] {
+    border-top: 1px solid __LINE__;
 }
 #SettingsSectionHeader #CardTitle {
     font-size: __FS_MD__;
     font-weight: 700;
     color: __HEADLINE__;
+}
+#SubPanelCard[settingsBand="true"] {
+    background: transparent;
+    border: none;
+    border-radius: 0;
 }
 #BrandTitle {
     color: __HEADLINE__;
@@ -1340,7 +1352,7 @@ QComboBox QAbstractItemView {
     outline: 0;
 }
 QLabel[settingLabel="true"] {
-    color: __TEXT__;
+    color: __MUTED__;
     font-weight: 600;
     line-height: 1.35em;
 }

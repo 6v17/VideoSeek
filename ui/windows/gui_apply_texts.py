@@ -704,7 +704,8 @@ class ApplyTextsGuiMixin:
 
     def _apply_texts_settings_and_finish(self, t, config):
         self.settings_page.header.title.setText(t["settings_page_title"])
-        self.settings_page.header.subtitle.hide()
+        self.settings_page.header.subtitle.setText(t["settings_page_desc"])
+        self.settings_page.header.subtitle.show()
         self.settings_page.general_title.setText(t["settings_group_title"])
         self.settings_page.btn_save.setText(t["save_settings"])
         self.settings_page.btn_reset.setText(t["reset_settings"])
