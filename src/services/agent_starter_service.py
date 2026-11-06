@@ -228,16 +228,20 @@ def _format_first_reply_instruction(
             "Your **first message** must briefly tell the user what you can help with **right now** "
             "(from the snapshot below; do not invent features). Include status, 3–6 example requests, "
             "and limits. Then ask what to find or export. "
-            "After that, list the indexed library with GET /libraries and GET /videos — "
-            "that is the library, not a disk walk. "
-            "Do not search or export until the user names a target.\n"
+            "After that, GET /libraries and report each library name and its video count. "
+            "From GET /videos, name files only (the last segment of video_rel_path). "
+            "Do not paste absolute paths. "
+            "Above 20 videos, report the count and library names only. "
+            "Do not walk the disk. Do not search or export until the user names a target.\n"
             f"{bullet_lines}"
         )
     return (
         "## 读完请先告诉用户（必读）\n"
         "**第一条回复**须用通俗中文说明此刻能帮用户做什么（依据下方快照，勿编造）。"
         "含状态、3–6 条需求示例、不能做什么；再问想找/导出什么。"
-        "说完用 GET /libraries 和 GET /videos 列出已索引的片，这就是片库，不要 ls/扫盘。"
+        "说完用 GET /libraries 报库名和条数。"
+        "GET /videos 只报文件名（video_rel_path 的最后一段），不要贴绝对路径。"
+        "超过 20 条只报数量和库名。不要 ls/扫盘。"
         "用户没说找什么之前，不要搜索或导出。\n"
         f"{bullet_lines}"
     )
@@ -384,14 +388,14 @@ def build_agent_starter_text(
         "",
         _format_first_reply_instruction(health, preset_total=preset_total, locale=locale),
         "",
+        _format_doc_reference(locale=locale, api_base=api_base),
+        "",
         _format_policy_kernel(locale=locale, api_base=api_base),
         "",
         _format_iron_rules(locale=locale, api_base=api_base),
         "",
         snapshot_title,
         json.dumps(snapshot, ensure_ascii=False, indent=2),
-        "",
-        _format_doc_reference(locale=locale, api_base=api_base),
     ]
     if not index_ready:
         parts.extend(["", not_ready])
