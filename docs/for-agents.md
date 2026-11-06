@@ -153,7 +153,7 @@
 | `dialogue_match_modes` | 台词检索可选匹配：`["exact","fuzzy"]` |
 | `tag_index_ready` / `tag_indexed_videos` / `tag_rows` | VLM 标签投影是否可用及规模（权威稿仍在理解页 JSON） |
 | `tag_match_modes` | 标签检索可选匹配：`["exact","fuzzy"]` |
-| `text_search_enhance_enabled` | 服务机默认是否开启画面文搜增强（请求可用 `text_enhance` 覆盖） |
+| `text_search_enhance_enabled` | 省略请求里的 `text_enhance` 时用的面板默认。`false` 表示默认关，功能仍在；要开就传 `text_enhance: true` |
 | `search_skip_ranges` / `search_skip_ranges_display` | 桌面跳过时段原文与可读时钟。空字符串表示不过滤。不是请求字段 |
 | `ffmpeg.ffmpeg_available` | 为 false 则无法导出 |
 | `model`, `provider`, `embedding_space`, `dimension`, `metric` | 当前 embedding |
@@ -668,8 +668,9 @@ XML 另有 `write_path`；剪映另有 `draft_name` / `draft_path` / `drafts_dir
 | 6.0s（619.5–625.5） | **~10s**（+4s） |
 | 2.0s（621.5–623.5） | **~6s** |
 
-- 期望成片 **N 秒** → 请求区间约 **`N − 4` 秒**（默认边距），或以 hit 为中心缩短窗口。
+- 期望成片 **N 秒** → 请求区间约 **`N − 4` 秒**（默认边距），或以 hit 为中心缩短窗口。点命中本身已按锚点 ±3 秒扩成约 6 秒，再走 copy 就会变成约 10 秒。
 - 要**精确时长** → `encode_mode: "original"`。
+- `keep_per_source` 三处默认不同：batch 导出默认 **1**，manifest 的 sources 模式默认 **2**，`dedupe` 是另一个字段、默认 true。
 
 **单条成功响应：** `output_path`, `video_path`, `start_sec`, `end_sec`（**实际裁切窗口，已含 copy 边距**）, `duration_sec`, `encode_mode`
 

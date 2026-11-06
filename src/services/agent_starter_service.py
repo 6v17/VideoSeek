@@ -40,8 +40,11 @@ def _format_doc_reference(*, locale: str, api_base: str) -> str:
     lang = "en" if str(locale).lower().startswith("en") else "zh"
     doc_url = f"{api_base}/agent-doc?format=text"
     if lang == "en":
-        return f"Fields / playbook: GET {doc_url} (§5) — do not scan the disk."
-    return f"字段与 playbook：GET {doc_url}（§5）— 勿扫盘。"
+        return (
+            f"Before the first search, GET {doc_url} once (§3/§4 fields, §5 playbook) — "
+            "do not scan the disk."
+        )
+    return f"首次搜索前先 GET {doc_url} 一次（§3/§4 字段，§5 playbook）— 勿扫盘。"
 
 
 def _search_preset_summaries(*, limit: int = STARTER_PRESET_SNAPSHOT_LIMIT) -> Tuple[List[Dict[str, Any]], int]:
@@ -224,13 +227,18 @@ def _format_first_reply_instruction(
             "## First reply to the user (required)\n"
             "Your **first message** must briefly tell the user what you can help with **right now** "
             "(from the snapshot below; do not invent features). Include status, 3–6 example requests, "
-            "and limits. Then ask what to find or export. Do not call the API silently first.\n"
+            "and limits. Then ask what to find or export. "
+            "After that, list the indexed library with GET /libraries and GET /videos — "
+            "that is the library, not a disk walk. "
+            "Do not search or export until the user names a target.\n"
             f"{bullet_lines}"
         )
     return (
         "## 读完请先告诉用户（必读）\n"
         "**第一条回复**须用通俗中文说明此刻能帮用户做什么（依据下方快照，勿编造）。"
-        "含状态、3–6 条需求示例、不能做什么；再问想找/导出什么。**不要**先静默调 API。\n"
+        "含状态、3–6 条需求示例、不能做什么；再问想找/导出什么。"
+        "说完用 GET /libraries 和 GET /videos 列出已索引的片，这就是片库，不要 ls/扫盘。"
+        "用户没说找什么之前，不要搜索或导出。\n"
         f"{bullet_lines}"
     )
 
@@ -272,12 +280,19 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
             f"Folder changes: POST {api_base}/libraries/refresh then GET /videos?ready_only=false. "
             f"Whole library: POST {api_base}/index/sync. Never invent a path.\n"
             f"2. DEFAULT: one POST {batch_url} + export.output_dir for mp4. "
+            "copy adds ~2s each side; a point hit is already ±3s, so a 6s intent is about 10s. "
+            "Use encode_mode=original for an exact length. "
+            "Batch export keep_per_source defaults to 1; manifest sources mode defaults to 2. "
             f"Preset: {preset_body} | Folder: {folder_body}\n"
             "3. preset_id from snapshot or GET /search/presets; video_path only from API — never guess paths.\n"
             "4. Visual text search: YOU may set text_enhance true/false "
             "(phrase/synonym routes + CLIP pick + RRF; original query outweighs extras; "
             "hits within 2s collapse; score stays a similarity; not plot LLM; "
-            "check meta.text_enhance_applied).\n"
+            "check meta.text_enhance_applied). "
+            "Snapshot text_search_enhance_enabled is the default when text_enhance is omitted; "
+            "false does not mean the feature is missing. "
+            "min_score on visual search is the gap below this search's top score; "
+            "on fuzzy subtitles it is an absolute score.\n"
             "5. Non-default (user must ask): manifest, precise/preview_anchor_sec, intermediate JSON files.\n"
             f"6. Scope: GET {api_base}/libraries / GET {api_base}/videos when needed."
         )
@@ -287,11 +302,16 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
         f"文件夹有变动：POST {api_base}/libraries/refresh，再 GET /videos?ready_only=false。"
         f"整库：POST {api_base}/index/sync。轮询 index_sync_in_progress。禁止猜路径。\n"
         f"2. 默认：一次 POST {batch_url}，要 mp4 同 body 加 export.output_dir。"
+        "copy 在区间两侧各加约 2 秒；点命中已含 ±3 秒，想要 6 秒成片大约会到 10 秒。"
+        "要准时长用 encode_mode=original。"
+        "batch 导出的 keep_per_source 默认 1，manifest 的 sources 模式默认 2。"
         f"Preset：{preset_body} | 截图文件夹：{folder_body}\n"
         "3. preset_id 来自快照或 GET /search/presets；video_path 只来自 API — 禁止猜路径。\n"
         "4. 画面文搜：由你传 text_enhance true/false"
         "（短语/同义多路 + CLIP 挑选 + RRF；原句优先，2 秒内并成一镜，score 仍是相似度；"
-        "非剧情大模型；看 meta.text_enhance_applied）。\n"
+        "非剧情大模型；看 meta.text_enhance_applied）。"
+        "快照里的 text_search_enhance_enabled 是省略 text_enhance 时的默认，false 不是功能不可用。"
+        "画面搜索的 min_score 是距本次最高分的差距；字幕模糊匹配的 min_score 是绝对分。\n"
         "5. 非默认（须用户要求）：manifest、precise/preview_anchor_sec、中间 JSON 文件。\n"
         f"6. 缩 scope：GET {api_base}/libraries / GET {api_base}/videos。"
     )
