@@ -3664,6 +3664,7 @@ class RecapPackTests(unittest.TestCase):
         self.assertAlmostEqual(recap_target_sec(1440.0), 513.0)
         self.assertAlmostEqual(recap_target_sec(3600.0), 720.0)
         self.assertEqual(format_recap_clock(125.0), "02:05")
+        self.assertEqual(format_recap_clock(3665.0), "1:01:05")
         self.assertAlmostEqual(parse_recap_clock("02:05"), 125.0)
         self.assertAlmostEqual(parse_recap_clock("90"), 90.0)
 

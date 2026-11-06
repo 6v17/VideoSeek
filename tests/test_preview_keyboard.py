@@ -258,5 +258,17 @@ class ExpandedPreviewNudgeTests(unittest.TestCase):
         self.assertEqual(player.set_time.call_args_list[1].args[0], 18000)
 
 
+class TimecodeDisplayTests(unittest.TestCase):
+    def test_preview_and_result_clocks_roll_into_hours(self):
+        from ui.playback.expanded_preview_chrome import _format_ms
+        from ui.views.table_views import _format_time_range, _format_time_value
+
+        self.assertEqual(_format_ms(65_000), "01:05")
+        self.assertEqual(_format_ms(3_665_000), "1:01:05")
+        self.assertEqual(_format_time_value(3665), "1:01:05")
+        self.assertEqual(_format_time_range(3665, 3725, {}), "1:01:05-1:02:05")
+        self.assertEqual(_format_time_range(12, 18, {}), "00:12-00:18")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -681,7 +681,4 @@ def _format_segment_display_sec(value):
 
 
 def _format_ms(ms):
-    total_seconds = max(0, int(ms / 1000))
-    minutes = total_seconds // 60
-    seconds = total_seconds % 60
-    return f"{minutes:02d}:{seconds:02d}"
+    return format_timecode_seconds(max(0, int(ms)) / 1000.0)

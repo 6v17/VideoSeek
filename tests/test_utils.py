@@ -26,6 +26,9 @@ class FormatTimecodeTests(unittest.TestCase):
     def test_format_timecode_range_span(self):
         self.assertEqual(utils.format_timecode_range(12.0, 18.0), "00:12–00:18")
 
+    def test_format_timecode_range_rolls_hours(self):
+        self.assertEqual(utils.format_timecode_range(3665, 3725), "1:01:05–1:02:05")
+
 
 class ExportEncodeModeTests(unittest.TestCase):
     def test_normalize_export_encode_mode(self):

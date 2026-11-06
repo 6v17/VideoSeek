@@ -1,4 +1,6 @@
-"""Recap duration targets and MM:SS clock helpers.
+"""Recap duration targets and clock helpers.
+
+Clocks use MM:SS under one hour and H:MM:SS after that, same as search timecodes.
 
 ``recap_service`` re-exports these names.
 """
@@ -12,6 +14,7 @@ from src.services.recap_constants import (
     TARGET_RECAP_SEC,
 )
 from src.services.recap_match import recap_story_window
+from src.utils import format_timecode_seconds
 
 def recap_target_sec(duration_sec: float) -> float:
     """Scale recap length to the story window, clamped to about 3–12 minutes."""
@@ -29,12 +32,7 @@ def recap_duration_bounds(target_sec: float) -> tuple[float, float]:
 
 def format_recap_clock(sec: float) -> str:
     total = max(0.0, float(sec or 0.0))
-    minutes = int(total // 60)
-    seconds = int(round(total - minutes * 60.0))
-    if seconds >= 60:
-        minutes += 1
-        seconds = 0
-    return f"{minutes:02d}:{seconds:02d}"
+    return format_timecode_seconds(int(round(total)))
 
 def format_recap_clock_range(start: float, end: float) -> str:
     return f"{format_recap_clock(start)}–{format_recap_clock(end)}"

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.services.library_service import resolve_library_card_status
+from src.utils import format_timecode_seconds
 from src.storage.asset_store import load_model_metadata
 from src.app.config import load_config
 from src.app.path_display import video_display_name
@@ -660,11 +661,11 @@ def _build_result_actions(
     return container
 
 def _format_time_range(start_sec, end_sec, texts=None, match_kind="frame"):
-    start_text = f"{int(start_sec // 60):02d}:{int(start_sec % 60):02d}"
+    start_text = format_timecode_seconds(start_sec)
     if str(match_kind or "") == "video":
         template = (texts or {}).get("time_preview_label", "Preview ~{time}")
         return template.format(time=start_text)
-    end_text = f"{int(end_sec // 60):02d}:{int(end_sec % 60):02d}"
+    end_text = format_timecode_seconds(end_sec)
     if abs(float(end_sec) - float(start_sec)) < 1e-3:
         return start_text
     return f"{start_text}-{end_text}"
@@ -721,8 +722,4 @@ def _build_link_result_actions(video_path, match_sec, source_link, on_preview, o
 
 
 def _format_time_value(seconds):
-    seconds = max(0.0, float(seconds))
-    total = int(seconds)
-    mins = total // 60
-    secs = total % 60
-    return f"{mins:02d}:{secs:02d}"
+    return format_timecode_seconds(seconds)
