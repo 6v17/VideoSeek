@@ -602,6 +602,9 @@ class ResultGridCard(QFrame):
         self._on_add_to_shot_list = on_add_to_shot_list
 
         self.rank_label.setText(str(rank))
+        # Drop the previous hit's frame before apply_slot. Otherwise a recycled
+        # card paints that pixmap back and fast scrolling never replaces it.
+        self._source_pixmap = None
         self.thumb_label.setPixmap(QPixmap())
         self.thumb_label.setText(loading_text)
 

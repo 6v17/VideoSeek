@@ -124,6 +124,30 @@ class ResultGridVirtualizeTests(unittest.TestCase):
         self.assertGreater(max(after), max(before.values()))
         grid.hide()
 
+    def test_recycle_does_not_keep_previous_frame(self):
+        grid = self._show_grid(80, height=320)
+        pix = QPixmap(40, 24)
+        pix.fill(Qt.GlobalColor.red)
+        grid.set_thumbnail(0, pix)
+        card0 = grid.card_at(0)
+        self.assertIsNotNone(card0)
+        self.assertIsNotNone(card0._source_pixmap)
+        bar = grid.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        self.app.processEvents()
+        grid._sync_visible(force_rebind=True)
+        self.app.processEvents()
+        stale = 0
+        for card in grid._cards:
+            if not card.isVisible() or card._logical_index is None:
+                continue
+            if grid._items[card._logical_index].get("pixmap") is not None:
+                continue
+            if card._source_pixmap is not None:
+                stale += 1
+        self.assertEqual(stale, 0)
+        grid.hide()
+
     def test_set_thumbnail_offscreen_then_onscreen(self):
         grid = self._show_grid(80, height=320)
         pix = QPixmap(40, 24)
