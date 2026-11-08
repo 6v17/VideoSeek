@@ -9,6 +9,7 @@ from src.core.extract_frames import (
     FrameExtractionError,
     _build_cpu_extract_command,
     _build_d3d11va_extract_command,
+    _resolve_frame_layout,
     extract_frames_with_ffmpeg,
     stream_frames_with_ffmpeg,
 )
@@ -342,6 +343,54 @@ class ExtractFramesTests(unittest.TestCase):
             "hwdownload,format=nv12,fps=1.500000,scale=224:224:force_original_aspect_ratio=increase:flags=bicubic,crop=224:224",
             command,
         )
+
+    @patch(
+        "src.services.embedding_preprocess.resolve_embedding_preprocess",
+        return_value="center_crop",
+    )
+    def test_square_layout_uses_profile_image_size(self, _mock_preprocess):
+        config = {
+            "schema_version": 2,
+            "models": {
+                "active_profile": "siglip_384",
+                "profiles": [
+                    {
+                        "id": "siglip_384",
+                        "provider": "siglip2_onnx",
+                        "runtime": {"image_size": 384},
+                    }
+                ],
+            },
+        }
+        height, width, vf = _resolve_frame_layout("D:/video.mp4", 2.0, config)
+        self.assertEqual((height, width), (384, 384))
+        self.assertIn(
+            "scale=384:384:force_original_aspect_ratio=increase:flags=bicubic,crop=384:384",
+            vf,
+        )
+
+    @patch(
+        "src.services.embedding_preprocess.resolve_embedding_preprocess",
+        return_value="center_crop",
+    )
+    def test_square_layout_without_image_size_stays_224(self, _mock_preprocess):
+        for runtime in ({}, {"image_size": 0}, {"image_size": "nope"}):
+            config = {
+                "schema_version": 2,
+                "models": {
+                    "active_profile": "siglip_base",
+                    "profiles": [
+                        {
+                            "id": "siglip_base",
+                            "provider": "siglip2_onnx",
+                            "runtime": runtime,
+                        }
+                    ],
+                },
+            }
+            height, width, vf = _resolve_frame_layout("D:/video.mp4", 2.0, config)
+            self.assertEqual((height, width), (224, 224))
+            self.assertIn("scale=224:224:", vf)
 
     @patch("src.core.extract_frames.get_ffmpeg_path", return_value="ffmpeg")
     def test_build_cpu_command_uses_aspect_preserving_crop(self, _mock_ffmpeg):

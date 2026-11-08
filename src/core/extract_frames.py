@@ -25,8 +25,8 @@ def get_video_stream_info(path):
 
     return _impl(path)
 
-# Software decode + CPU filters. Square CLIP profiles output 224×224 BGR.
-# FG-CLIP2 keeps aspect and snaps to a 16px patch grid (at most 256 patches).
+# Software decode + CPU filters. Square CLIP profiles output image_size × image_size
+# BGR (default 224). FG-CLIP2 keeps aspect and snaps to a 16px patch grid (at most 256 patches).
 _DEFAULT_READ_TIMEOUT_SEC = 600.0
 _DECODE_BACKEND_CPU = "cpu"
 _DECODE_BACKEND_D3D11VA = "d3d11va"
@@ -111,14 +111,32 @@ def _build_startupinfo():
     return startupinfo
 
 
-def _build_frame_vf(fps):
+def _square_frame_size(config) -> int:
+    """Side length for square CLIP-family frames.
+
+    Reads the active profile's ``runtime.image_size``. Missing or invalid values
+    stay 224, so libraries imported before that field existed keep their frames.
+    """
+    from src.storage.config_store import get_active_model_profile
+
+    profile = get_active_model_profile(config=config)
+    runtime = profile.get("runtime") if isinstance(profile, dict) else None
+    raw = runtime.get("image_size") if isinstance(runtime, dict) else None
+    try:
+        size = int(raw or 224)
+    except (TypeError, ValueError):
+        size = 224
+    return size if size > 0 else 224
+
+
+def _build_frame_vf(fps, size=224):
     """fps + square geometry from the active profile lock (stretch or center-crop)."""
     from src.core.vision_preprocess import clip_frame_vf
     from src.services.embedding_preprocess import resolve_embedding_preprocess
 
     return clip_frame_vf(
         fps=float(fps),
-        size=224,
+        size=int(size),
         preprocess=resolve_embedding_preprocess(),
     )
 
@@ -126,14 +144,16 @@ def _build_frame_vf(fps):
 def _resolve_frame_layout(video_path, fps, config):
     """Return ``(height, width, vf)`` for one video.
 
-    Square CLIP profiles stay 224. FG-CLIP2 scales to the NaFlex patch grid so
-    the rawvideo pipe has a constant size without stretching the frame to a square.
+    Square CLIP-family profiles use the active runtime ``image_size`` (default 224).
+    FG-CLIP2 scales to the NaFlex patch grid so the rawvideo pipe has a constant
+    size without stretching the frame to a square.
     """
     from src.storage.config_store import get_active_model_profile
 
     provider = str(get_active_model_profile(config=config).get("provider") or "")
     if provider != "fgclip2_onnx":
-        return 224, 224, _build_frame_vf(fps)
+        size = _square_frame_size(config)
+        return size, size, _build_frame_vf(fps, size)
 
     info = get_video_stream_info(video_path) or {}
     src_w = int(info.get("width") or 0)
@@ -631,7 +651,7 @@ def stream_frames_with_ffmpeg(
 ):
     """Stream BGR frames + timestamps from ``video_path``.
 
-    Square CLIP profiles are 224×224. FG-CLIP2 keeps aspect on the NaFlex grid.
+    Square CLIP profiles are ``image_size`` × ``image_size`` (default 224). FG-CLIP2 keeps aspect on the NaFlex grid.
 
     If ``fps_override`` is set (remix / explicit sampling), it is used as the ``fps=`` filter rate.
     Otherwise the active config sampling rules are used (library indexing).
