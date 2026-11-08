@@ -80,13 +80,20 @@ class SigLIP2OnnxEngine(OnnxVisionBatchMixin):
         self._vision_input_name = self.visual_session.get_inputs()[0].name
 
     def preprocess_into(self, img_bgr, out_chw):
-        """Normalize one BGR frame into CHW float32 ``out_chw`` shaped (3, image_size, image_size)."""
+        """Normalize one BGR frame into CHW float32 ``out_chw`` shaped (3, image_size, image_size).
+
+        Indexing frames are already square at ``image_size``. Stills follow the
+        profile lock (center-crop or stretch) so they match those frames. This
+        is the library geometry, not SigLIP's reference square resize.
+        """
+        from src.core.vision_preprocess import resize_for_clip_rgb
+        from src.services.embedding_preprocess import resolve_embedding_preprocess
+
         img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         h, w = int(img.shape[0]), int(img.shape[1])
         size = self.image_size
         if h != size or w != size:
-            interp = cv2.INTER_AREA if (h > size or w > size) else cv2.INTER_LINEAR
-            img = cv2.resize(img, (size, size), interpolation=interp)
+            img = resize_for_clip_rgb(img, size, resolve_embedding_preprocess())
         tensor = img.astype(np.float32, copy=False)
         tensor *= 2.0 / 255.0
         tensor -= 1.0
