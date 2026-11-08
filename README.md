@@ -14,7 +14,7 @@ By default, indexing stays on your machine (ONNX · Lance · FFmpeg) and **media
 [Download](https://www.lv17.top/) · [Releases](https://github.com/6v17/VideoSeek/releases) · [User guide (ZH)](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) · QQ `1033551438`
 
 <p align="center">
-  <img src="docs/assets/图搜视频.png" alt="VideoSeek search UI" width="800">
+  <img src="docs/assets/文搜演示.gif" alt="Search a local library by describing a shot" width="800">
 </p>
 
 ---

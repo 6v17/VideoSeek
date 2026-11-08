@@ -14,7 +14,7 @@
 [官网下载](https://www.lv17.top/) · [Releases](https://github.com/6v17/VideoSeek/releases) · [使用教程](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) · QQ `1033551438`
 
 <p align="center">
-  <img src="docs/assets/图搜视频.png" alt="VideoSeek 搜索界面" width="800">
+  <img src="docs/assets/文搜演示.gif" alt="用一句话在本地视频库里搜镜头" width="800">
 </p>
 
 ---
