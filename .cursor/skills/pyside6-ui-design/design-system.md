@@ -54,7 +54,8 @@ Special chrome (nav, wizard steps, mode segments, toggles) keeps the role object
 
 ## Key layout constants (`layout.py`)
 
-- Main window preferred ~1360×850, min ~1080×680  
+- Main window preferred ~2040×850, min 1100×680 when the screen can hold it. Smaller desktops fit the work area; sidebar, results toolbar, and preview column shrink with the window.
+- Card gutter is `COMPONENT_SIZES["card_gap"]` (8): page header to body, stacked cards, and the search results/preview split.  
 - `search_compare_baseline_height` 540  
 - `result_table_min_height` 420  
 - `settings_input_width` 116, `settings_path_input_width` 520  

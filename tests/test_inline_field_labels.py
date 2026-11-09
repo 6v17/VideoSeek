@@ -9,6 +9,7 @@ os.environ.setdefault("VIDEOSEEK_TEST_MODE", "1")
 
 from PySide6.QtWidgets import QApplication, QLabel
 
+from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.search_panel import SearchPanel
 
 
@@ -58,6 +59,13 @@ class InlineFieldLabelLayoutTests(unittest.TestCase):
         self.assertEqual(panel.query_stack.count(), 6)
         panel.search_query_tabs.setCurrentIndex(3)
         self.assertIs(panel.query_stack.currentWidget(), panel.gallery_form)
+
+    def test_search_card_stays_a_short_two_line_strip(self):
+        panel = SearchPanel()
+        self.assertEqual(panel.height(), int(COMPONENT_SIZES["search_panel_open_height"]))
+        self.assertLessEqual(panel.height(), 100)
+        two_lines = panel.fontMetrics().lineSpacing() * 2 + 14
+        self.assertGreaterEqual(panel.text_search.height(), two_lines)
 
 
 if __name__ == "__main__":

@@ -175,13 +175,14 @@ class PageScaffold(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        gap = int(COMPONENT_SIZES["card_gap"])
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(12)
+        outer.setSpacing(gap)
         self.header = PageHeader()
         outer.addWidget(self.header)
         self.content_host = QWidget()
         self.content_layout = QVBoxLayout(self.content_host)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_layout.setSpacing(12)
+        self.content_layout.setSpacing(gap)
         outer.addWidget(self.content_host, 1)

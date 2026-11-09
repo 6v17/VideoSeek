@@ -71,7 +71,7 @@ class DialogueLibraryPage(QWidget):
 
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(0, 8, 0, 0)
+        body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(0)
 
         self.dialogue_table_card = VSCard(margins=(16, 14, 16, 14), spacing=12)

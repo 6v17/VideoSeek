@@ -366,10 +366,14 @@ class SearchPanel(VSCard):
     TAB_DIALOGUE = 3
 
     def __init__(self, parent=None):
-        card_margin = int(COMPONENT_SIZES.get("search_panel_card_margin", 12))
-        # Keep ≥6 so scope/mobile/mode rows do not sit on each other's borders.
-        row_spacing = max(6, int(COMPONENT_SIZES.get("search_panel_row_spacing", 4)))
-        super().__init__(parent, margins=(card_margin,) * 4, spacing=row_spacing)
+        card_margin = int(COMPONENT_SIZES.get("search_panel_card_margin", 8))
+        card_margin_v = int(COMPONENT_SIZES.get("search_panel_card_margin_v", 4))
+        row_spacing = int(COMPONENT_SIZES.get("search_panel_block_gap", 4))
+        super().__init__(
+            parent,
+            margins=(card_margin, card_margin_v, card_margin, card_margin_v),
+            spacing=row_spacing,
+        )
         layout = self.content_layout
         layout.setSpacing(row_spacing)
 
@@ -581,7 +585,7 @@ class SearchPanel(VSCard):
             placeholder = QWidget()
             placeholder.setMaximumHeight(0)
             self.search_query_tabs.addTab(placeholder, "")
-        self.search_query_tabs.setFixedHeight(36)
+        self.search_query_tabs.setFixedHeight(32)
         self.search_query_tabs.currentChanged.connect(self.query_stack.setCurrentIndex)
         # Text is the landing tab. Image search stays one click away.
         self.search_query_tabs.setCurrentIndex(1)
@@ -801,8 +805,8 @@ class SearchPanel(VSCard):
         self._default_width = default_width
         self.setMinimumWidth(0)
         self.setMaximumWidth(16777215)
-        # One short bar. The old card height belonged to the side preview, not the query.
-        self._default_height = 116
+        # One short bar. Vertical padding is tighter than the side margins.
+        self._default_height = int(COMPONENT_SIZES.get("search_panel_open_height", 100))
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._sync_card_height()
         self._apply_query_box_height()
@@ -899,7 +903,7 @@ class SearchPanel(VSCard):
         self._sync_card_height()
 
     def _sync_card_height(self) -> None:
-        """Open bar stays 116. A folded card is only the header button."""
+        """Open bar stays at the compact strip height. A folded card is only the header button."""
         if getattr(self, "_query_collapsed", False):
             margins = self.content_layout.contentsMargins()
             self.setFixedHeight(margins.top() + margins.bottom() + 28)
@@ -978,10 +982,11 @@ class SearchPanel(VSCard):
 
     def _apply_query_box_height(self) -> None:
         """Give the query field two text lines without growing the card."""
-        card = int(self._default_height or 116)
-        margin_v = int(COMPONENT_SIZES.get("search_panel_card_margin", 8)) * 2
-        spacing = max(6, int(COMPONENT_SIZES.get("search_panel_row_spacing", 4)))
-        tabs = self.search_query_tabs.height() or 36
+        card = int(self._default_height or COMPONENT_SIZES.get("search_panel_open_height", 100))
+        margins = self.content_layout.contentsMargins()
+        margin_v = int(margins.top() + margins.bottom())
+        spacing = int(self.content_layout.spacing())
+        tabs = self.search_query_tabs.height() or 32
         # Panel border sits outside the layout.
         available = card - margin_v - spacing - int(tabs) - 2
         line = max(16, self.fontMetrics().lineSpacing())

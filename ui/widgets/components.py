@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QSlider,
@@ -284,7 +285,20 @@ class NavigationSidebar(QWidget):
         self.btn_collapse.setFixedSize(28, 28)
         self.btn_collapse.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.btn_collapse.clicked.connect(self.collapse_requested.emit)
+        self.btn_sidebar_more = QToolButton()
+        self.btn_sidebar_more.setObjectName("SidebarIconButton")
+        self.btn_sidebar_more.setText("…")
+        self.btn_sidebar_more.setToolTip("更多")
+        self.btn_sidebar_more.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sidebar_more.setFixedSize(28, 28)
+        self.btn_sidebar_more.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.btn_sidebar_more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._sidebar_more_menu = QMenu(self.btn_sidebar_more)
+        self._sidebar_more_menu.aboutToShow.connect(self._fill_sidebar_more_menu)
+        self.btn_sidebar_more.setMenu(self._sidebar_more_menu)
+        self.btn_sidebar_more.hide()
         title_row.addWidget(self.title, 1)
+        title_row.addWidget(self.btn_sidebar_more, 0, Qt.AlignmentFlag.AlignTop)
         title_row.addWidget(self.btn_collapse, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(title_row)
         self.subtitle = QLabel("Local video search workspace")
@@ -294,6 +308,8 @@ class NavigationSidebar(QWidget):
 
         self.hero_card = QFrame()
         self.hero_card.setObjectName("HeroCard")
+        self.hero_card.setMinimumHeight(0)
+        self.hero_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         hero_layout = QVBoxLayout(self.hero_card)
         hero_layout.setContentsMargins(12, 10, 12, 10)
         hero_layout.setSpacing(4)
@@ -384,6 +400,69 @@ class NavigationSidebar(QWidget):
             button.setCursor(Qt.PointingHandCursor)
 
         layout.addWidget(self.footer_icon_row)
+        self._sidebar_fitting = False
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        self.fit_to_height()
+
+    def fit_to_height(self) -> None:
+        """Drop marketing chrome, then footer icons, as the sidebar gets shorter.
+
+        Button heights stay at the roomy size until both of those are already gone.
+        """
+        if self._sidebar_fitting:
+            return
+        height = int(self.height())
+        if height < 120:
+            return
+        self._sidebar_fitting = True
+        try:
+            for plan in ("full", "no_hero", "folded", "compact"):
+                self._apply_sidebar_plan(plan)
+                self._nav_layout.activate()
+                needed = self._sidebar_needed_height()
+                if needed <= height + 2:
+                    break
+        finally:
+            self._sidebar_fitting = False
+
+    def _sidebar_needed_height(self) -> int:
+        width = max(int(self.width()), int(COMPONENT_SIZES["sidebar_width"]))
+        layout = self._nav_layout
+        if layout.hasHeightForWidth():
+            return int(layout.heightForWidth(width))
+        return int(layout.sizeHint().height())
+
+    def _apply_sidebar_plan(self, plan: str) -> None:
+        compact = plan == "compact"
+        self._nav_layout.setSpacing(
+            int(COMPONENT_SIZES["sidebar_spacing_floor" if compact else "sidebar_spacing"])
+        )
+        self._nav_layout.setContentsMargins(12, 8 if compact else 16, 12, 8 if compact else 12)
+        nav_h = int(COMPONENT_SIZES["nav_button_height_floor" if compact else "nav_button_height"])
+        foot_h = int(COMPONENT_SIZES["sidebar_action_height_floor" if compact else "sidebar_action_height"])
+        for button in self._nav_buttons.values():
+            button.setFixedHeight(nav_h)
+        for button in (self.btn_notice, self.btn_about, self.btn_language):
+            button.setFixedHeight(foot_h)
+        for button in (self.btn_theme, self.btn_donate, self.btn_github, self.btn_bilibili, self.btn_qq):
+            button.setFixedHeight(foot_h)
+        self._sidebar_plan = plan
+        self.hero_card.setVisible(plan == "full")
+        show_icons = plan in {"full", "no_hero"}
+        self.footer_icon_row.setVisible(show_icons)
+        self.btn_sidebar_more.setVisible(not show_icons)
+
+    def _fill_sidebar_more_menu(self) -> None:
+        menu = self._sidebar_more_menu
+        menu.clear()
+        for button in (self.btn_theme, self.btn_donate, self.btn_github, self.btn_bilibili, self.btn_qq):
+            if button.isHidden():
+                continue
+            label = button.toolTip() or button.text() or " "
+            action = menu.addAction(label)
+            action.triggered.connect(lambda _checked=False, target=button: target.click())
 
     def _build_nav_button(self, text, checked=False):
         button = QPushButton(text)
@@ -391,7 +470,10 @@ class NavigationSidebar(QWidget):
         button.setCheckable(True)
         button.setChecked(checked)
         button.setCursor(Qt.PointingHandCursor)
-        button.setFixedHeight(COMPONENT_SIZES["nav_button_height"])
+        compact = getattr(self, "_sidebar_plan", "full") == "compact"
+        button.setFixedHeight(
+            int(COMPONENT_SIZES["nav_button_height_floor" if compact else "nav_button_height"])
+        )
         return button
 
     def register_nav_page(self, page_id: str, label: str, *, insert_after: str = "understanding"):
@@ -544,7 +626,6 @@ class SearchPage(QWidget):
         self.header = self.scaffold.header
         self.header.subtitle.hide()
         page_body = self.scaffold.content_layout
-        page_body.setSpacing(6)
 
         self.indexing_notice, self.indexing_notice_text = make_runtime_banner()
         self.indexing_notice.hide()
@@ -612,7 +693,7 @@ class SearchPage(QWidget):
         self.compare_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.compare_splitter.setObjectName("SearchCompareSplitter")
         self.compare_splitter.setChildrenCollapsible(False)
-        self.compare_splitter.setHandleWidth(10)
+        self.compare_splitter.setHandleWidth(int(COMPONENT_SIZES["card_gap"]))
         self._compare_splitter = self.compare_splitter
         self._compare_row = self.compare_splitter
         self._compare_sizes_set = False
@@ -673,9 +754,24 @@ class SearchPage(QWidget):
         self._results_view_group.addButton(self.btn_results_view_table, 0)
         self._results_view_group.addButton(self.btn_results_view_grid, 1)
 
+        self.btn_results_overflow = QToolButton()
+        self.btn_results_overflow.setObjectName("SidebarIconButton")
+        self.btn_results_overflow.setText("…")
+        self.btn_results_overflow.setToolTip("更多")
+        self.btn_results_overflow.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_results_overflow.setFixedSize(28, 28)
+        self.btn_results_overflow.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.btn_results_overflow.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._results_overflow_menu = QMenu(self.btn_results_overflow)
+        self._results_overflow_menu.aboutToShow.connect(self._fill_results_overflow_menu)
+        self.btn_results_overflow.setMenu(self._results_overflow_menu)
+        self.btn_results_overflow.hide()
+        self._results_actions_compact = False
+
         actions_layout.addWidget(self.results_view_segment)
         actions_layout.addWidget(self.btn_shot_list)
         actions_layout.addWidget(self.btn_export_tasks)
+        actions_layout.addWidget(self.btn_results_overflow)
 
         self.results_size_cluster = QWidget()
         self.results_size_cluster.setObjectName("SearchResultsSize")
@@ -690,8 +786,8 @@ class SearchPage(QWidget):
         self.results_size_slider.setSingleStep(10)
         self.results_size_slider.setPageStep(10)
         self.results_size_slider.setValue(100)
-        self.results_size_slider.setFixedWidth(112)
         self.results_size_slider.setFixedHeight(28)
+        self.results_size_slider.setFixedWidth(int(COMPONENT_SIZES["results_size_slider_width"]))
         self.results_size_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.results_size_value = QLabel("100%")
         self.results_size_value.setObjectName("SearchScoreValue")
@@ -707,8 +803,8 @@ class SearchPage(QWidget):
         self.btn_group_back.setFixedHeight(28)
         self.btn_group_back.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.btn_group_back.hide()
-        self.results_size_cluster.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.results_actions.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.results_size_cluster.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.results_actions.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         results_toolbar.addWidget(self.btn_group_back, 0)
         results_toolbar.addWidget(self.lbl_status, 0, Qt.AlignmentFlag.AlignVCenter)
         results_toolbar.addStretch(1)
@@ -732,7 +828,7 @@ class SearchPage(QWidget):
 
         self.browse_stack = QStackedWidget()
         self.browse_stack.setObjectName("SearchBrowseStack")
-        self.browse_stack.setMinimumWidth(280)
+        self.browse_stack.setMinimumWidth(int(COMPONENT_SIZES["results_column_min_width_floor"]))
         self.browse_stack.addWidget(self.results_slot)
 
         from ui.widgets.embedded_preview import EmbeddedPreviewLayer
@@ -760,7 +856,7 @@ class SearchPage(QWidget):
         # Results stay in the left column. Search sits above both columns.
         self._original_column = QWidget()
         self._original_column.setObjectName("SearchOriginalColumn")
-        self._original_column.setMinimumWidth(360)
+        self._original_column.setMinimumWidth(int(COMPONENT_SIZES["results_column_min_width"]))
         self._original_column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         original_layout = QVBoxLayout(self._original_column)
         original_layout.setContentsMargins(0, 0, 0, 0)
@@ -769,7 +865,7 @@ class SearchPage(QWidget):
 
         self.preview_column = QWidget()
         self.preview_column.setObjectName("SearchPreviewColumn")
-        self.preview_column.setMinimumWidth(320)
+        self.preview_column.setMinimumWidth(int(COMPONENT_SIZES["preview_column_min_width"]))
         self.preview_column.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         preview_column_layout = QVBoxLayout(self.preview_column)
         preview_column_layout.setContentsMargins(0, 0, 0, 0)
@@ -844,6 +940,7 @@ class SearchPage(QWidget):
         if active and self.browse_stack.currentWidget() is not self.results_slot:
             self.browse_stack.setCurrentWidget(self.results_slot)
         self._sync_docked_preview_face()
+        self.fit_results_toolbar()
         board = getattr(self, "gallery_board", None)
         if active and board is not None and board.isVisible():
             QTimer.singleShot(0, board.refit)
@@ -856,14 +953,17 @@ class SearchPage(QWidget):
             self._group_back_before_gallery = False
             button.hide()
             button.setToolTip("")
+            self.fit_results_toolbar()
             return
         button.setText(text)
         button.setToolTip(str(tip or "").strip())
         if getattr(self, "_gallery_results_active", False):
             self._group_back_before_gallery = True
             button.hide()
+            self.fit_results_toolbar()
             return
         button.show()
+        self.fit_results_toolbar()
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
@@ -884,15 +984,144 @@ class SearchPage(QWidget):
             panel.apply_viewport_budget(vh)
         splitter = getattr(self, "compare_splitter", None)
         if splitter is not None and not getattr(self, "_compare_sizes_set", False) and splitter.width() > 200:
+            results_floor, results_pref, preview_floor, _preview_pref = self._column_width_bounds()
+            room = int(splitter.width())
             if getattr(self, "_preview_collapsed", False):
                 preview_w = 36
             else:
-                preview_w = _DOCKED_PREVIEW_WIDTH
-            splitter.setSizes([max(0, splitter.width() - preview_w), preview_w])
+                preview_w = min(_DOCKED_PREVIEW_WIDTH, max(preview_floor, room - results_pref))
+                if room - preview_w < results_floor:
+                    preview_w = max(1, room - results_floor)
+            splitter.setSizes([max(0, room - preview_w), preview_w])
             self._compare_sizes_set = True
+        self.fit_results_toolbar()
+        self._fit_compare_columns()
         view = getattr(self, "result_view", None)
         if view is not None and hasattr(view, "set_viewport_min_height"):
             view.set_viewport_min_height(result_table_min_height(viewport_height=vh))
+
+    def _column_width_bounds(self) -> tuple[int, int, int, int]:
+        sizes = COMPONENT_SIZES
+        return (
+            int(sizes["results_column_min_width_floor"]),
+            int(sizes["results_column_min_width"]),
+            int(sizes["preview_column_min_width_floor"]),
+            int(sizes["preview_column_min_width"]),
+        )
+
+    def _results_actions_width(self, *, compact: bool) -> int:
+        if self._gallery_results_active:
+            return 0
+        spacing = 6
+        segment = int(self.results_view_segment.sizeHint().width())
+        if compact:
+            more = max(28, int(self.btn_results_overflow.sizeHint().width()))
+            return segment + spacing + more
+        shot = int(self.btn_shot_list.sizeHint().width())
+        export = int(self.btn_export_tasks.sizeHint().width())
+        return segment + spacing + shot + spacing + export
+
+    def _set_results_actions_compact(self, compact: bool) -> None:
+        gallery = bool(self._gallery_results_active)
+        self._results_actions_compact = bool(compact) and not gallery
+        self.results_view_segment.setVisible(not gallery)
+        show_labels = not gallery and not self._results_actions_compact
+        self.btn_shot_list.setVisible(show_labels)
+        self.btn_export_tasks.setVisible(show_labels)
+        self.btn_results_overflow.setVisible(self._results_actions_compact)
+
+    def _fill_results_overflow_menu(self) -> None:
+        menu = self._results_overflow_menu
+        menu.clear()
+        for button in (self.btn_shot_list, self.btn_export_tasks):
+            label = button.text() or button.toolTip() or " "
+            action = menu.addAction(label)
+            action.triggered.connect(lambda _checked=False, target=button: target.click())
+
+    def fit_results_toolbar(self) -> None:
+        """Shrink the size slider, then fold 素材篮 / 导出任务 into …, as the card narrows."""
+        card = getattr(self, "results_card", None)
+        if card is None:
+            return
+        margins = card.content_layout.contentsMargins()
+        width = int(card.contentsRect().width()) - margins.left() - margins.right()
+        if width < 80:
+            return
+        slider_max = int(COMPONENT_SIZES["results_size_slider_width"])
+        slider_min = int(COMPONENT_SIZES["results_size_slider_width_floor"])
+        back_visible = self.btn_group_back.isVisible()
+        back_w = int(self.btn_group_back.sizeHint().width()) if back_visible else 0
+        # Hidden widgets drop out of the row. Stretch and status stay, at zero width.
+        gaps = 40 if back_visible else 30
+        label_w = int(self.results_size_label.sizeHint().width())
+        value_w = max(int(self.results_size_value.sizeHint().width()), 36)
+        cluster_fixed = label_w + 12 + value_w
+        actions_full = self._results_actions_width(compact=False)
+        chrome = back_w + gaps + cluster_fixed + actions_full
+        need_full = chrome + slider_max
+        need_buttons = chrome + slider_min
+        if self._gallery_results_active or width >= need_buttons:
+            compact = False
+            slider = slider_max if width >= need_full else max(slider_min, width - chrome)
+            slider = min(slider_max, max(slider_min, slider))
+        else:
+            compact = True
+            slider = slider_min
+        self.results_size_slider.setFixedWidth(slider)
+        self._set_results_actions_compact(compact)
+
+    def _fit_compare_columns(self) -> None:
+        """Let results and preview share whatever width the splitter actually has."""
+        if getattr(self, "_compare_fitting", False):
+            return
+        if self._preview_collapsed or getattr(self, "_preview_column_yielded", False):
+            return
+        splitter = self.compare_splitter
+        results_floor, results_pref, preview_floor, preview_pref = self._column_width_bounds()
+        self._compare_fitting = True
+        try:
+            # Drop to the floor before measuring. A stale 360+320 minimum otherwise
+            # reports a width the viewport does not actually have.
+            self._original_column.setMinimumWidth(results_floor)
+            self.preview_column.setMinimumWidth(preview_floor)
+            self.preview_panel.setMinimumWidth(preview_floor)
+            self.browse_stack.setMinimumWidth(results_floor)
+            host = self.parentWidget()
+            total = int(splitter.width())
+            if host is not None and int(host.width()) > 80:
+                total = min(total, int(host.width()))
+            if total < 80:
+                return
+            available = max(0, total - int(splitter.handleWidth()))
+            if available >= results_pref + preview_pref:
+                results_min, preview_min = results_pref, preview_pref
+            else:
+                preview_min = min(preview_pref, max(preview_floor, available - results_pref))
+                results_min = min(results_pref, max(results_floor, available - preview_min))
+                if results_min + preview_min > available > 0:
+                    preview_min = max(1, min(preview_floor, available // 3))
+                    results_min = max(1, available - preview_min)
+            self._original_column.setMinimumWidth(results_min)
+            self.preview_column.setMinimumWidth(preview_min)
+            self.preview_panel.setMinimumWidth(preview_min)
+            self.browse_stack.setMinimumWidth(min(results_min, results_floor))
+            sizes = splitter.sizes()
+            if len(sizes) != 2:
+                return
+            results_w, preview_w = int(sizes[0]), int(sizes[1])
+            toolbar_need = (
+                (int(self.btn_group_back.sizeHint().width()) + 10 if self.btn_group_back.isVisible() else 0)
+                + int(self.results_size_cluster.sizeHint().width())
+                + int(self.results_actions.sizeHint().width())
+                + 20
+            )
+            if results_w < toolbar_need and preview_w > preview_min:
+                give = min(toolbar_need - results_w, preview_w - preview_min)
+                if give > 0:
+                    splitter.setSizes([results_w + give, preview_w - give])
+            self.updateGeometry()
+        finally:
+            self._compare_fitting = False
 
     def adopt_preview_width(self) -> None:
         """After the page grows, bring a squeezed preview back up to the docked width."""
@@ -908,7 +1137,7 @@ class SearchPage(QWidget):
         target = _DOCKED_PREVIEW_WIDTH
         if preview_w >= target:
             return
-        results_min = 360
+        _results_floor, results_min, _preview_floor, _preview_pref = self._column_width_bounds()
         column = getattr(self, "_original_column", None)
         if column is not None:
             results_min = int(column.minimumWidth())
@@ -998,14 +1227,18 @@ class SearchPage(QWidget):
                 splitter.setSizes([max(0, total - 36), 36])
         else:
             self.btn_preview_restore.hide()
-            column.setMinimumWidth(320)
+            _results_floor, _results_pref, preview_floor, _preview_pref = self._column_width_bounds()
+            column.setMinimumWidth(preview_floor)
             column.setMaximumWidth(16777215)
             self._sync_docked_preview_face()
             sizes = splitter.sizes()
             total = max(int(splitter.width()), sum(int(part) for part in sizes))
-            target = max(320, int(self._preview_width_before_collapse or _DOCKED_PREVIEW_WIDTH))
+            target = max(preview_floor, int(self._preview_width_before_collapse or _DOCKED_PREVIEW_WIDTH))
+            if total > preview_floor + _results_floor:
+                target = min(target, total - _results_floor)
             if total > target + 80:
                 splitter.setSizes([max(0, total - target), target])
+            self._fit_compare_columns()
             fit = getattr(self.preview_panel, "_fit_host_aspect", None)
             if callable(fit):
                 QTimer.singleShot(0, fit)
@@ -1048,15 +1281,17 @@ class SearchPage(QWidget):
         if self._preview_column_collapsed_before_yield:
             self.set_preview_collapsed(True, emit=False)
             return
-        column.setMinimumWidth(320)
+        _results_floor, _results_pref, preview_floor, _preview_pref = self._column_width_bounds()
+        column.setMinimumWidth(preview_floor)
         column.setMaximumWidth(16777215)
         self.btn_preview_restore.hide()
         self._sync_docked_preview_face()
         width = int(getattr(self, "_preview_column_width_before_yield", 0) or 0)
-        if width < 320:
+        if width < preview_floor:
             width = _DOCKED_PREVIEW_WIDTH
         total = max(int(splitter.width()), width + int(self._original_column.minimumWidth()))
         splitter.setSizes([max(0, total - width), width])
+        self._fit_compare_columns()
         self._schedule_video_follow()
 
     def set_results_display_scale(self, percent: int, *, emit: bool = True, snap: bool = False) -> None:
@@ -1197,7 +1432,7 @@ class LibraryPage(QWidget):
         # --- Panel: visual video library (one card: actions + tree) ---
         self.visual_tab = QWidget()
         visual_layout = QVBoxLayout(self.visual_tab)
-        visual_layout.setContentsMargins(0, 8, 0, 0)
+        visual_layout.setContentsMargins(0, 0, 0, 0)
         visual_layout.setSpacing(0)
 
         self.table_card = VSCard(margins=(16, 14, 16, 14), spacing=12)

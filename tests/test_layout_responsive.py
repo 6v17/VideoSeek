@@ -116,7 +116,7 @@ class LayoutResponsiveTests(unittest.TestCase):
         self.assertGreaterEqual(sizes[0], 200)
         self.assertGreaterEqual(sizes[1], 160)
 
-    def test_apply_window_size_clamps_minimum_to_available(self):
+    def test_apply_window_size_fits_a_short_desktop(self):
         class _Win:
             def __init__(self):
                 self.min_size = None
@@ -132,16 +132,44 @@ class LayoutResponsiveTests(unittest.TestCase):
                 self.size = size
 
         win = _Win()
-        with patch.object(layout_mod, "_available_size", return_value=QSize(1280, 640)):
+        floor = layout_mod.WINDOW_SIZES["main"]["minimum"]
+        self.assertGreaterEqual(floor.width(), 1100)
+        self.assertGreaterEqual(floor.height(), 680)
+        with patch.object(layout_mod, "_available_size", return_value=QSize(1024, 600)):
+            layout_mod.apply_window_size(
+                win,
+                preferred=QSize(2040, 850),
+                minimum=floor,
+                margin=72,
+            )
+        self.assertEqual(win.min_size, QSize(1024, 600))
+        self.assertEqual(win.size, QSize(1024, 600))
+
+    def test_apply_window_size_opens_preferred_when_screen_can_hold_it(self):
+        class _Win:
+            def __init__(self):
+                self.min_size = None
+                self.size = None
+
+            def setMinimumSize(self, w, h=None):
+                if isinstance(w, QSize):
+                    self.min_size = w
+                else:
+                    self.min_size = QSize(int(w), int(h))
+
+            def resize(self, size):
+                self.size = size
+
+        win = _Win()
+        with patch.object(layout_mod, "_available_size", return_value=QSize(1600, 900)):
             layout_mod.apply_window_size(
                 win,
                 preferred=QSize(1360, 850),
-                minimum=QSize(1024, 600),
+                minimum=QSize(1100, 680),
                 margin=72,
             )
-        self.assertIsNotNone(win.min_size)
-        self.assertLessEqual(win.min_size.height(), 640)
-        self.assertEqual(win.size, QSize(1280, 640))
+        self.assertEqual(win.min_size, QSize(1100, 680))
+        self.assertEqual(win.size, QSize(1360, 850))
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePol
 
 from ui.playback.expanded_preview_chrome import ExpandedPreviewChrome
 from ui.widgets.layout import (
+    COMPONENT_SIZES,
     compare_row_card_height,
     compare_row_min_height,
     layout_viewport_height,
@@ -169,7 +170,7 @@ class PreviewPanel(VSCard):
 
     def _apply_docked_geometry(self, viewport_height: int | None = None) -> None:
         del viewport_height
-        self.setMinimumWidth(320)
+        self.setMinimumWidth(int(COMPONENT_SIZES["preview_column_min_width_floor"]))
         self.setMinimumHeight(0)
         self.setMaximumHeight(16777215)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)

@@ -374,4 +374,7 @@ class ShotListGuiMixin:
         label = self.texts.get("shot_list", "Shot list")
         button.setText(f"{label} ({count})" if count else label)
         self._set_button_object_name(button, "PrimaryButton" if count else "GhostButton")
+        fit = getattr(self.search_page, "fit_results_toolbar", None)
+        if callable(fit):
+            fit()
         self._sync_preview_layer_actions()

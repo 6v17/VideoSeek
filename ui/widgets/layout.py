@@ -5,8 +5,10 @@ from PySide6.QtGui import QGuiApplication
 WINDOW_SIZES = {
     "main": {
         # 1400 was search-over-results. The preview is an added right column.
+        # 1100×680 is the roomy floor. Shorter desktops clamp to the screen, and the
+        # shell (sidebar, results toolbar, preview column) shrinks with that height.
         "preferred": QSize(2040, 850),
-        "minimum": QSize(1664, 600),
+        "minimum": QSize(1100, 680),
         "screen_margin": 72,
     },
     "about_dialog": {
@@ -41,9 +43,21 @@ WINDOW_SIZES = {
 }
 
 COMPONENT_SIZES = {
+    # One gutter between cards (and the page header, which is the same chrome).
+    "card_gap": 8,
     "sidebar_width": 248,
     "nav_button_height": 36,
+    "nav_button_height_floor": 30,
     "sidebar_action_height": 32,
+    "sidebar_action_height_floor": 28,
+    "sidebar_spacing": 8,
+    "sidebar_spacing_floor": 4,
+    "results_size_slider_width": 112,
+    "results_size_slider_width_floor": 64,
+    "results_column_min_width": 360,
+    "results_column_min_width_floor": 220,
+    "preview_column_min_width": 320,
+    "preview_column_min_width_floor": 200,
     "image_drop_min_height": 160,
     # High-DPI / short logical windows: compress drop zone before crushing option rows.
     "image_drop_min_height_floor": 100,
@@ -74,6 +88,9 @@ COMPONENT_SIZES = {
     "search_field_gap": 4,
     "search_controls_group_gap": 8,
     "search_panel_card_margin": 8,
+    "search_panel_card_margin_v": 4,
+    "search_panel_block_gap": 4,
+    "search_panel_open_height": 100,
     "search_panel_row_spacing": 8,
     "settings_path_input_width": 160,
     "understanding_form_label_width": 96,
@@ -281,14 +298,20 @@ def clamp_size(preferred, margin):
 
 
 def apply_window_size(window, preferred, minimum, margin):
+    """Open at the preferred size. The floor holds only when the screen can show it.
+
+    A shorter desktop keeps the window inside the work area. Inner chrome then
+    shrinks with the real size instead of staying at a fixed pixel size.
+    """
     target = clamp_size(preferred, margin)
     available = _available_size(margin)
-    min_width = min(minimum.width(), target.width())
-    min_height = min(minimum.height(), target.height())
+    min_width = max(1, int(minimum.width()))
+    min_height = max(1, int(minimum.height()))
     if available is not None:
-        # Keep mins inside ~95% of the usable desktop so high-DPI laptops are not forced taller.
-        min_width = min(min_width, max(320, int(available.width() * 0.95)))
-        min_height = min(min_height, max(240, int(available.height() * 0.95)))
+        min_width = min(min_width, int(available.width()))
+        min_height = min(min_height, int(available.height()))
+    min_width = min(min_width, int(target.width()))
+    min_height = min(min_height, int(target.height()))
     window.setMinimumSize(min_width, min_height)
     window.resize(target)
 

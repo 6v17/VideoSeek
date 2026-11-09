@@ -96,7 +96,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         content_layout = QVBoxLayout(self.scroll_content)
         # Small gutter between card edge and the always-on scrollbar track.
         content_layout.setContentsMargins(0, 0, 10, 0)
-        content_layout.setSpacing(16)
+        content_layout.setSpacing(int(COMPONENT_SIZES["card_gap"]))
         return content_layout, shell_layout
 
     def _init_settings_status_headers(self):

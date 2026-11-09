@@ -6,10 +6,14 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QFrame, QScrollArea
 
 from src.domain.search_hit import SearchHit
-from ui.widgets.components import SearchPage
+from ui.widgets.components import LibraryPage, NavigationSidebar, SearchPage
+from ui.widgets.dialogue_library_page import DialogueLibraryPage
+from ui.widgets.image_gallery_page import ImageGalleryPage
+from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.result_grid import grid_column_plan, grid_metrics
 from ui.widgets.result_view import VIEW_TABLE, ResultView, table_display_metrics
 
@@ -247,6 +251,99 @@ class SearchWorkspaceChromeTests(unittest.TestCase):
         self.assertFalse(bool(card._overlay_buttons[0].property("compact")))
         _row, col, _row_span, _col_span = card._actions_layout.getItemPosition(1)
         self.assertEqual(col, 1)
+
+    def test_card_gaps_use_one_compact_gutter(self):
+        gap = int(COMPONENT_SIZES["card_gap"])
+        self.assertEqual(gap, 8)
+
+        def _show(widget):
+            widget.resize(1100, 700)
+            widget.show()
+            self.app.processEvents()
+            return widget
+
+        def _vgap(top, bottom):
+            top_edge = top.mapToGlobal(top.rect().topLeft()).y() + top.height()
+            bottom_edge = bottom.mapToGlobal(bottom.rect().topLeft()).y()
+            return bottom_edge - top_edge
+
+        def _hgap(left, right):
+            left_edge = left.mapToGlobal(left.rect().topLeft()).x() + left.width()
+            right_edge = right.mapToGlobal(right.rect().topLeft()).x()
+            return right_edge - left_edge
+
+        page = _show(SearchPage())
+        self.assertEqual(_hgap(page.results_card, page.preview_panel), gap)
+        library = _show(LibraryPage())
+        dialogue = _show(DialogueLibraryPage())
+        gallery = _show(ImageGalleryPage())
+        self.assertEqual(_vgap(library.shared_toolbar_card, library.table_card), gap)
+        self.assertEqual(_vgap(dialogue.shared_toolbar_card, dialogue.dialogue_table_card), gap)
+        self.assertEqual(_vgap(gallery.shared_toolbar_card, gallery.table_card), gap)
+        for widget in (page, library, dialogue, gallery):
+            widget.hide()
+
+    def test_sidebar_drops_hero_when_the_column_is_short(self):
+        bar = NavigationSidebar()
+        bar.resize(248, 900)
+        bar.show()
+        self.app.processEvents()
+        bar.fit_to_height()
+        self.assertTrue(bar.hero_card.isVisible())
+        self.assertTrue(bar.footer_icon_row.isVisible())
+        self.assertFalse(bar.btn_sidebar_more.isVisible())
+
+        bar.resize(248, 460)
+        self.app.processEvents()
+        bar.fit_to_height()
+        self.assertFalse(bar.hero_card.isVisible())
+        self.assertLessEqual(bar._sidebar_needed_height(), bar.height() + 2)
+        bar.hide()
+
+    def test_results_toolbar_shrinks_then_folds_labels(self):
+        page = SearchPage()
+        page.btn_shot_list.setText("素材篮")
+        page.btn_export_tasks.setText("导出任务")
+        page.resize(1200, 700)
+        page.show()
+        self.app.processEvents()
+        page.results_card.resize(860, 240)
+        self.app.processEvents()
+        page.fit_results_toolbar()
+        self.assertFalse(page.btn_results_overflow.isVisible())
+        self.assertTrue(page.btn_shot_list.isVisible())
+        self.assertEqual(page.results_size_slider.width(), 112)
+
+        page.results_card.resize(280, 240)
+        self.app.processEvents()
+        page.fit_results_toolbar()
+        self.assertTrue(page.btn_results_overflow.isVisible())
+        self.assertFalse(page.btn_shot_list.isVisible())
+        self.assertFalse(page.btn_export_tasks.isVisible())
+        self.assertLessEqual(page.results_size_slider.width(), 64)
+        page._fill_results_overflow_menu()
+        labels = [action.text() for action in page._results_overflow_menu.actions()]
+        self.assertIn("素材篮", labels)
+        self.assertIn("导出任务", labels)
+        page.hide()
+
+    def test_compare_columns_share_a_narrow_splitter(self):
+        page = SearchPage()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(page)
+        scroll.resize(520, 480)
+        scroll.show()
+        self.app.processEvents()
+        page._fit_compare_columns()
+        results_min = page._original_column.minimumWidth()
+        preview_min = page.preview_column.minimumWidth()
+        self.assertLess(results_min, 360)
+        self.assertLess(preview_min, 320)
+        self.assertLessEqual(results_min + preview_min, scroll.viewport().width())
+        scroll.hide()
 
 
 if __name__ == "__main__":

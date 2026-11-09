@@ -1956,7 +1956,7 @@ QSplitter#SearchCompareSplitter {
 }
 QSplitter#SearchCompareSplitter::handle {
     background: transparent;
-    margin: 0 __SPACE_1__;
+    margin: 0;
     border-radius: __RADIUS_SM__;
 }
 QSplitter#SearchCompareSplitter::handle:hover,
