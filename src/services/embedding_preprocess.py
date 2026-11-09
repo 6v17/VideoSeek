@@ -1,7 +1,9 @@
-"""Per-profile lock for CLIP frame geometry (stretch vs center-crop).
+"""Per-profile lock for square CLIP frame geometry (stretch vs center-crop).
 
-Existing libraries keep stretch forever so multi-TB syncs never need a rebuild.
-Empty profiles lock to center-crop on first use.
+Existing libraries keep their lock. An unset library that already has vectors
+locks to stretch so a multi-TB sync never rebuilds. An empty library locks to
+that model's own training geometry: OpenAI CLIP center-crops; Chinese CLIP and
+fixed-resolution SigLIP2 stretch to square. FG-CLIP2 does not use this lock.
 """
 
 from __future__ import annotations
@@ -18,6 +20,16 @@ from src.core.vision_preprocess import (
 logger = logging.getLogger(__name__)
 
 _META_KEY = "embedding_preprocess"
+# OpenAI CLIP trains with a short-side resize plus a center crop.
+# Chinese CLIP and SigLIP2 so400m-224 train with a direct square resize.
+_CENTER_CROP_PROVIDERS = frozenset({"clip_onnx"})
+
+
+def official_square_preprocess(provider: str) -> str:
+    """Training geometry for a square vision provider. Unknown providers stretch."""
+    if str(provider or "").strip().lower() in _CENTER_CROP_PROVIDERS:
+        return PREPROCESS_CENTER_CROP
+    return PREPROCESS_STRETCH
 
 
 def profile_has_visual_assets(profile_base_dir: str) -> bool | None:
@@ -72,11 +84,15 @@ def set_locked_embedding_preprocess(profile_base_dir: str, mode: str) -> str:
 def resolve_embedding_preprocess(config=None) -> str:
     """Return the locked mode for the active profile, locking once if unset.
 
-    - Already locked → return as-is (never auto-migrate stretch → crop).
+    - Already locked → return as-is (never auto-migrate).
     - Unset + existing vectors/ready assets → lock ``stretch``.
-    - Unset + empty profile → lock ``center_crop``.
+    - Unset + empty profile → lock that provider's training geometry.
     """
-    from src.storage.config_store import get_local_model_asset_dirs, load_config
+    from src.storage.config_store import (
+        get_active_model_profile,
+        get_local_model_asset_dirs,
+        load_config,
+    )
 
     cfg = config if config is not None else load_config()
     base_dir = get_local_model_asset_dirs(config=cfg)["base_dir"]
@@ -92,7 +108,8 @@ def resolve_embedding_preprocess(config=None) -> str:
             base_dir,
         )
         return PREPROCESS_STRETCH
-    mode = PREPROCESS_STRETCH if has_assets else PREPROCESS_CENTER_CROP
+    provider = str(get_active_model_profile(config=cfg).get("provider") or "")
+    mode = PREPROCESS_STRETCH if has_assets else official_square_preprocess(provider)
     set_locked_embedding_preprocess(base_dir, mode)
     logger.info(
         "Locked embedding_preprocess=%s for profile %s",

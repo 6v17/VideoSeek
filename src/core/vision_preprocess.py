@@ -13,7 +13,7 @@ VALID_EMBEDDING_PREPROCESS = frozenset({PREPROCESS_STRETCH, PREPROCESS_CENTER_CR
 # Legacy issued packs stretched frames to square (scale only).
 CLIP_STRETCH_VF = "scale={size}:{size}:flags=bicubic"
 
-# Prefer for new empty profiles: keep aspect, then center-crop to square.
+# OpenAI CLIP training geometry: keep aspect, then center-crop to square.
 CLIP_SQUARE_VF = (
     "scale={size}:{size}:force_original_aspect_ratio=increase:flags=bicubic,"
     "crop={size}:{size}"

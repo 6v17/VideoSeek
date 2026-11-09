@@ -197,7 +197,7 @@ sequenceDiagram
 
 - Provider 通过 `register_inference_engine(provider_id, factory)` 注册。
 - `clip_embedding.get_engine()` 按当前 profile 的 `provider` 经 `build_inference_engine` 解析。
-- 内置：**`clip_onnx`**、**`siglip2_onnx`**、**`chinese_clip_onnx`**。
+- 内置：**`clip_onnx`**、**`siglip2_onnx`**、**`chinese_clip_onnx`**、**`fgclip2_onnx`**。
 - 未知 `provider` **直接失败**（不静默换模型，否则会污染检索结果）。
 - 磁盘布局：`config_store.resolve_provider_dir()`；向量在 `data/model_assets/<provider_dir>/<variant>/`。
 - 同族大档（224）：`scripts/vision_model_pack_specs.py` + `export_*_onnx.py` / `pack_vision_model_zip.py`；manifest 需带 `embedding_dimension`（OpenAI L=768，SigLIP2 so400m=1152）。
@@ -208,7 +208,16 @@ sequenceDiagram
 2. 在 `clip_embedding._register_default_inference_engines` 里 `register_inference_engine("<provider>_onnx", factory)`。
 3. 在 `resolve_provider_dir()` 映射目录名。
 4. 在 `model_package_service` / `model_service` 补 manifest 默认值。
-5. 用户切换 profile 后须 **重建媒体库索引**。
+5. 用户切换 profile 后须 **重建媒体库索引**。方图模型还要在 `official_square_preprocess` 写明训练几何（见下）。
+
+### 画面几何（按库锁定）
+
+方图模型的预处理锁在该库目录的 meta 里，键 `embedding_preprocess`。窗口搜索、建库、本机 Agent API、团队搜图都走 `encode_images` → `resolve_embedding_preprocess()`，读的是**当前模型库**这一把锁。调用方若直接传 `query_vector`，接口原样比较，不再裁切。
+
+- 锁已经写上：搜索和后续建库都沿用，不自动改。改锁等于要求整库重嵌。
+- 还没写锁、库里已有向量：锁成 `stretch`（直接缩成正方形）。这是旧库的几何。
+- 空库第一次用：按模型的训练方式锁一次。OpenAI CLIP 为 `center_crop`（短边对齐后中心裁方）。Chinese CLIP 与固定分辨率 SigLIP2 为 `stretch`。
+- FG-CLIP2 不读这把锁。抽帧按宽高比缩到最多 256 个 16×16 patch（NaFlex）。
 
 ## 配置
 
@@ -280,6 +289,7 @@ docs/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-11-09 | 补画面几何：方图预处理按库锁定；空库跟各模型训练方式；FG-CLIP2 走 NaFlex |
 | 2026-11-06 | 概览补上云嵌入、文搜增强、跳过时段、图库、用户机检索。用户机可文字搜和图搜，同步留在本机或服务机 |
 | 2026-09-04 | 模糊搜索排序：完整子集优先于散落命中；CAM++ 权重入库；剪映 / 解说剪辑文档对齐 |
 | 2026-08-16 | 对齐 Lance 主线：建索引段去掉 FAISS/远程库检索；`agent_api/` 包路径；去掉对私有/缺失文档的硬链 |
