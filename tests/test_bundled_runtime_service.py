@@ -170,6 +170,40 @@ class BundledRuntimeServiceTests(unittest.TestCase):
             self.assertNotIn("ffmpeg.exe", names)
             self.assertNotIn("rapidocr-zh-understanding.zip", names)
 
+    def test_plan_supplemental_imports_missing_fgclip2_without_switching_profile(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_dir = os.path.join(temp_dir, "runtime")
+            os.makedirs(runtime_dir)
+            Path(runtime_dir, "ffmpeg.exe").write_bytes(b"ffmpeg")
+            Path(runtime_dir, "fgclip2-onnx.zip").write_bytes(b"zip")
+            with open(os.path.join(runtime_dir, "manifest.json"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "files": ["ffmpeg.exe", "fgclip2-onnx.zip"],
+                        "prefer_active_profile_id": "fgclip2_base",
+                    },
+                    handle,
+                )
+            ready_status = {
+                "resources_ready": True,
+                "model_ready": True,
+                "ffmpeg_ready": True,
+                "model_root_dir": os.path.join(temp_dir, "models"),
+                "model_dir": os.path.join(temp_dir, "models"),
+            }
+            with (
+                patch("src.services.bundled_runtime_service.get_bundled_runtime_dir", return_value=runtime_dir),
+                patch("src.services.runtime_resource_service.get_runtime_resource_status", return_value=ready_status),
+                patch("src.utils.has_ffmpeg", return_value=True),
+            ):
+                plan = bundled_runtime_service.plan_bundled_import(runtime_dir=runtime_dir)
+
+            self.assertTrue(plan.get("supplemental"))
+            self.assertFalse(plan.get("switch_active_profile"))
+            names = {os.path.basename(path).lower() for path in plan.get("paths") or []}
+            self.assertIn("fgclip2-onnx.zip", names)
+            self.assertNotIn("ffmpeg.exe", names)
+
 
 if __name__ == "__main__":
     unittest.main()

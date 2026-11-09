@@ -43,9 +43,9 @@ python import_runtime_resources.py --status
 ### 版本号（正式 / QQ 群测）
 
 - **运行时版本：** `src/app/app_meta.py` 的 `version`（窗口标题、关于页、打包 `VERSION.txt` 都读它）。改版时同步 `pyproject.toml` 的 `version`。
-- **群测：** `1.0.93-beta.1`（同一基线可 `.2`…）；包名 `VideoSeek-1.0.93-beta.1.zip`；**不要**写入公开 `version.json`。
-- **正式：** `1.0.93`（以 `app_meta.py` 为准）；打 tag `v1.0.93`；再更新 OSS `version.json`。
-- 比较规则：同基线时 `beta` **小于** 正式版（`1.0.93-beta.1` < `1.0.93`）。
+- **群测：** `1.0.94-beta.1`（同一基线可 `.2`…）；包名 `VideoSeek-1.0.94-beta.1.zip`；**不要**写入公开 `version.json`。
+- **正式：** `1.0.94`（以 `app_meta.py` 为准）；打 tag `v1.0.94`；再更新 OSS `version.json`。
+- 比较规则：同基线时 `beta` **小于** 正式版（`1.0.94-beta.1` < `1.0.94`）。
 - **安装包**：请从 [GitHub Releases](https://github.com/6v17/VideoSeek/releases) 下载官方包。完整打包脚本（Nuitka / Inno）**不公开**，由维护者本地使用。
 - 完整版安装后首启：主窗口先显示，再在后台导入自带 `runtime\`（顶栏进度，不挡界面）。**老用户**只补缺包，**不改当前检索模型**。Agent：`VideoSeek.exe --bootstrap-runtime`。
 - **CAM++：** 仓库已带 `resources/asr/campplus.onnx` + `.onnx.data`（解说对白声线聚类）；也可从桌面资源包 `cam++.zip` 导入。

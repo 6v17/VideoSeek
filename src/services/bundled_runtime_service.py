@@ -53,6 +53,24 @@ def resolve_bundled_runtime_paths(*, runtime_dir: str | None = None) -> list[str
     return paths
 
 
+def is_fgclip2_bundled_variant_installed(*, model_root: str | None = None) -> bool:
+    from src.services.model_package_service import PROVIDER_REQUIRED_MODEL_FILES
+    from src.services.runtime_resource_service import get_runtime_resource_status
+
+    status = get_runtime_resource_status()
+    root = str(model_root or status.get("model_root_dir") or status.get("model_dir") or "").strip()
+    if not root:
+        from src.utils import get_app_data_dir
+
+        root = os.path.join(get_app_data_dir(), "models")
+    variant_dir = os.path.join(root, "fgclip2-onnx", "base")
+    manifest_path = os.path.join(variant_dir, "model_manifest.json")
+    if not os.path.isfile(manifest_path):
+        return False
+    required = list(PROVIDER_REQUIRED_MODEL_FILES.get("fgclip2_onnx") or [])
+    return all(os.path.isfile(os.path.join(variant_dir, name)) for name in required)
+
+
 def is_chinese_clip_bundled_variant_installed(*, model_root: str | None = None) -> bool:
     from src.services.model_package_service import PROVIDER_REQUIRED_MODEL_FILES
     from src.services.runtime_resource_service import get_runtime_resource_status
@@ -111,6 +129,9 @@ def plan_bundled_import(*, runtime_dir: str | None = None) -> dict[str, Any]:
                     selected.append(path)
             elif "chinese-clip" in name:
                 if not is_chinese_clip_bundled_variant_installed():
+                    selected.append(path)
+            elif "fgclip2" in name:
+                if not is_fgclip2_bundled_variant_installed():
                     selected.append(path)
             elif "rapidocr" in name:
                 if not is_bundled_rapidocr_installed():
