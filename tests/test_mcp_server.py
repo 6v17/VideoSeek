@@ -1,9 +1,24 @@
 import io
 import json
+import os
+import tempfile
+import threading
+import time
 import unittest
+import urllib.error
 from unittest.mock import patch
 
-from src.web.mcp_server import AgentHttpClient, cursor_mcp_config, handle_message, serve
+from src.web.mcp_server import (
+    AgentApiUnreachable,
+    AgentHttpClient,
+    _MSG_API_OFF,
+    _MSG_HEALTH,
+    _MSG_TIMEOUT,
+    cursor_mcp_config,
+    handle_message,
+    recover_local_api,
+    serve,
+)
 
 
 class FakeApi(AgentHttpClient):
@@ -233,6 +248,97 @@ class McpToolRoutingTests(unittest.TestCase):
                 query={"ready_only": True},
             )
         self.assertIn("ready_only=true", captured["url"])
+
+
+class InstanceLockTests(unittest.TestCase):
+    def test_dead_pid_is_ignored(self):
+        from src.app.instance_lock import pid_alive, read_instance_lock
+
+        self.assertTrue(pid_alive(os.getpid()))
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "agent_api.dev.lock")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump({"pid": 424242, "port": 8765, "api_enabled": True}, handle)
+            with patch("src.app.instance_lock.instance_lock_path", return_value=path):
+                with patch("src.app.instance_lock.pid_alive", return_value=False):
+                    self.assertIsNone(read_instance_lock())
+
+
+class RecoverLocalApiTests(unittest.TestCase):
+    def test_running_app_with_api_off_does_not_launch(self):
+        client = AgentHttpClient("http://127.0.0.1:9")
+        with patch(
+            "src.app.instance_lock.read_instance_lock",
+            return_value={"pid": 1, "api_enabled": False},
+        ):
+            with patch("src.web.mcp_server.subprocess.Popen") as popen:
+                with patch(
+                    "src.web.mcp_server.urllib.request.urlopen",
+                    side_effect=urllib.error.URLError("refused"),
+                ):
+                    with self.assertRaises(AgentApiUnreachable) as caught:
+                        client.request_json("GET", "/api/v1/health", timeout=1)
+        popen.assert_not_called()
+        self.assertIn("本机 Agent API", str(caught.exception))
+        self.assertEqual(str(caught.exception), _MSG_API_OFF)
+
+    def test_health_failure_is_not_a_closed_port(self):
+        client = AgentHttpClient("http://127.0.0.1:8765")
+
+        class _Response:
+            status = 500
+
+            def read(self):
+                return b'{"ok": false}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        with patch(
+            "src.app.instance_lock.read_instance_lock",
+            return_value={"pid": 1, "api_enabled": True},
+        ):
+            with patch("src.web.mcp_server.urllib.request.urlopen", return_value=_Response()):
+                self.assertEqual(recover_local_api(client), _MSG_HEALTH)
+
+    def test_launch_timeout_message(self):
+        client = AgentHttpClient("http://127.0.0.1:9")
+        with patch("src.app.instance_lock.read_instance_lock", return_value=None):
+            with patch("src.web.mcp_server.subprocess.Popen", return_value=unittest.mock.Mock()):
+                with patch("src.web.mcp_server._HEALTH_WAIT_SEC", 0):
+                    with patch(
+                        "src.web.mcp_server.urllib.request.urlopen",
+                        side_effect=urllib.error.URLError("refused"),
+                    ):
+                        self.assertEqual(recover_local_api(client), _MSG_TIMEOUT)
+
+    def test_parallel_callers_launch_once(self):
+        calls = []
+
+        def _slow(*_args, **_kwargs):
+            calls.append(1)
+            time.sleep(0.3)
+            return "ready"
+
+        barrier = threading.Barrier(2)
+        results = []
+
+        def _worker():
+            barrier.wait(timeout=2)
+            results.append(recover_local_api(AgentHttpClient("http://127.0.0.1:9")))
+
+        with patch("src.app.instance_lock.read_instance_lock", return_value=None):
+            with patch("src.web.mcp_server._launch_and_wait", side_effect=_slow):
+                threads = [threading.Thread(target=_worker) for _ in range(2)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=3)
+        self.assertEqual(calls, [1])
+        self.assertEqual(results, ["ready", "ready"])
 
 
 if __name__ == "__main__":

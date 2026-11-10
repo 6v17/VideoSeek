@@ -49,6 +49,12 @@ if __name__ == "__main__":
 
     single_instance_server = SingleInstanceServer(parent=app)
     app._videoseek_single_instance = single_instance_server
+    from src.app.instance_lock import configured_api_enabled, remove_instance_lock, write_instance_lock
+
+    try:
+        write_instance_lock(api_enabled=configured_api_enabled())
+    except Exception:
+        logger.exception("Could not write the instance lock")
 
     # 设置全局字体
     font = app.font()
@@ -85,6 +91,7 @@ if __name__ == "__main__":
     if getattr(window, "startup_cancelled", False):
         logger.info("Startup cancelled before main window was shown")
         single_instance_server.close()
+        remove_instance_lock()
         sys.exit(0)
 
     class _FirstPaintProbe(QObject):
@@ -132,5 +139,6 @@ if __name__ == "__main__":
         single_instance_server.close()
     except Exception:
         pass
+    remove_instance_lock()
     logger.info("Application exiting with code %s", exit_code)
     sys.exit(exit_code)

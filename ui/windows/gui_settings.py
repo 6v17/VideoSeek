@@ -1393,6 +1393,7 @@ class SettingsGuiMixin:
     def copy_mcp_config(self):
         from src.web.mcp_server import cursor_mcp_config_text
 
+        self._enable_local_agent_api_for_mcp()
         QApplication.clipboard().setText(cursor_mcp_config_text())
         self.settings_page.lbl_status.setText(
             self.texts.get(
@@ -1400,6 +1401,24 @@ class SettingsGuiMixin:
                 "MCP config copied.",
             )
         )
+
+    def _enable_local_agent_api_for_mcp(self) -> None:
+        """Turning on MCP is the consent to open the loopback search API."""
+        share_mode = str(self.settings_page.input_team_mode.currentData() or "off")
+        if share_mode in {"server", "client"}:
+            return
+        config = load_config()
+        config["agent_api_enabled"] = True
+        save_config(config)
+        page = self.settings_page
+        page.input_agent_api_enabled.setCurrentIndex(1)
+        agent_index = page.input_team_mode.findData("agent")
+        if agent_index >= 0:
+            page.input_team_mode.blockSignals(True)
+            page.input_team_mode.setCurrentIndex(agent_index)
+            page.input_team_mode.blockSignals(False)
+        self._update_share_mode_chrome("agent")
+        self._apply_agent_api_settings()
 
     def reset_settings(self):
         try:

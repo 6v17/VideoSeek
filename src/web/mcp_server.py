@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,6 +34,14 @@ _SCAN_ACCEPT_TIMEOUT_SEC = 180
 _TIMELINE_TIMEOUT_HINT = (
     "timeline 输出上限 60 秒，超时返回 engine_busy；重试前减少 items 或改 output=manifest。"
 )
+_HEALTH_WAIT_SEC = 20.0
+_MSG_API_OFF = (
+    "VideoSeek 已在运行，但本机搜索接口没开。"
+    "请到设置里把搜索接口选成「本机 Agent API」并保存。"
+)
+_MSG_HEALTH = "接口在听，健康检查失败。"
+_MSG_TIMEOUT = "启动超时，请手动打开 VideoSeek。"
+_MSG_OPEN = "请先打开 VideoSeek。"
 
 _PATH_RULE = (
     "video_path 和 library_path 必须原样来自本次对话里更早的工具结果，或用户明确给出的绝对路径。"
@@ -293,6 +304,7 @@ class AgentHttpClient:
         query: Mapping[str, Any] | None = None,
         body: Mapping[str, Any] | None = None,
         timeout: float = 60,
+        recover: bool = True,
     ) -> tuple[int, Any]:
         url = self.base_url + path
         if query:
@@ -321,11 +333,19 @@ class AgentHttpClient:
             raw = exc.read()
             status = int(exc.code)
         except urllib.error.URLError as exc:
-            raise AgentApiUnreachable(
-                "连不上本机 VideoSeek 接口（"
-                + self.base_url
-                + "）。请打开 VideoSeek，搜索接口选「本机 Agent API」并保存。"
-            ) from exc
+            if not recover:
+                raise AgentApiUnreachable(_MSG_OPEN) from exc
+            outcome = recover_local_api(self)
+            if outcome != "ready":
+                raise AgentApiUnreachable(outcome) from exc
+            return self.request_json(
+                method,
+                path,
+                query=query,
+                body=body,
+                timeout=timeout,
+                recover=False,
+            )
         if not raw:
             return status, {}
         try:
@@ -345,6 +365,83 @@ def default_api_base() -> str:
 
 def repo_root() -> str:
     return str(Path(__file__).resolve().parents[2])
+
+
+class _LaunchGate:
+    """One in-flight launch shared by parallel tools/call requests."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._running = False
+        self._result = ""
+
+    def run(self, start) -> str:
+        with self._condition:
+            if self._running:
+                while self._running:
+                    self._condition.wait()
+                return self._result
+            self._running = True
+        try:
+            result = start()
+        except Exception:
+            result = _MSG_OPEN
+        with self._condition:
+            self._result = result
+            self._running = False
+            self._condition.notify_all()
+        return result
+
+
+_launch_gate = _LaunchGate()
+
+
+def recover_local_api(client: AgentHttpClient) -> str:
+    """Return ``ready`` or a message the model can show. Launch at most once at a time."""
+    from src.app.instance_lock import read_instance_lock
+
+    running = read_instance_lock()
+    if running is not None:
+        if running.get("api_enabled"):
+            return _wait_until_healthy(client)
+        return _MSG_API_OFF
+    return _launch_gate.run(lambda: _launch_and_wait(client))
+
+
+def _launch_and_wait(client: AgentHttpClient) -> str:
+    command, workdir = _gui_launch_command()
+    kwargs: dict[str, Any] = {"cwd": workdir, "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    try:
+        subprocess.Popen(command, **kwargs)
+    except OSError:
+        return _MSG_OPEN
+    return _wait_until_healthy(client)
+
+
+def _wait_until_healthy(client: AgentHttpClient) -> str:
+    deadline = time.monotonic() + _HEALTH_WAIT_SEC
+    while time.monotonic() < deadline:
+        try:
+            status, payload = client.request_json("GET", "/api/v1/health", timeout=2, recover=False)
+        except AgentApiUnreachable:
+            time.sleep(0.4)
+            continue
+        if status == 200 and (not isinstance(payload, dict) or payload.get("ok") is not False):
+            return "ready"
+        return _MSG_HEALTH
+    return _MSG_TIMEOUT
+
+
+def _gui_launch_command() -> tuple[list[str], str]:
+    root = repo_root()
+    main_py = os.path.join(root, "main.py")
+    if os.path.isfile(main_py):
+        return [sys.executable, main_py], root
+    return [sys.executable], os.path.dirname(os.path.abspath(sys.executable))
 
 
 def cursor_mcp_config() -> dict[str, Any]:

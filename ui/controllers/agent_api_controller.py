@@ -43,6 +43,7 @@ class AgentApiController(QObject):
         except Exception:
             logger.exception("Failed to start Agent API.")
             return None
+        self._mark_api_enabled(True)
         return self.get_base_url()
 
     def stop(self):
@@ -50,6 +51,15 @@ class AgentApiController(QObject):
         if self._service is None:
             return
         self._service.stop()
+        self._mark_api_enabled(False)
+
+    def _mark_api_enabled(self, enabled: bool) -> None:
+        try:
+            from src.app.instance_lock import update_instance_lock
+
+            update_instance_lock(api_enabled=enabled)
+        except Exception:
+            logger.debug("Instance lock update skipped", exc_info=True)
 
     def _bind_index_sync(self):
         if self._sync_bound:
