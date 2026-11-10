@@ -39,7 +39,10 @@ def configured_api_enabled() -> bool:
         from src.app.config import load_config
 
         return bool(load_config().get("agent_api_enabled", False))
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/app/instance_lock.py:configured_api_enabled")
         return False
 
 
