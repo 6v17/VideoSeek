@@ -71,7 +71,8 @@ def create_preview_clip(input_path, start_sec, output_path, duration_sec=None):
         "-movflags",
         "+faststart",
     ]
-    tmp_path = f"{output_path}.{uuid.uuid4().hex}.part"
+    # ffmpeg picks the muxer from the suffix. ".part" is not a format it knows.
+    tmp_path = f"{output_path}.{uuid.uuid4().hex}.part.mp4"
     cmd.append(tmp_path)
 
     startupinfo = None

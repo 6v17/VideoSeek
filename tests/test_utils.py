@@ -122,6 +122,9 @@ class PreviewClipEncodeConfigTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-tune") + 1], "film")
         self.assertEqual(cmd[cmd.index("-crf") + 1], "28")
         self.assertEqual(cmd[cmd.index("-b:a") + 1], "96k")
+        tmp_name = cmd[-1]
+        self.assertTrue(tmp_name.endswith(".mp4"))
+        self.assertNotIn(".part", os.path.splitext(tmp_name)[1])
 
 
 class ExportClipEncodeConfigTests(unittest.TestCase):
