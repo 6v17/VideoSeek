@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -14,6 +15,7 @@ from src.web.mcp_server import (
     _MSG_API_OFF,
     _MSG_HEALTH,
     _MSG_TIMEOUT,
+    _force_utf8_stdio,
     cursor_mcp_config,
     handle_message,
     recover_local_api,
@@ -64,6 +66,8 @@ class McpProtocolTests(unittest.TestCase):
         server = config["mcpServers"]["videoseek"]
         self.assertEqual(server["args"], ["-m", "src.web.mcp_server"])
         self.assertTrue(server["cwd"])
+        self.assertEqual(server["env"]["PYTHONUTF8"], "1")
+        self.assertEqual(server["env"]["PYTHONIOENCODING"], "utf-8")
 
     def test_packaged_cursor_config_calls_the_exe(self):
         with patch("src.infra.paths.is_standalone_app", return_value=True):
@@ -73,6 +77,41 @@ class McpProtocolTests(unittest.TestCase):
         self.assertNotIn("-m", server["args"])
         self.assertEqual(server["cwd"], "D:/VideoSeek")
         self.assertTrue(server["command"])
+        self.assertEqual(server["env"]["PYTHONIOENCODING"], "utf-8")
+
+    def test_tool_list_is_utf8_when_stdout_locale_is_gbk(self):
+        raw = io.BytesIO()
+        stdout = io.TextIOWrapper(raw, encoding="gbk")
+        serve(
+            FakeApi(),
+            io.StringIO('{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n'),
+            stdout,
+        )
+        parsed = json.loads(raw.getvalue().decode("utf-8"))
+        description = parsed["result"]["tools"][0]["description"]
+        self.assertIn("列出", description)
+        self.assertNotIn("\ufffd", description)
+
+    def test_force_utf8_stdio_reconfigures_pipes(self):
+        stream = unittest.mock.Mock()
+        with (
+            patch.object(sys, "stdin", stream),
+            patch.object(sys, "stdout", stream),
+            patch.object(sys, "stderr", stream),
+        ):
+            _force_utf8_stdio()
+        self.assertEqual(stream.reconfigure.call_count, 3)
+        stream.reconfigure.assert_called_with(encoding="utf-8", newline="\n")
+
+    def test_force_utf8_stdio_ignores_a_fixed_encoding(self):
+        stream = unittest.mock.Mock()
+        stream.reconfigure.side_effect = OSError("underlying stream is not seekable")
+        with (
+            patch.object(sys, "stdin", stream),
+            patch.object(sys, "stdout", stream),
+            patch.object(sys, "stderr", stream),
+        ):
+            _force_utf8_stdio()
 
 
 class McpToolRoutingTests(unittest.TestCase):

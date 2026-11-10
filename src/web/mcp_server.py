@@ -6,6 +6,8 @@ six tools and two resources. It does not search, index, or export by itself.
 Cursor config (cwd is the VideoSeek repo)::
 
     python -m src.web.mcp_server
+
+Windows pipes default to the ANSI code page. Protocol bytes are always UTF-8.
 """
 
 from __future__ import annotations
@@ -452,6 +454,9 @@ def cursor_mcp_config() -> dict[str, Any]:
     """Cursor mcp.json fragment. Packaged builds call the exe; source uses Python."""
     from src.infra.paths import get_app_install_dir, is_standalone_app
 
+    # Interpreter startup reads these before main(). The server also reconfigures
+    # its pipes, so a client that drops env still gets UTF-8 on the wire.
+    utf8_env = {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     if is_standalone_app():
         return {
             "mcpServers": {
@@ -459,6 +464,7 @@ def cursor_mcp_config() -> dict[str, Any]:
                     "command": sys.executable,
                     "args": ["--mcp-stdio"],
                     "cwd": get_app_install_dir(),
+                    "env": utf8_env,
                 }
             }
         }
@@ -468,6 +474,7 @@ def cursor_mcp_config() -> dict[str, Any]:
                 "command": sys.executable,
                 "args": ["-m", "src.web.mcp_server"],
                 "cwd": repo_root(),
+                "env": utf8_env,
             }
         }
     }
@@ -516,7 +523,20 @@ def serve(api: AgentHttpClient, stdin, stdout) -> None:
             _write(stdout, response)
 
 
+def _force_utf8_stdio() -> None:
+    """MCP clients decode stdin/stdout as UTF-8. Windows pipes do not."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", newline="\n")
+        except (OSError, ValueError):
+            continue
+
+
 def main() -> int:
+    _force_utf8_stdio()
     serve(AgentHttpClient(default_api_base()), sys.stdin, sys.stdout)
     return 0
 
@@ -848,7 +868,16 @@ def _rpc_error(request_id: Any, code: int, message: str) -> dict[str, Any]:
 
 
 def _write(stdout, payload: Mapping[str, Any]) -> None:
-    stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    """Write one JSON-RPC line as UTF-8, ignoring the stream's locale encoding."""
+    line = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+    buffer = getattr(stdout, "buffer", None)
+    if buffer is not None:
+        buffer.write(line)
+        flush = getattr(buffer, "flush", None)
+        if callable(flush):
+            flush()
+        return
+    stdout.write(line.decode("utf-8"))
     flush = getattr(stdout, "flush", None)
     if callable(flush):
         flush()
