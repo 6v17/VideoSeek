@@ -162,15 +162,36 @@ class CanonicalizeLibraryPathTests(unittest.TestCase):
 
 
 class BuildPreviewCachePathTests(unittest.TestCase):
-    def test_build_preview_cache_path_is_deterministic_for_same_inputs(self):
+    def test_build_preview_cache_path_is_stable_until_source_or_duration_changes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             video_path = str(Path(temp_dir) / "clip.mp4")
-            first = utils.build_preview_cache_path(video_path, 12.5)
-            second = utils.build_preview_cache_path(video_path, 12.5)
+            Path(video_path).write_bytes(b"video-bytes")
+            cache_dir = str(Path(temp_dir) / "cache")
+            with patch(
+                "src.app.config.get_data_storage_paths",
+                return_value={"preview_cache_dir": cache_dir},
+            ):
+                first = utils.build_preview_cache_path(video_path, 12.5, duration_sec=6)
+                second = utils.build_preview_cache_path(video_path, 12.5, duration_sec=6)
+                longer = utils.build_preview_cache_path(video_path, 12.5, duration_sec=8)
+                Path(video_path).write_bytes(b"replaced-video-bytes")
+                replaced = utils.build_preview_cache_path(video_path, 12.5, duration_sec=6)
 
-        self.assertNotEqual(first, second)
+        self.assertEqual(first, second)
+        self.assertNotEqual(first, longer)
+        self.assertNotEqual(first, replaced)
         self.assertTrue(first.endswith(".mp4"))
-        self.assertTrue(second.endswith(".mp4"))
+        self.assertIn("preview_clips", first)
+
+    def test_create_preview_clip_reuses_ready_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = str(Path(temp_dir) / "preview.mp4")
+            Path(output_path).write_bytes(b"x" * 2048)
+            with patch("src.media.export_clip.subprocess.run") as mock_run:
+                result = utils.create_preview_clip("D:/videos/clip.mp4", 10.0, output_path, duration_sec=6)
+            mock_run.assert_not_called()
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(Path(output_path).read_bytes(), b"x" * 2048)
 
 
 if __name__ == "__main__":

@@ -15,10 +15,16 @@ from src.media.probe import get_video_duration_seconds
 EXPORT_ENCODE_MODE_ORIGINAL = "original"
 EXPORT_ENCODE_MODE_COPY = "copy"
 _EXPORT_ENCODE_MODES = {EXPORT_ENCODE_MODE_ORIGINAL, EXPORT_ENCODE_MODE_COPY}
+# Reject empty or truncated encodes. A real fallback clip is tens of kilobytes.
+_PREVIEW_CLIP_MIN_BYTES = 1024
 
 
 def create_preview_clip(input_path, start_sec, output_path, duration_sec=None):
     from src.app.config import load_config
+
+    output_path = os.fspath(output_path)
+    if preview_clip_cache_is_ready(output_path):
+        return subprocess.CompletedProcess(args=[], returncode=0)
 
     ffmpeg = get_ffmpeg_path()
     config = load_config()
@@ -28,15 +34,8 @@ def create_preview_clip(input_path, start_sec, output_path, duration_sec=None):
     encode = _preview_encode_settings(config)
 
     input_path = os.fspath(input_path)
-    output_path = os.fspath(output_path)
     start_sec = max(0.0, float(start_sec))
     clip_duration = preview_seconds if duration_sec is None else max(0.1, float(duration_sec))
-
-    if os.path.exists(output_path):
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
 
     fast_seek = max(0.0, start_sec - 1.0)
     precise_seek = start_sec - fast_seek
@@ -71,8 +70,9 @@ def create_preview_clip(input_path, start_sec, output_path, duration_sec=None):
         encode["audio_bitrate"],
         "-movflags",
         "+faststart",
-        output_path,
     ]
+    tmp_path = f"{output_path}.{uuid.uuid4().hex}.part"
+    cmd.append(tmp_path)
 
     startupinfo = None
     if sys.platform == "win32":
@@ -80,7 +80,22 @@ def create_preview_clip(input_path, start_sec, output_path, duration_sec=None):
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = 0
 
-    return subprocess.run(cmd, startupinfo=startupinfo, capture_output=True)
+    try:
+        result = subprocess.run(cmd, startupinfo=startupinfo, capture_output=True)
+    except Exception:
+        _remove_quiet(tmp_path)
+        raise
+    if result.returncode != 0 or not preview_clip_cache_is_ready(tmp_path):
+        _remove_quiet(tmp_path)
+        if result.returncode == 0:
+            return subprocess.CompletedProcess(args=cmd, returncode=1)
+        return result
+    try:
+        os.replace(tmp_path, output_path)
+    except OSError:
+        _remove_quiet(tmp_path)
+        return subprocess.CompletedProcess(args=cmd, returncode=1)
+    return result
 
 
 def _resolve_base_clip_window(
@@ -367,16 +382,65 @@ def _build_hidden_startupinfo():
     return startupinfo
 
 
-def build_preview_cache_path(video_path, start_sec):
-    from src.app.config import get_data_storage_paths
+def preview_clip_cache_is_ready(output_path: str) -> bool:
+    """True when a fallback clip is already encoded and safe to play again."""
+    try:
+        return os.path.isfile(output_path) and os.path.getsize(output_path) >= _PREVIEW_CLIP_MIN_BYTES
+    except OSError:
+        return False
 
+
+def _remove_quiet(path: str) -> None:
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def _preview_source_fingerprint(video_path: str) -> str:
+    path = os.fspath(video_path)
+    try:
+        st = os.stat(path)
+    except OSError:
+        return path
+    return f"{path}|{int(st.st_mtime)}|{int(st.st_size)}"
+
+
+def _preview_encode_fingerprint(config) -> str:
+    encode = _preview_encode_settings(config)
+    width = int(config.get("preview_width", 640))
+    height = int(config.get("preview_height", 360))
+    return (
+        f"{width}x{height}|{encode['preset']}|{encode['tune']}|"
+        f"{encode['crf']}|{encode['audio_bitrate']}"
+    )
+
+
+def build_preview_cache_path(video_path, start_sec, duration_sec=None):
+    """Stable fallback-clip path. Replaced source bytes or encode settings miss the cache."""
+    from src.app.config import get_data_storage_paths, load_config
+
+    config = load_config()
     cache_dir = get_data_storage_paths().get("preview_cache_dir", "")
     if not cache_dir:
         cache_dir = os.path.join(get_app_data_dir(), "cache")
-    os.makedirs(cache_dir, exist_ok=True)
-    key = f"{video_path}|{int(start_sec)}|{uuid.uuid4().hex}"
-    filename = f"preview_{hashlib.sha1(key.encode('utf-8')).hexdigest()[:16]}.mp4"
-    return os.path.join(cache_dir, filename)
+    clip_dir = os.path.join(cache_dir, "preview_clips")
+    os.makedirs(clip_dir, exist_ok=True)
+    if duration_sec is None:
+        duration = float(config.get("preview_seconds", 6))
+    else:
+        duration = max(0.1, float(duration_sec))
+    key = "|".join(
+        (
+            _preview_source_fingerprint(video_path),
+            f"{max(0.0, float(start_sec)):.3f}",
+            f"{duration:.3f}",
+            _preview_encode_fingerprint(config),
+        )
+    )
+    filename = f"preview_{hashlib.sha1(key.encode('utf-8', errors='replace')).hexdigest()[:20]}.mp4"
+    return os.path.join(clip_dir, filename)
 
 
 def build_seekable_preview_proxy_path(video_path: str) -> str:

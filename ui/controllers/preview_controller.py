@@ -114,9 +114,15 @@ class PreviewController:
         if is_http_media_url(video_path):
             return False
 
-        from src.media.export_clip import build_preview_cache_path
+        from src.media.export_clip import build_preview_cache_path, preview_clip_cache_is_ready
 
-        cache_path = build_preview_cache_path(video_path, clip_start)
+        cache_path = build_preview_cache_path(
+            video_path,
+            clip_start,
+            duration_sec=clip_duration,
+        )
+        if preview_clip_cache_is_ready(cache_path):
+            return self._play_prepared_clip(cache_path)
         return self._start_clip_prepare(
             video_path,
             playback_path=playback_path,
@@ -208,25 +214,32 @@ class PreviewController:
 
         release_prepare_worker(worker)
         if not isinstance(result, dict) or result.get("cancelled") or result.get("error"):
-            if os.path.exists(cache_path):
-                try:
-                    os.remove(cache_path)
-                except OSError:
-                    pass
+            self._discard_unready_clip(cache_path)
             return
         clip_result = result.get("result")
         if clip_result is None or getattr(clip_result, "returncode", 1) != 0:
-            if os.path.exists(cache_path):
-                try:
-                    os.remove(cache_path)
-                except OSError:
-                    pass
+            self._discard_unready_clip(cache_path)
             return
+        self._play_prepared_clip(cache_path)
+
+    def _discard_unready_clip(self, cache_path) -> None:
+        from src.media.export_clip import preview_clip_cache_is_ready
+
+        if preview_clip_cache_is_ready(cache_path):
+            return
+        if os.path.exists(cache_path):
+            try:
+                os.remove(cache_path)
+            except OSError:
+                pass
+
+    def _play_prepared_clip(self, cache_path) -> bool:
         self.current_preview_path = cache_path
         self._set_preview_surface_idle(False)
         media_player = self.parent_window.media_player
         media_player.setSource(QUrl.fromLocalFile(cache_path))
         media_player.play()
+        return True
 
     def start_warmup(self, on_done=None):
         """Warm libvlc on the UI thread (libvlc is not thread-safe for Instance create)."""
@@ -443,13 +456,7 @@ class PreviewController:
             logger.debug("Preview surface visibility skipped: %s", exc)
 
     def cleanup_previous_preview(self):
-        if not self.current_preview_path:
-            return
-        if os.path.exists(self.current_preview_path):
-            try:
-                os.remove(self.current_preview_path)
-            except OSError:
-                pass
+        # Keep the encoded file. The next fallback for the same moment replays it.
         self.current_preview_path = None
 
     def shutdown(self):

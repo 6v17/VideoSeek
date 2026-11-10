@@ -94,10 +94,11 @@ class PreviewControllerPrepareTests(unittest.TestCase):
                 fake_worker.start.assert_called_once()
 
     @patch("ui.controllers.preview_controller.create_vlc_preview_instance", return_value=None)
+    @patch("src.media.export_clip.preview_clip_cache_is_ready", return_value=False)
     @patch("src.media.export_clip.build_preview_cache_path", return_value="D:/cache/preview.mp4")
     @patch("src.media.export_clip.resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
-    def test_play_vlc_fail_starts_clip_worker(self, mock_vlc_cls, _window, _cache, _instance):
+    def test_play_vlc_fail_starts_clip_worker(self, mock_vlc_cls, _window, _cache, _ready, _instance):
         from ui.controllers.preview_controller import PreviewController
 
         parent = self._parent()
@@ -119,6 +120,29 @@ class PreviewControllerPrepareTests(unittest.TestCase):
                 kwargs = worker_cls.call_args.kwargs
                 self.assertEqual(kwargs.get("mode"), "clip")
                 fake_worker.start.assert_called_once()
+
+    @patch("ui.controllers.preview_controller.create_vlc_preview_instance", return_value=None)
+    @patch("src.media.export_clip.preview_clip_cache_is_ready", return_value=True)
+    @patch("src.media.export_clip.build_preview_cache_path", return_value="D:/cache/preview.mp4")
+    @patch("src.media.export_clip.resolve_base_clip_window", return_value=(27.0, 6.0))
+    @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
+    def test_play_vlc_fail_reuses_ready_clip(self, mock_vlc_cls, _window, _cache, _ready, _instance):
+        from ui.controllers.preview_controller import PreviewController
+
+        parent = self._parent()
+        vlc_player = MagicMock()
+        vlc_player.play.return_value = False
+        mock_vlc_cls.return_value = vlc_player
+        controller = PreviewController(parent)
+
+        with patch("src.media.export_clip.get_seekable_preview_proxy_if_ready", return_value="D:/videos/clip.mp4"):
+            with patch("ui.playback.preview_prepare_worker.PreviewPrepareWorker") as worker_cls:
+                result = controller.play("D:/videos/clip.mp4", 30.0)
+
+        self.assertTrue(result)
+        worker_cls.assert_not_called()
+        parent.media_player.setSource.assert_called()
+        parent.media_player.play.assert_called_once()
 
 
 if __name__ == "__main__":
