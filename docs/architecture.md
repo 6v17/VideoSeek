@@ -230,6 +230,7 @@ sequenceDiagram
 | 模块 | 用途 | 权重 |
 |------|------|------|
 | `agent_api/` | 本机 Agent API（health、search、batch、presets、export） | **主要**自动化入口；见 `for-agents.md` |
+| `mcp_server.py` | stdio MCP：6 个工具 + 2 个资源，HTTP 转发到 Agent API | 薄适配；不复制搜索逻辑 |
 | `mobile_bridge.py` | 手机传图 | 可选；薄封装 |
 | `display_qr.py` | 手机配对二维码 | 可选 UI 辅助 |
 

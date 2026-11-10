@@ -326,6 +326,7 @@ class SettingsGuiMixin:
             running = hasattr(self, "agent_api_controller") and self.agent_api_controller.is_running()
             page.btn_copy_agent_api_url.setEnabled(bool(running and not pending))
             page.btn_copy_agent_starter.setEnabled(bool(running and not pending))
+            page.btn_copy_mcp_config.setEnabled(not pending)
 
     def _on_edit_team_client_url(self):
         from ui.dialogs.team_mode_dialog import prompt_team_client_url
@@ -1386,6 +1387,17 @@ class SettingsGuiMixin:
             self.texts.get(
                 "setting_agent_api_copy_starter_done",
                 "Setup notes copied.",
+            )
+        )
+
+    def copy_mcp_config(self):
+        from src.web.mcp_server import cursor_mcp_config_text
+
+        QApplication.clipboard().setText(cursor_mcp_config_text())
+        self.settings_page.lbl_status.setText(
+            self.texts.get(
+                "setting_agent_api_copy_mcp_done",
+                "MCP config copied.",
             )
         )
 
