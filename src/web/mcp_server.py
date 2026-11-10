@@ -437,6 +437,10 @@ def _wait_until_healthy(client: AgentHttpClient) -> str:
 
 
 def _gui_launch_command() -> tuple[list[str], str]:
+    from src.infra.paths import get_app_install_dir, is_standalone_app
+
+    if is_standalone_app():
+        return [sys.executable], get_app_install_dir()
     root = repo_root()
     main_py = os.path.join(root, "main.py")
     if os.path.isfile(main_py):
@@ -445,7 +449,19 @@ def _gui_launch_command() -> tuple[list[str], str]:
 
 
 def cursor_mcp_config() -> dict[str, Any]:
-    """Cursor mcp.json fragment. The app must stay open with the local API on."""
+    """Cursor mcp.json fragment. Packaged builds call the exe; source uses Python."""
+    from src.infra.paths import get_app_install_dir, is_standalone_app
+
+    if is_standalone_app():
+        return {
+            "mcpServers": {
+                "videoseek": {
+                    "command": sys.executable,
+                    "args": ["--mcp-stdio"],
+                    "cwd": get_app_install_dir(),
+                }
+            }
+        }
     return {
         "mcpServers": {
             "videoseek": {

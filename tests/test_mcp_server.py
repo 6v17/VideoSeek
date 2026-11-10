@@ -65,6 +65,15 @@ class McpProtocolTests(unittest.TestCase):
         self.assertEqual(server["args"], ["-m", "src.web.mcp_server"])
         self.assertTrue(server["cwd"])
 
+    def test_packaged_cursor_config_calls_the_exe(self):
+        with patch("src.infra.paths.is_standalone_app", return_value=True):
+            with patch("src.infra.paths.get_app_install_dir", return_value="D:/VideoSeek"):
+                server = cursor_mcp_config()["mcpServers"]["videoseek"]
+        self.assertEqual(server["args"], ["--mcp-stdio"])
+        self.assertNotIn("-m", server["args"])
+        self.assertEqual(server["cwd"], "D:/VideoSeek")
+        self.assertTrue(server["command"])
+
 
 class McpToolRoutingTests(unittest.TestCase):
     def _call(self, api, name, arguments):
