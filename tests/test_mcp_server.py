@@ -156,16 +156,56 @@ class McpToolRoutingTests(unittest.TestCase):
         self.assertTrue(result["result"]["isError"])
         self.assertIn("连不上", result["result"]["content"][0]["text"])
 
-    def test_status_resource_reads_health(self):
+    def test_status_resource_keeps_a_short_snapshot(self):
         api = FakeApi()
-        api.next_payload = {"ok": True, "index_ready": True}
+        api.next_payload = {
+            "ok": True,
+            "api_version": "1",
+            "index_ready": True,
+            "dialogue_index_ready": False,
+            "capabilities": {"frame_search": True, "chunk_search": False, "export_clip": True},
+            "max_batch_queries": 64,
+            "max_batch_frame_extract": 16,
+            "search_timeout_sec": 90,
+            "ffmpeg": {"ffmpeg_path": "C:/ffmpeg/ffmpeg.exe"},
+            "indexed_video_paths": ["D:/a.mp4"] * 40,
+            "team": {"api_base_url": ""},
+        }
         result = handle_message(
             {"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {"uri": "videoseek://status"}},
             api,
         )
         self.assertEqual(api.calls[0]["path"], "/api/v1/health")
         body = json.loads(result["result"]["contents"][0]["text"])
-        self.assertTrue(body["index_ready"])
+        self.assertTrue(body["ready"])
+        self.assertTrue(body["frame_search_ready"])
+        self.assertFalse(body["chunk_index_ready"])
+        self.assertEqual(body["limits"]["batch_search"], 64)
+        self.assertEqual(body["limits"]["frames_per_call"], 16)
+        self.assertEqual(body["limits"]["timeout_sec"], 90)
+        self.assertEqual(body["api_base_url"], api.base_url)
+        self.assertNotIn("ffmpeg", body)
+        self.assertNotIn("indexed_video_paths", body)
+
+    def test_sync_timeouts_match_accept_not_full_index(self):
+        api = FakeApi()
+        self._call(api, "sync_library", {"action": "sync"})
+        self._call(api, "sync_library", {"action": "add", "library_path": "D:/Videos"})
+        self._call(api, "sync_library", {"action": "refresh"})
+        self.assertEqual(api.calls[0]["timeout"], 60)
+        self.assertEqual(api.calls[1]["timeout"], 180)
+        self.assertEqual(api.calls[2]["timeout"], 180)
+
+    def test_timeline_engine_busy_tells_the_model_not_to_retry_blindly(self):
+        api = FakeApi()
+        api.next_status = 503
+        api.next_payload = {"ok": False, "error": {"code": "engine_busy", "message": "timed out"}}
+        items = [{"video_path": "D:/a.mp4", "start_sec": 1, "end_sec": 3}]
+        result = self._call(api, "export_timeline", {"format": "jianying", "items": items})
+        text = result["result"]["content"][0]["text"]
+        self.assertTrue(result["result"]["isError"])
+        self.assertIn("60", text)
+        self.assertIn("manifest", text)
 
     def test_bool_query_uses_lowercase_true(self):
         captured = {}

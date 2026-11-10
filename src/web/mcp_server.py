@@ -24,6 +24,13 @@ _SERVER_NAME = "videoseek"
 _MAX_FRAME_ITEMS = 16
 _MAX_EXPORT_ITEMS = 64
 _MAX_SEARCH_QUERIES = 64
+# Desktop accepts the job and returns; indexing continues in the app.
+_SYNC_ACCEPT_TIMEOUT_SEC = 60
+# add/refresh may scan folders before they accept.
+_SCAN_ACCEPT_TIMEOUT_SEC = 180
+_TIMELINE_TIMEOUT_HINT = (
+    "timeline 输出上限 60 秒，超时返回 engine_busy；重试前减少 items 或改 output=manifest。"
+)
 
 _PATH_RULE = (
     "video_path 和 library_path 必须原样来自本次对话里更早的工具结果，或用户明确给出的绝对路径。"
@@ -63,6 +70,7 @@ _TOOLS: list[dict[str, Any]] = [
             "登记库或同步索引。action=add：把已有文件夹登记为画面库并索引；"
             "include：只索引给出的视频文件；refresh：只重扫视频列表，不索引；"
             "sync：同步整库，或只同步 video_ids / video_paths。"
+            "四条都是交给桌面开始后就返回，不会等到索引结束。add 和 refresh 可能要扫盘，比 sync 慢。"
             + _PATH_RULE
         ),
         "inputSchema": {
@@ -193,7 +201,8 @@ _TOOLS: list[dict[str, Any]] = [
         "name": "export_timeline",
         "description": (
             "output=timeline 时把多段写成剪映草稿、达芬奇 FCPXML 或 Premiere XML。"
-            "output=manifest 时只生成清单 JSON，不写剪辑工程。"
+            + _TIMELINE_TIMEOUT_HINT
+            + "output=manifest 时只生成清单 JSON，不写剪辑工程。"
             "片段的路径和时间必须来自 search。"
             + _PATH_RULE
         ),
@@ -222,7 +231,7 @@ _RESOURCES: list[dict[str, str]] = [
     {
         "uri": "videoseek://status",
         "name": "status",
-        "description": "索引是否就绪、台词和标签能不能搜、超时和上限。开始搜索前先读一次。",
+        "description": "索引是否就绪、画面和台词能不能搜、批量上限和搜索超时。开始搜索前先读一次。",
         "mimeType": "application/json",
     },
     {
@@ -480,7 +489,12 @@ def _sync_library(arguments: Mapping[str, Any], api: AgentHttpClient) -> tuple[i
     if action == "add":
         if not str(library_path or "").strip():
             raise ValueError("add requires library_path.")
-        return api.request_json("POST", "/api/v1/libraries", body={"library_path": library_path}, timeout=3600)
+        return api.request_json(
+            "POST",
+            "/api/v1/libraries",
+            body={"library_path": library_path},
+            timeout=_SCAN_ACCEPT_TIMEOUT_SEC,
+        )
     if action == "include":
         if not isinstance(video_paths, list) or not video_paths:
             raise ValueError("include requires video_paths.")
@@ -488,17 +502,22 @@ def _sync_library(arguments: Mapping[str, Any], api: AgentHttpClient) -> tuple[i
             "POST",
             "/api/v1/libraries/include",
             body={"video_paths": video_paths},
-            timeout=3600,
+            timeout=_SYNC_ACCEPT_TIMEOUT_SEC,
         )
     if action == "refresh":
         body = {"library_path": library_path} if library_path else {}
-        return api.request_json("POST", "/api/v1/libraries/refresh", body=body, timeout=3600)
+        return api.request_json(
+            "POST",
+            "/api/v1/libraries/refresh",
+            body=body,
+            timeout=_SCAN_ACCEPT_TIMEOUT_SEC,
+        )
     if action == "sync":
         return api.request_json(
             "POST",
             "/api/v1/index/sync",
             body={"library_path": library_path, "video_ids": video_ids, "video_paths": video_paths},
-            timeout=3600,
+            timeout=_SYNC_ACCEPT_TIMEOUT_SEC,
         )
     raise ValueError("action must be add, include, refresh, or sync.")
 
@@ -591,7 +610,7 @@ def _export_timeline(arguments: Mapping[str, Any], api: AgentHttpClient) -> tupl
             "dedupe": arguments.get("dedupe"),
             "write_path": arguments.get("write_path"),
         }
-        return api.request_json("POST", "/api/v1/export/manifest", body=body, timeout=180)
+        return api.request_json("POST", "/api/v1/export/manifest", body=body, timeout=45)
     if output != "timeline":
         raise ValueError("output must be timeline or manifest.")
     fmt = str(arguments.get("format") or "").strip()
@@ -606,12 +625,17 @@ def _export_timeline(arguments: Mapping[str, Any], api: AgentHttpClient) -> tupl
         "drafts_dir": arguments.get("drafts_dir"),
         "draft_name": arguments.get("draft_name"),
     }
-    return api.request_json("POST", "/api/v1/export/timeline", body=body, timeout=180)
+    status, payload = api.request_json("POST", "/api/v1/export/timeline", body=body, timeout=75)
+    if _is_engine_busy(status, payload):
+        raise ValueError(_TIMELINE_TIMEOUT_HINT)
+    return status, payload
 
 
 def _read_resource(uri: str, api: AgentHttpClient) -> dict[str, Any]:
     if uri == "videoseek://status":
-        _status, payload = api.request_json("GET", "/api/v1/health", timeout=60)
+        status, payload = api.request_json("GET", "/api/v1/health", timeout=60)
+        if status < 400 and isinstance(payload, dict):
+            payload = _slim_status(payload, api.base_url)
     elif uri == "videoseek://presets":
         _status, payload = api.request_json("GET", "/api/v1/search/presets", timeout=60)
     else:
@@ -625,6 +649,35 @@ def _read_resource(uri: str, api: AgentHttpClient) -> dict[str, Any]:
             }
         ]
     }
+
+
+def _slim_status(payload: Mapping[str, Any], api_base_url: str) -> dict[str, Any]:
+    capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), dict) else {}
+    team = payload.get("team") if isinstance(payload.get("team"), dict) else {}
+    base = str(team.get("api_base_url") or "").strip() or api_base_url
+    return {
+        "ok": payload.get("ok"),
+        "api_version": payload.get("api_version"),
+        "ready": bool(payload.get("index_ready")),
+        "chunk_index_ready": bool(capabilities.get("chunk_search")),
+        "dialogue_index_ready": bool(payload.get("dialogue_index_ready")),
+        "frame_search_ready": bool(capabilities.get("frame_search")),
+        "limits": {
+            "batch_search": payload.get("max_batch_queries"),
+            "frames_per_call": payload.get("max_batch_frame_extract"),
+            "timeout_sec": payload.get("search_timeout_sec"),
+        },
+        "api_base_url": base,
+    }
+
+
+def _is_engine_busy(status: int, payload: Any) -> bool:
+    if status != 503 or not isinstance(payload, dict):
+        return False
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return str(error.get("code") or "") == "engine_busy"
+    return False
 
 
 def _tool_result(payload: Any, *, is_error: bool) -> dict[str, Any]:
