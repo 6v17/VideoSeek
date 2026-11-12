@@ -112,6 +112,7 @@ class LibraryExpandHeightTests(unittest.TestCase):
             for i in range(40)
         ]
         tree.resize(800, 360)
+        tree.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
         tree.show()
         tree.refresh_from_entries(entries, library_paths=[lib])
         block = tree._blocks[0]
@@ -138,7 +139,14 @@ class LibraryExpandHeightTests(unittest.TestCase):
         kept = bar.value()
         tree.resize(780, 340)
         self.assertEqual(block.view.verticalScrollBar().value(), kept)
+        tree.hide()
+        focus = QApplication.focusWidget()
+        if focus is not None:
+            focus.clearFocus()
+        tree.close()
+        QApplication.processEvents()
         tree.deleteLater()
+        QApplication.processEvents()
 
 
 class LibraryEnglishColumnTests(unittest.TestCase):
