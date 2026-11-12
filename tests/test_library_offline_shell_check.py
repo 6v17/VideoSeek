@@ -74,6 +74,14 @@ class LibraryExpandHeightTests(unittest.TestCase):
             ),
             90,
         )
+        self.assertEqual(
+            expanded_library_list_height(
+                content_height=30000,
+                viewport_height=0,
+                header_height=36,
+            ),
+            480,
+        )
 
     def test_two_videos_expand_to_their_rows_not_a_fixed_stub(self):
         tree = LibraryGroupedVideoTree()
@@ -90,6 +98,47 @@ class LibraryExpandHeightTests(unittest.TestCase):
         self.assertEqual(view.model().rowCount(), 2)
         self.assertEqual(view.height(), 2 * view.verticalHeader().defaultSectionSize())
         self.assertNotEqual(view.height(), 280)
+
+    def test_collapsed_check_survives_for_sync_and_long_list_stays_capped(self):
+        tree = LibraryGroupedVideoTree()
+        lib = os.path.normpath("D:/videos")
+        entries = [
+            {
+                "library_path": lib,
+                "video_id": f"v{i}",
+                "video_rel_path": f"clip_{i:04d}.mp4",
+                "source_exists": True,
+            }
+            for i in range(40)
+        ]
+        tree.resize(800, 360)
+        tree.show()
+        tree.refresh_from_entries(entries, library_paths=[lib])
+        block = tree._blocks[0]
+        block.lib_cb.setCheckState(Qt.CheckState.Checked)
+        self.assertFalse(block.expanded)
+        self.assertEqual(set(tree.collect_checked_video_ids()), {f"v{i}" for i in range(40)})
+
+        tree._set_block_expanded(block, True)
+        self.assertLess(block.view.height(), 40 * block.view.verticalHeader().defaultSectionSize())
+        block.model.setData(
+            block.model.index(0, 0),
+            Qt.CheckState.Unchecked,
+            Qt.ItemDataRole.CheckStateRole,
+        )
+        tree._set_block_expanded(block, False)
+        self.assertFalse(block.expanded)
+        self.assertNotIn("v0", tree.collect_checked_video_ids())
+        self.assertIn("v1", tree.collect_checked_video_ids())
+
+        block.model._checked.clear()
+        self.assertIn("v1", tree.collect_checked_video_ids())
+        bar = block.view.verticalScrollBar()
+        bar.setValue(min(200, bar.maximum()))
+        kept = bar.value()
+        tree.resize(780, 340)
+        self.assertEqual(block.view.verticalScrollBar().value(), kept)
+        tree.deleteLater()
 
 
 class LibraryEnglishColumnTests(unittest.TestCase):

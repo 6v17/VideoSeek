@@ -43,6 +43,9 @@ from ui.widgets.list_find_bar import (
 _COUNT_COL_MIN = 36
 _STATUS_COL_MIN = 88
 _ACTION_COL_MIN = 56
+_ROW_HEIGHT = 30
+# Before the pane has a height, never stretch a long library to one widget per row.
+_UNSIZED_LIST_CAP = _ROW_HEIGHT * 16
 _STATUS_READY = QColor("#2ec27e")
 _STATUS_PENDING = QColor("#f4c95d")
 # Fixable missing vectors — stronger amber so it reads as “needs sync”.
@@ -58,15 +61,15 @@ def expanded_library_list_height(
 ) -> int:
     """Fit an expanded video list to its rows, and never taller than the visible pane.
 
-    A zero viewport means the tree is not on screen yet, so the list keeps its
-    content height until a later resize can cap it.
+    A zero viewport means the pane is not laid out yet. Short lists still show
+    every row; a long list stays capped so it is not one giant widget.
     """
     content = max(0, int(content_height))
     if content <= 0:
         return 0
     viewport = int(viewport_height)
     if viewport <= 0:
-        return content
+        return min(content, _UNSIZED_LIST_CAP)
     cap = viewport - max(0, int(header_height)) - max(0, int(body_margin))
     if cap < 1:
         cap = viewport
@@ -404,7 +407,7 @@ class LibraryVideoTableModel(QAbstractTableModel):
         return [dict(ent) for ent in self._rows if str(ent.get("video_id") or "").strip() in wanted]
 
     def set_all_checked(self, checked: bool) -> None:
-        self.beginResetModel()
+        # dataChanged keeps the scroll offset. Resetting the model jumps a long list to row 0.
         if checked:
             self._checked = {
                 str(r.get("video_id") or "").strip()
@@ -413,7 +416,24 @@ class LibraryVideoTableModel(QAbstractTableModel):
             }
         else:
             self._checked.clear()
-        self.endResetModel()
+        self._emit_check_state()
+
+    def set_checked_ids(self, video_ids: Iterable[str]) -> None:
+        valid = {str(r.get("video_id") or "").strip() for r in self._rows}
+        wanted = {str(v).strip() for v in video_ids if str(v).strip() in valid}
+        if wanted == self._checked:
+            return
+        self._checked = wanted
+        self._emit_check_state()
+
+    def _emit_check_state(self) -> None:
+        if not self._rows:
+            return
+        self.dataChanged.emit(
+            self.index(0, 0),
+            self.index(len(self._rows) - 1, 0),
+            [Qt.ItemDataRole.CheckStateRole],
+        )
 
     def check_stats(self) -> tuple[int, int]:
         tot = sum(1 for r in self._rows if str(r.get("video_id") or "").strip())
@@ -441,6 +461,19 @@ class LibraryVideoTableModel(QAbstractTableModel):
                     Qt.ItemDataRole.ForegroundRole,
                 ],
             )
+
+
+class _LibraryVideoView(QTableView):
+    """Capped, uniform-height video list. The wheel stays here while this list can move."""
+
+    def wheelEvent(self, event):  # noqa: N802 — Qt API
+        bar = self.verticalScrollBar()
+        before = bar.value() if bar is not None else 0
+        super().wheelEvent(event)
+        if bar is not None and bar.value() != before:
+            event.accept()
+            return
+        event.ignore()
 
 
 class _LibBlock:
@@ -688,6 +721,7 @@ class LibraryGroupedVideoTree(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         self._sync_column_widths()
+        self._fit_expanded_lists()
 
     def _sync_column_widths(self) -> None:
         """English 'Action' / '999/999 extracted' is wider than the Chinese headers."""
@@ -734,6 +768,8 @@ class LibraryGroupedVideoTree(QWidget):
             self._refresh_block_status_label(block)
         if block.open_button is not None:
             block.open_button.setFixedWidth(self._action_col_w)
+        if block.view is not None:
+            block.view.setColumnWidth(1, max(_STATUS_COL_MIN, self._status_col_w))
 
     def _set_status_label_text(self, label: QLabel, text: str) -> None:
         full = str(text or "")
@@ -746,9 +782,7 @@ class LibraryGroupedVideoTree(QWidget):
     def collect_expanded_library_paths(self) -> list[str]:
         return [os.path.normpath(b.lib_path) for b in self._blocks if b.expanded]
 
-    def _block_checked_ids(self, block: _LibBlock) -> list[str]:
-        if block.populated and block.model is not None:
-            return block.model.checked_video_ids()
+    def _sticky_checked_ids(self, block: _LibBlock) -> list[str]:
         if block.default_on and not block.wanted_ids:
             return [
                 str(e.get("video_id") or "").strip()
@@ -756,6 +790,13 @@ class LibraryGroupedVideoTree(QWidget):
                 if str(e.get("video_id") or "").strip()
             ]
         return [vid for vid in block.wanted_ids if vid]
+
+    def _block_checked_ids(self, block: _LibBlock) -> list[str]:
+        # A collapsed body is hidden. Its table must not be the source of truth:
+        # hiding it can drop check state, and sync would skip that library.
+        if block.expanded and block.populated and block.model is not None:
+            return block.model.checked_video_ids()
+        return self._sticky_checked_ids(block)
 
     def collect_checked_video_ids(self) -> list[str]:
         out: list[str] = []
@@ -848,7 +889,7 @@ class LibraryGroupedVideoTree(QWidget):
     def collect_checked_entries(self) -> list[dict]:
         out: list[dict] = []
         for block in self._blocks:
-            if block.populated and block.model is not None:
+            if block.expanded and block.populated and block.model is not None:
                 out.extend(block.model.checked_entries())
                 continue
             wanted = set(self._block_checked_ids(block))
@@ -1136,7 +1177,7 @@ class LibraryGroupedVideoTree(QWidget):
         model.set_video_icon(self._row_file_icon(body))
         block.model = model
 
-        view = QTableView(body)
+        view = _LibraryVideoView(body)
         view.setObjectName("LibraryGroupedLibTree")
         view.setModel(model)
         view.setShowGrid(False)
@@ -1145,16 +1186,24 @@ class LibraryGroupedVideoTree(QWidget):
         view.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         view.setAlternatingRowColors(True)
+        view.setWordWrap(False)
+        view.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        view.setAutoScroll(False)
+        view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         view.verticalHeader().setVisible(False)
         view.horizontalHeader().setVisible(False)
-        view.verticalHeader().setDefaultSectionSize(30)
+        # Fixed sections: ResizeToContents measures every row and relayouts while scrolling,
+        # which stutters a thousand-row library and snaps the scrollbar back to the top.
+        view.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        view.verticalHeader().setDefaultSectionSize(_ROW_HEIGHT)
         view.setIconSize(QSize(16, 16))
         view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         view.setFixedHeight(0)
         hh = view.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        view.setColumnWidth(1, max(_STATUS_COL_MIN, self._status_col_w))
         block.view = view
         body_l.addWidget(view)
 
@@ -1196,8 +1245,26 @@ class LibraryGroupedVideoTree(QWidget):
         self._set_focused_block(block)
         self._set_block_expanded(block, not block.expanded)
 
+    def _remember_checks(self, block: _LibBlock) -> None:
+        if not block.populated or block.model is None:
+            return
+        block.wanted_ids = set(block.model.checked_video_ids())
+        _n, total = block.model.check_stats()
+        block.default_on = bool(total) and len(block.wanted_ids) >= total
+
+    def _apply_sticky_checks(self, block: _LibBlock) -> None:
+        if not block.populated or block.model is None:
+            return
+        sticky = set(self._sticky_checked_ids(block))
+        if set(block.model.checked_video_ids()) == sticky:
+            return
+        block.model.set_checked_ids(sticky)
+
     def _set_block_expanded(self, block: _LibBlock, on: bool) -> None:
-        block.expanded = bool(on)
+        on = bool(on)
+        if block.expanded and not on:
+            self._remember_checks(block)
+        block.expanded = on
         if block.body is not None:
             block.body.setVisible(block.expanded)
         card = block.card
@@ -1213,6 +1280,7 @@ class LibraryGroupedVideoTree(QWidget):
             )
         if block.expanded:
             self._ensure_populated(block)
+            self._apply_sticky_checks(block)
             self._fit_expanded_list(block)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
@@ -1220,9 +1288,13 @@ class LibraryGroupedVideoTree(QWidget):
         self._fit_expanded_lists()
 
     def _fit_expanded_lists(self) -> None:
+        outer = self._scroll.verticalScrollBar() if self._scroll is not None else None
+        keep_outer = outer.value() if outer is not None else 0
         for block in self._blocks:
             if block.expanded:
                 self._fit_expanded_list(block)
+        if outer is not None and outer.value() != keep_outer:
+            outer.setValue(min(keep_outer, outer.maximum()))
 
     def _fit_expanded_list(self, block: _LibBlock) -> None:
         view = block.view
@@ -1234,9 +1306,9 @@ class LibraryGroupedVideoTree(QWidget):
             content = 0
         else:
             header = view.verticalHeader()
-            content = header.length()
-            if content <= 0:
-                content = rows * max(1, header.defaultSectionSize())
+            section = max(1, header.defaultSectionSize())
+            # Uniform rows: do not ask the header to walk every section while scrolling.
+            content = rows * section
             content += view.frameWidth() * 2
         header_widget = block.collapse.parentWidget() if block.collapse is not None else None
         header_height = header_widget.sizeHint().height() if header_widget is not None else 0
@@ -1250,8 +1322,12 @@ class LibraryGroupedVideoTree(QWidget):
             header_height=header_height,
             body_margin=body_margin,
         )
+        bar = view.verticalScrollBar()
+        keep = bar.value() if bar is not None else 0
         if view.height() != height:
             view.setFixedHeight(height)
+        if bar is not None and bar.value() != keep:
+            bar.setValue(min(keep, bar.maximum()))
 
     def _ensure_populated(self, block: _LibBlock) -> None:
         if block.populated or block.model is None:
