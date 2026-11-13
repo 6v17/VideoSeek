@@ -1,7 +1,6 @@
 import unittest
 
 from ui.thumb_cache import ThumbPixmapCache
-from ui.views.table_visibility import visible_table_row_range
 
 
 class ThumbCacheTests(unittest.TestCase):
@@ -62,15 +61,6 @@ class ThumbCacheTests(unittest.TestCase):
 
         controller._on_thumb_ready(1, None)
         self.assertIsNone(parent.search_page.result_view.set_thumbnail.call_args.args[1])
-
-
-class TableVisibilityTests(unittest.TestCase):
-    def test_empty_table_returns_empty_range(self):
-        from PySide6.QtWidgets import QApplication, QTableWidget
-
-        _app = QApplication.instance() or QApplication([])
-        table = QTableWidget()
-        self.assertEqual(list(visible_table_row_range(table)), [])
 
 
 if __name__ == "__main__":

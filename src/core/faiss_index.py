@@ -178,22 +178,6 @@ def load_clip_index(index_file):
                 os.remove(temp_path)
 
 
-def search_vector(query_vector, index, timestamps, video_paths, top_k=10):
-    actual_k = min(top_k, index.ntotal)
-    if actual_k <= 0:
-        return []
-
-    distances, indices = index.search(query_vector, actual_k)
-    matched_results = []
-    for rank, index_value in enumerate(indices[0]):
-        if index_value == -1 or index_value >= len(video_paths):
-            continue
-        timestamp = timestamps[index_value]
-        video_path = video_paths[index_value]
-        matched_results.append((timestamp, timestamp, distances[0][rank], video_path))
-    return matched_results
-
-
 def save_vectors(vectors_list, timestamps, output_file, chunks=None, chunk_config=None, embedding_spec=None):
     folder_path = os.path.dirname(output_file)
     if folder_path and not os.path.exists(folder_path):
