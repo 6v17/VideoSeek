@@ -288,20 +288,27 @@ class SearchWorker(QThread):
     def _should_stop(self) -> bool:
         return bool(self._stop_requested or self.isInterruptionRequested())
 
-    def _emit_results(self, results, *, app_cfg, kind: str) -> None:
+    def _emit_results(self, results, *, app_cfg, kind: str, vectors=None) -> None:
         rows = list(results or [])
         self.hit_vectors = None
         visual = str(kind or "").strip().lower() not in {"dialogue", "tags"}
         if visual and rows and bool(app_cfg.get("search_result_grouping_enabled", True)):
-            try:
-                from src.services.search_result_groups import fetch_hit_frame_vectors
+            if isinstance(vectors, list) and len(vectors) == len(rows):
+                # User machines get these from the server. There is no local frame index to read.
+                self.hit_vectors = list(vectors)
+            else:
+                try:
+                    from src.services.team_mode_service import is_team_client_mode
 
-                self.hit_vectors = fetch_hit_frame_vectors(rows, app_cfg)
-            except Exception as exc:
-                from src.app.logging_utils import note_swallowed
+                    if not is_team_client_mode(app_cfg):
+                        from src.services.search_result_groups import fetch_hit_frame_vectors
 
-                note_swallowed(exc, "ui/workers.py:group_vectors")
-                self.hit_vectors = None
+                        self.hit_vectors = fetch_hit_frame_vectors(rows, app_cfg)
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "ui/workers.py:group_vectors")
+                    self.hit_vectors = None
         self.result_ready.emit(rows)
 
     def _emit_progress(self, phase: str, message: str = "") -> None:
@@ -372,6 +379,8 @@ class SearchWorker(QThread):
                     text_enhance = bool(get_text_search_enhance_enabled(app_cfg))
                 if self._should_stop():
                     raise InterruptedError("search stopped")
+                frame_vectors: list = []
+                want_vectors = kind not in {"dialogue", "tags"}
                 results = run_team_client_search(
                     server_url=str(app_cfg.get("team_server_url") or ""),
                     query_data=query_data,
@@ -391,16 +400,18 @@ class SearchWorker(QThread):
                     match_mode=config.search_mode if kind in {"dialogue", "tags"} else None,
                     text_enhance=text_enhance,
                     api_port_default=int(app_cfg.get("team_api_port", 8765) or 8765),
+                    collect_frame_vectors=frame_vectors if want_vectors else None,
                 )
-                results = filter_hits_by_min_score(
-                    results,
-                    resolved_min_score,
-                    relative=kind not in {"dialogue", "tags"},
-                )
+                incoming = list(results or [])
+                results = filter_hits_by_min_score(incoming, resolved_min_score)
+                aligned_vectors = None
+                if want_vectors and len(frame_vectors) == len(incoming):
+                    by_hit = {id(hit): vector for hit, vector in zip(incoming, frame_vectors)}
+                    aligned_vectors = [by_hit.get(id(hit)) for hit in results]
                 if kind in {"dialogue", "tags"}:
                     self.dialogue_status_message = ""
                     self.dialogue_matched_by = "team"
-                self._emit_results(results, app_cfg=app_cfg, kind=kind)
+                self._emit_results(results, app_cfg=app_cfg, kind=kind, vectors=aligned_vectors)
                 return
 
             kind = str(config.search_kind or "").strip().lower()
@@ -482,7 +493,7 @@ class SearchWorker(QThread):
                     should_stop_callback=self._should_stop,
                     **base_kwargs,
                 )
-            results = filter_hits_by_min_score(results, resolved_min_score, relative=True)
+            results = filter_hits_by_min_score(results, resolved_min_score)
             from src.services.search_service import locate_crop_confidence_warning_key
 
             self.locate_warning_key = locate_crop_confidence_warning_key(

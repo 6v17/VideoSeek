@@ -1,6 +1,8 @@
 import unittest
 
-from src.storage.config_store import next_result_window
+from src.domain.search_hit import SearchHit
+from src.storage.config_store import next_result_window, result_window_loaded_count
+from ui.controllers.search_controller import _unseen_hits, _vectors_for_unseen
 from src.app.search_results_paging import (
     visible_end_index,
     SEARCH_RESULTS_PAGE_SIZE,
@@ -53,9 +55,29 @@ class SearchWindowGrowthTests(unittest.TestCase):
         self.assertIsNone(next_result_window(300, 100, loaded_count=120))
         self.assertEqual(next_result_window(300, 119, loaded_count=120), 400)
 
+    def test_grouped_page_uses_the_rows_on_screen(self):
+        shown = result_window_loaded_count(300, 118)
+        self.assertEqual(shown, 118)
+        self.assertIsNone(next_result_window(300, 100, loaded_count=shown))
+        self.assertEqual(next_result_window(300, 117, loaded_count=shown), 400)
+        self.assertEqual(result_window_loaded_count(300, 118, focused=True), 300)
+        self.assertEqual(result_window_loaded_count(300, 300), 300)
+
     def test_nearly_full_window_still_uses_the_cap_horizon(self):
         self.assertIsNone(next_result_window(400, 298, loaded_count=399))
         self.assertEqual(next_result_window(400, 299, loaded_count=399), 500)
+
+
+class UnseenBatchTests(unittest.TestCase):
+    def test_new_batch_keeps_only_its_own_vectors(self):
+        first = SearchHit(1.0, 1.0, 0.9, "a.mp4")
+        second = SearchHit(2.0, 2.0, 0.4, "b.mp4")
+        incoming = [first, second, SearchHit(3.0, 3.0, 0.99, "c.mp4")]
+        extra = _unseen_hits([first, second], incoming)
+        vectors = _vectors_for_unseen([first, second], incoming, ["va", "vb", "vc"])
+        self.assertEqual([hit.video_path for hit in extra], ["c.mp4"])
+        self.assertEqual(vectors, ["vc"])
+        self.assertIsNone(_vectors_for_unseen([first], incoming, ["va"]))
 
 
 if __name__ == "__main__":

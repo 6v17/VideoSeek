@@ -313,7 +313,7 @@ SEARCH_WINDOW_STEP = 100
 SEARCH_WINDOW_LEAD = 100
 SEARCH_CANDIDATE_LIMIT = SEARCH_WINDOW_INITIAL
 # Safety ceiling for one request. The desktop window grows by SEARCH_WINDOW_STEP
-# until the score floor; this only stops a runaway top_k.
+# while lower-scoring hits still exist; this only stops a runaway top_k.
 SEARCH_TOP_K_MAX = 10000
 
 
@@ -347,6 +347,23 @@ def next_result_window(limit, reached_index, exhausted=False, loaded_count=None)
     if reached + 1 < current - SEARCH_WINDOW_LEAD:
         return None
     return current + SEARCH_WINDOW_STEP
+
+
+def result_window_loaded_count(source_count: int, visible_count: int, *, focused: bool = False) -> int:
+    """Rows the user can scroll to. Grouping can show fewer rows than the fetched hits."""
+    try:
+        source = max(0, int(source_count))
+    except (TypeError, ValueError):
+        source = 0
+    if focused:
+        return source
+    try:
+        visible = max(0, int(visible_count))
+    except (TypeError, ValueError):
+        visible = 0
+    if visible <= 0:
+        return source
+    return min(source, visible)
 
 
 _SEARCH_MIN_SCORE_KEYS = {

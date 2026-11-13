@@ -49,6 +49,19 @@ class AgentApiHelperTests(unittest.TestCase):
         self.assertEqual(payload[0]["end_sec"], 2.0)
         self.assertEqual(payload[0]["video_path"], "D:/a.mp4")
         self.assertIn("score", payload[0])
+        self.assertNotIn("frame_vector", payload[0])
+
+    def test_hits_to_payload_includes_frame_vectors_when_asked(self):
+        payload = _hits_to_payload(
+            [SearchHit(1.0, 1.0, 0.9, "D:/a.mp4"), SearchHit(2.0, 2.0, 0.4, "D:/b.mp4")],
+            mode="frame",
+            expand_frame_hits=False,
+            pad_before_sec=0.0,
+            pad_after_sec=0.0,
+            frame_vectors=[[0.2, 0.3], None],
+        )
+        self.assertEqual(payload[0]["frame_vector"], [0.2, 0.3])
+        self.assertIsNone(payload[1]["frame_vector"])
 
     @patch("src.web.agent_api.search.resolve_hit_source_path", return_value="D:/resolved/clip.mp4")
     def test_hits_to_payload_fills_empty_video_path(self, _mock_resolve):

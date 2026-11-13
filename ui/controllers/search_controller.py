@@ -9,6 +9,7 @@ from src.domain.search_hit import coerce_search_hit
 from src.storage.config_store import (
     SEARCH_CANDIDATE_LIMIT,
     next_result_window,
+    result_window_loaded_count,
 )
 from ui.threading_utils import shutdown_thread
 from ui.workers import SearchConfig, SearchWarmupWorker, SearchWorker, ThumbLoader
@@ -38,6 +39,22 @@ def _unseen_hits(existing, incoming):
     return extra
 
 
+def _vectors_for_unseen(existing, incoming, vectors):
+    """Vectors for the new rows only. ``hit_vectors`` lines up with the full window, not the delta."""
+    rows = list(incoming or [])
+    if not isinstance(vectors, list) or len(vectors) != len(rows):
+        return None
+    seen = {_hit_key(row) for row in existing or []}
+    picked = []
+    for row, vector in zip(rows, vectors):
+        key = _hit_key(row)
+        if key in seen:
+            continue
+        seen.add(key)
+        picked.append(vector)
+    return picked
+
+
 class SearchController(QObject):
     def __init__(self, parent_window):
         super().__init__(parent_window)
@@ -53,7 +70,8 @@ class SearchController(QObject):
         self._last_coarse_results = []
         self._all_results = []
         self._source_hits = []
-        self._source_vectors = None
+        self._result_batches = []
+        self._result_batch_vectors = []
         self._result_groups = []
         self._expanded_group_ids = set()
         self._grid_group_focus = None
@@ -161,6 +179,49 @@ class SearchController(QObject):
         self.worker.finished.connect(self._finish_search)
         self.worker.start()
 
+    def restart_with_min_score(self, min_score) -> bool:
+        """Run the last query again when the score slider moves.
+
+        The list on screen was already filtered. A new percent cannot bring
+        those dropped hits back unless the same query is searched again.
+        """
+        previous = self._search_config
+        if previous is None or self.is_search_running():
+            return False
+        try:
+            new_score = None if min_score is None else float(min_score)
+        except (TypeError, ValueError):
+            return False
+        old_score = getattr(previous, "min_score", None)
+        if (
+            old_score is not None
+            and new_score is not None
+            and abs(float(old_score) - new_score) < 1e-6
+        ):
+            return False
+        self.start_search(
+            previous.query,
+            bool(previous.is_text),
+            scope_library_paths=list(previous.scope_library_paths or []),
+            scope_video_paths=list(previous.scope_video_paths or []),
+            query_vector=previous.query_vector,
+            search_mode=previous.search_mode,
+            search_kind=previous.search_kind,
+            top_k=previous.top_k,
+            min_score=new_score,
+            search_precision_mode=previous.search_precision_mode,
+            pixel_query_data=previous.pixel_query_data,
+            preview_anchor_sec=previous.preview_anchor_sec,
+            locate_anchor_score=previous.locate_anchor_score,
+            locate_score_margin=previous.locate_score_margin,
+            video_discovery_enabled=previous.video_discovery_enabled,
+            compose_text=previous.compose_text,
+            compose_image_paths=previous.compose_image_paths,
+            compose_fusion=previous.compose_fusion,
+            required_tags=previous.required_tags,
+        )
+        return True
+
     def start_preset_search(self, preset_id):
         """Load preset into Compose and run the same path as clicking Search.
 
@@ -228,7 +289,8 @@ class SearchController(QObject):
         self.stop_thumbnail_loading()
         self._all_results = []
         self._source_hits = []
-        self._source_vectors = None
+        self._result_batches = []
+        self._result_batch_vectors = []
         self._result_groups = []
         self._expanded_group_ids = set()
         self._grid_group_focus = None
@@ -348,7 +410,7 @@ class SearchController(QObject):
             self._window_exhausted = True
             return
         self._window_limit = int(SEARCH_CANDIDATE_LIMIT)
-        # A short first page (chunk collapse, nearby-frame dedupe) is not the end.
+        # A short first page (chunk collapse, nearby-frame dedupe, grouping) is not the end.
         # Growth stops only when a larger fetch adds no new hits.
         self._window_exhausted = len(self._source_hits) == 0
         self._prefetch_hold = False
@@ -365,7 +427,11 @@ class SearchController(QObject):
             self._window_limit,
             self._furthest_visible_index(),
             exhausted=self._window_exhausted,
-            loaded_count=len(self._source_hits),
+            loaded_count=result_window_loaded_count(
+                len(self._source_hits),
+                len(self._all_results or []),
+                focused=self._grid_group_focus is not None,
+            ),
         )
         if nxt is None:
             return
@@ -398,14 +464,15 @@ class SearchController(QObject):
             return
         requested = int(getattr(worker, "window_limit", 0) or 0)
         incoming = list(rows or [])
-        extra = _unseen_hits(self._source_hits, incoming)
+        prior = list(self._source_hits or [])
+        extra = _unseen_hits(prior, incoming)
         if not extra:
             self._window_exhausted = True
         else:
-            self._source_hits = incoming
-            vectors = getattr(worker, "hit_vectors", None)
-            self._source_vectors = list(vectors) if isinstance(vectors, list) else None
-            self.rebuild_grouped_results(pin_top=False)
+            vectors = _vectors_for_unseen(prior, incoming, getattr(worker, "hit_vectors", None))
+            self._remember_result_batch(prior, extra, vectors)
+            if self._grid_group_focus is None:
+                self._append_grouped_batch(extra, vectors)
         if requested > 0:
             self._window_limit = requested
         self._maybe_grow_window(ignore_worker=worker)
@@ -424,6 +491,47 @@ class SearchController(QObject):
             return
         if not worker.isRunning():
             self._more_worker = None
+
+    def _remember_result_batch(self, prior, extra, vectors) -> None:
+        """Keep earlier batches intact and record this fetch as the next one."""
+        if not self._result_batches and prior:
+            self._result_batches = [list(prior)]
+            self._result_batch_vectors = [None]
+        self._source_hits = list(prior) + list(extra)
+        self._result_batches.append(list(extra))
+        self._result_batch_vectors.append(vectors)
+
+    def _grouping_options(self) -> tuple[bool, str]:
+        from src.app.config import load_config
+
+        kind = str((self._result_display_context or {}).get("search_kind") or "").strip().lower()
+        config = load_config()
+        enabled = bool(config.get("search_result_grouping_enabled", True)) and kind not in {"dialogue", "tags"}
+        sensitivity = str(config.get("search_result_grouping_sensitivity") or "standard")
+        return enabled, sensitivity
+
+    def _append_grouped_batch(self, hits, vectors) -> None:
+        """Group this batch by itself and add it under the rows already on screen."""
+        if not self._result_groups:
+            self.rebuild_grouped_results(pin_top=False)
+            return
+        from src.services.search_result_groups import flatten_result_groups, group_search_hits
+
+        enabled, sensitivity = self._grouping_options()
+        rows_in = list(hits or [])
+        aligned = vectors if isinstance(vectors, list) and len(vectors) == len(rows_in) else None
+        new_groups = group_search_hits(rows_in, aligned, enabled=enabled, sensitivity=sensitivity)
+        if not new_groups:
+            return
+        offset = len(self._result_groups)
+        self._result_groups = list(self._result_groups) + list(new_groups)
+        rows = flatten_result_groups(new_groups, id_offset=offset)
+        self._all_results = list(self._all_results or []) + rows
+        self._append_rendered(rows)
+        self._update_results_status_text(self._all_results, dict(self._result_display_context or {}))
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(0, self._ensure_visible_thumbnails)
 
     def _append_rendered(self, extra) -> None:
         if not extra:
@@ -617,7 +725,9 @@ class SearchController(QObject):
         self.parent_window.push_inference_status()
         self._source_hits = list(results or [])
         vectors = getattr(self.worker, "hit_vectors", None)
-        self._source_vectors = list(vectors) if isinstance(vectors, list) else None
+        aligned = list(vectors) if isinstance(vectors, list) and len(vectors) == len(self._source_hits) else None
+        self._result_batches = [list(self._source_hits)]
+        self._result_batch_vectors = [aligned]
         self._expanded_group_ids = set()
         self._grid_group_focus = None
         self._group_return = None
@@ -678,24 +788,27 @@ class SearchController(QObject):
         self.rebuild_grouped_results(pin_top=True)
 
     def rebuild_grouped_results(self, *, pin_top: bool = False) -> None:
-        """Collapse the current hit list. Safe to call again when the grouping control changes."""
-        from src.app.config import load_config
+        """Collapse each fetched batch on its own. Later batches stay below earlier ones."""
         from src.services.search_result_groups import (
             flatten_result_groups,
             focus_group_rows,
-            group_search_hits,
+            group_hit_batches,
         )
 
+        scroll = None if pin_top else self._capture_result_scroll()
         self._ensure_group_hooks()
-        hits = list(self._source_hits or [])
-        kind = str((self._result_display_context or {}).get("search_kind") or "").strip().lower()
-        config = load_config()
-        enabled = bool(config.get("search_result_grouping_enabled", True)) and kind not in {"dialogue", "tags"}
-        sensitivity = str(config.get("search_result_grouping_sensitivity") or "standard")
-        vectors = self._source_vectors
-        if not isinstance(vectors, list) or len(vectors) != len(hits):
-            vectors = None
-        groups = group_search_hits(hits, vectors, enabled=enabled, sensitivity=sensitivity)
+        enabled, sensitivity = self._grouping_options()
+        batches = list(self._result_batches or [])
+        batch_vectors = list(self._result_batch_vectors or [])
+        if not batches:
+            batches = [list(self._source_hits or [])]
+            batch_vectors = [None]
+        groups = group_hit_batches(
+            batches,
+            batch_vectors,
+            enabled=enabled,
+            sensitivity=sensitivity,
+        )
         self._result_groups = groups
         self._expanded_group_ids = {
             group_id
@@ -712,6 +825,27 @@ class SearchController(QObject):
             self._all_results = focus_group_rows(group, group_id=int(focus))
             self._set_group_return(group)
         self._render_current_page(pin_top=pin_top)
+        if scroll is not None:
+            self._queue_result_scroll_restore(scroll)
+
+    def _capture_result_scroll(self) -> int | None:
+        try:
+            view = self._result_view()
+            if view.view_mode == "grid":
+                return int(view.grid.verticalScrollBar().value())
+            return int(view.table.verticalScrollBar().value())
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/controllers/search_controller.py:capture_result_scroll")
+            return None
+
+    def _queue_result_scroll_restore(self, scroll: int) -> None:
+        view = self._result_view()
+        if view.view_mode == "grid":
+            view.grid._pending_restore = (int(scroll), None)
+        else:
+            view.table._pending_restore = (int(scroll), None)
 
     def _set_group_return(self, group) -> None:
         """Put group drill-in back on the status row. Never a bar above the list."""
@@ -829,6 +963,9 @@ class SearchController(QObject):
             from PySide6.QtCore import QTimer
 
             QTimer.singleShot(0, self._release_pin_guard)
+            return
+        # A short page can already show its last row, so there is no scroll event to ask for more.
+        self._maybe_grow_window()
 
     def _release_pin_guard(self) -> None:
         # Only the group we just opened should stay pinned. Returning restores the old place.
@@ -836,6 +973,7 @@ class SearchController(QObject):
             self._reset_result_scroll()
         self._pin_top_guard = False
         self._ensure_visible_thumbnails()
+        self._maybe_grow_window()
 
     def _paint_current_page(self, results) -> None:
         texts = self.parent_window.texts

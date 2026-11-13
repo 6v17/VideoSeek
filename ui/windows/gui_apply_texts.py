@@ -132,7 +132,7 @@ class ApplyTextsGuiMixin:
             filters.setToolTip(t.get("search_filters_toggle_tip", ""))
         panel = self.search_page.search_panel
         score_hint = t.get("search_min_score_hint", "")
-        panel.score_label.setText(t.get("search_min_score_label", "最低相关度"))
+        panel.score_label.setText(t.get("search_min_score_label", "最低相似度"))
         panel.score_label.setToolTip(score_hint)
         panel.score_input.setToolTip(score_hint)
         panel.score_value.setToolTip(score_hint)

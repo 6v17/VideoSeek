@@ -74,6 +74,9 @@ class AgentSearchRequest(BaseModel):
     locate_anchor_score: Optional[float] = None
     locate_score_margin: Optional[float] = None
     team_play_urls: bool = False
+    # Desktop user machines have no frame index. The server attaches each hit's
+    # frame vector so grouping matches a search run on the server itself.
+    include_frame_vectors: bool = False
 
 
 class AgentBatchSearchExportOptions(BaseModel):

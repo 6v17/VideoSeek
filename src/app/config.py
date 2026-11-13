@@ -618,12 +618,7 @@ def _sanitize_general_settings(config):
     sanitized.pop("search_min_score", None)
     sanitized.pop("search_min_score_video_discovery", None)
     sanitized.pop("search_min_score_precise", None)
-    # Older floors were absolute cosine. Those numbers overlap on real CLIP
-    # queries, so visual search now stores a drop below the best hit.
-    if "search_min_score_relative" not in sanitized:
-        for key in score_keys + ("search_min_score_image_chunk",):
-            sanitized[key] = DEFAULT_CONFIG[key]
-    sanitized["search_min_score_relative"] = True
+    sanitized.pop("search_min_score_relative", None)
 
     for key, allowed_values in CONFIG_ENUMS.items():
         value = str(sanitized.get(key, DEFAULT_CONFIG[key]) or "").strip().lower()

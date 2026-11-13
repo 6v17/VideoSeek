@@ -622,6 +622,7 @@ def run_team_client_search(
     text_enhance: Optional[bool] = None,
     api_port_default: int = 8765,
     timeout: float = 180.0,
+    collect_frame_vectors: Optional[list] = None,
 ) -> List[SearchHit]:
     base, token = _team_endpoint(server_url, api_port_default=api_port_default)
 
@@ -653,6 +654,8 @@ def run_team_client_search(
         payload["search_mode"] = mode
     if text_enhance is not None and kind not in {"dialogue", "tags"}:
         payload["text_enhance"] = bool(text_enhance)
+    if collect_frame_vectors is not None and kind not in {"dialogue", "tags"}:
+        payload["include_frame_vectors"] = True
     precision = str(search_precision_mode or "").strip().lower()
     if precision:
         payload["search_precision_mode"] = precision
@@ -738,7 +741,18 @@ def run_team_client_search(
                 matched_text=str(row.get("matched_text") or ""),
             )
         )
+        if collect_frame_vectors is not None:
+            collect_frame_vectors.append(_parse_frame_vector(row.get("frame_vector")))
     return out
+
+
+def _parse_frame_vector(raw) -> list[float] | None:
+    if not isinstance(raw, list) or not raw:
+        return None
+    try:
+        return [float(value) for value in raw]
+    except (TypeError, ValueError):
+        return None
 
 
 def _team_hit_time_range(row: dict, *, preferred_mode: str = "") -> tuple[float, float]:

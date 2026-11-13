@@ -197,6 +197,32 @@ class TeamClientScopeTests(unittest.TestCase):
             )
         self.assertNotIn("text_enhance", captured["payload"])
 
+    def test_visual_search_keeps_server_frame_vectors_with_hits(self):
+        captured = {}
+
+        def fake_post(url, payload, timeout=120.0, token="", **_kwargs):
+            captured["payload"] = payload
+            return {
+                "ok": True,
+                "hits": [
+                    {"video_path": "a.mp4", "start_sec": 1, "end_sec": 1, "score": 0.9, "frame_vector": [0.1, 0.2]},
+                    {"video_path": "", "start_sec": 2, "end_sec": 2, "score": 0.8, "frame_vector": [0.3, 0.4]},
+                    {"video_path": "b.mp4", "start_sec": 3, "end_sec": 3, "score": 0.4},
+                ],
+            }
+
+        vectors = []
+        with mock.patch("src.services.team_client_search._post_json", side_effect=fake_post):
+            hits = run_team_client_search(
+                server_url="http://192.168.1.2:8765",
+                query_data="蓝发",
+                is_text=True,
+                collect_frame_vectors=vectors,
+            )
+        self.assertTrue(captured["payload"].get("include_frame_vectors"))
+        self.assertEqual([hit.video_path for hit in hits], ["a.mp4", "b.mp4"])
+        self.assertEqual(vectors, [[0.1, 0.2], None])
+
 
 if __name__ == "__main__":
     unittest.main()

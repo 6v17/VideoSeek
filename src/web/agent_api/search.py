@@ -490,6 +490,18 @@ def _enrich_hit_payload(
     return payload
 
 
+def _json_frame_vector(vector) -> List[float] | None:
+    if vector is None:
+        return None
+    values = vector.reshape(-1).tolist() if hasattr(vector, "tolist") else list(vector)
+    if not values:
+        return None
+    try:
+        return [float(value) for value in values]
+    except (TypeError, ValueError):
+        return None
+
+
 def _hits_to_payload(
     hits: List[SearchHit],
     *,
@@ -498,9 +510,12 @@ def _hits_to_payload(
     pad_before_sec: float,
     pad_after_sec: float,
     team_play_urls: bool = False,
+    frame_vectors=None,
 ) -> List[Dict[str, Any]]:
-    return [
-        _enrich_hit_payload(
+    vectors = list(frame_vectors) if frame_vectors is not None else None
+    payloads: List[Dict[str, Any]] = []
+    for rank, hit in enumerate(hits, start=1):
+        payload = _enrich_hit_payload(
             hit,
             rank=rank,
             mode=mode,
@@ -509,14 +524,17 @@ def _hits_to_payload(
             pad_after_sec=pad_after_sec,
             team_play_urls=team_play_urls,
         )
-        for rank, hit in enumerate(hits, start=1)
-    ]
+        if vectors is not None:
+            vector = vectors[rank - 1] if rank - 1 < len(vectors) else None
+            payload["frame_vector"] = _json_frame_vector(vector)
+        payloads.append(payload)
+    return payloads
 
 
-def _filter_hits(hits: List[SearchHit], min_score: Optional[float], *, relative: bool = False) -> List[SearchHit]:
+def _filter_hits(hits: List[SearchHit], min_score: Optional[float]) -> List[SearchHit]:
     from src.services.search_query import filter_hits_by_min_score
 
-    return filter_hits_by_min_score(hits, min_score, relative=relative)
+    return filter_hits_by_min_score(hits, min_score)
 
 
 def _preset_to_agent_payload(preset: dict, config=None) -> Dict[str, Any]:
@@ -930,7 +948,12 @@ def _execute_agent_search_work(body: AgentSearchRequest) -> Dict[str, Any]:
             config=config,
         )
 
-    hits = _filter_hits(hits, resolved["min_score"], relative=True)
+    hits = _filter_hits(hits, resolved["min_score"])
+    frame_vectors = None
+    if bool(getattr(body, "include_frame_vectors", False)):
+        from src.services.search_result_groups import fetch_hit_frame_vectors
+
+        frame_vectors = fetch_hit_frame_vectors(hits, config)
     _record_agent_search_telemetry(resolved, hits, preview_anchor_sec=preview_anchor_sec)
     scope_meta = _build_scope_meta(_scope_for_request_meta(body, resolved), config=config)
     response = {
@@ -948,6 +971,7 @@ def _execute_agent_search_work(body: AgentSearchRequest) -> Dict[str, Any]:
             pad_before_sec=_bounded_pad_sec(body.pad_before_sec, field_name="pad_before_sec"),
             pad_after_sec=_bounded_pad_sec(body.pad_after_sec, field_name="pad_after_sec"),
             team_play_urls=bool(getattr(body, "team_play_urls", False) or resolved.get("team_play_urls")),
+            frame_vectors=frame_vectors,
         ),
         "meta": {
             "returned": len(hits),

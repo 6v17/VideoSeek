@@ -130,10 +130,40 @@ def group_search_hits(
     return groups
 
 
-def flatten_result_groups(groups, *, expanded: set[int] | None = None) -> list[GroupDisplayRow]:
+def group_hit_batches(
+    batches,
+    batch_vectors=None,
+    *,
+    enabled: bool = True,
+    sensitivity: str = "standard",
+) -> list[ResultGroup]:
+    """Group each fetched batch on its own and keep arrival order.
+
+    A later batch never joins an earlier group, so growing the window appends
+    rows instead of reordering the list.
+    """
+    groups: list[ResultGroup] = []
+    vectors = list(batch_vectors or [])
+    for index, hits in enumerate(batches or []):
+        rows = list(hits or [])
+        vec = vectors[index] if index < len(vectors) else None
+        if not isinstance(vec, list) or len(vec) != len(rows):
+            vec = None
+        groups.extend(group_search_hits(rows, vec, enabled=enabled, sensitivity=sensitivity))
+    return groups
+
+
+def flatten_result_groups(
+    groups,
+    *,
+    expanded: set[int] | None = None,
+    id_offset: int = 0,
+) -> list[GroupDisplayRow]:
     open_ids = expanded or set()
     rows: list[GroupDisplayRow] = []
-    for group_id, group in enumerate(groups or []):
+    offset = max(0, int(id_offset))
+    for local_id, group in enumerate(groups or []):
+        group_id = local_id + offset
         count = len(group.members)
         rows.append(
             _display_row(

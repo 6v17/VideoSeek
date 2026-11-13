@@ -295,8 +295,8 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
             "check meta.text_enhance_applied). "
             "Snapshot text_search_enhance_enabled is the default when text_enhance is omitted; "
             "false does not mean the feature is missing. "
-            "min_score on visual search is the gap below this search's top score; "
-            "on fuzzy subtitles it is an absolute score.\n"
+            "min_score is an absolute similarity for visual search and fuzzy subtitles. "
+            "0 does not filter.\n"
             "5. Non-default (user must ask): manifest, precise/preview_anchor_sec, intermediate JSON files.\n"
             f"6. Scope: GET {api_base}/libraries / GET {api_base}/videos when needed."
         )
@@ -315,7 +315,7 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
         "（短语/同义多路 + CLIP 挑选 + RRF；原句优先，2 秒内并成一镜，score 仍是相似度；"
         "非剧情大模型；看 meta.text_enhance_applied）。"
         "快照里的 text_search_enhance_enabled 是省略 text_enhance 时的默认，false 不是功能不可用。"
-        "画面搜索的 min_score 是距本次最高分的差距；字幕模糊匹配的 min_score 是绝对分。\n"
+        "画面搜索和字幕模糊匹配的 min_score 都是绝对相似度，0 表示不过滤。\n"
         "5. 非默认（须用户要求）：manifest、precise/preview_anchor_sec、中间 JSON 文件。\n"
         f"6. 缩 scope：GET {api_base}/libraries / GET {api_base}/videos。"
     )

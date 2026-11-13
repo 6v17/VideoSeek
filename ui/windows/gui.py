@@ -1551,6 +1551,7 @@ class MainWindow(
                 search_precision_mode=search_precision_mode,
             ),
             search_precision_mode=search_precision_mode,
+            min_score=self._slider_search_min_score(),
         )
         return True
 
@@ -1583,6 +1584,7 @@ class MainWindow(
             scope_video_paths=scope_video_paths,
             search_kind="dialogue",
             search_mode=match_mode,
+            min_score=self._slider_search_min_score(),
         )
         return True
 
@@ -1679,6 +1681,7 @@ class MainWindow(
                 is_text=False,
                 has_image=True,
             ),
+            min_score=self._slider_search_min_score(),
         )
         return True
 
@@ -1766,7 +1769,7 @@ class MainWindow(
             search_mode=compose_mode,
             search_kind="compose",
             top_k=plan.get("top_k"),
-            min_score=plan.get("min_score"),
+            min_score=self._slider_search_min_score(),
             search_precision_mode="fast",
             pixel_query_data=plan.get("pixel_query_data"),
             video_discovery_enabled=False,

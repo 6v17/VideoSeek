@@ -570,6 +570,15 @@ class SearchPanelStateMixin:
         kinds = tuple(getattr(panel, "_score_values", {}) or {})
         panel.set_score_thresholds(**{kind: get_search_min_score(kind=kind) for kind in kinds})
 
+    def _slider_search_min_score(self) -> float | None:
+        """Use the number on the slider, including 0%. Do not keep searching the last saved file."""
+        panel = getattr(getattr(self, "search_page", None), "search_panel", None)
+        kind = self._active_search_score_kind()
+        if panel is None or not kind or not hasattr(panel, "score_threshold"):
+            return None
+        self._save_search_score_threshold(kind)
+        return float(panel.score_threshold(kind))
+
     def _on_search_score_threshold_changed(self, _value: int) -> None:
         panel = getattr(getattr(self, "search_page", None), "search_panel", None)
         slider = getattr(panel, "score_input", None) if panel is not None else None
@@ -578,6 +587,7 @@ class SearchPanelStateMixin:
         kind = getattr(panel, "_score_kind", None) if panel is not None else None
         if kind:
             self._save_search_score_threshold(kind)
+            self._schedule_score_slider_research(panel.score_threshold(kind))
 
     def _save_search_score_threshold(self, kind: str) -> None:
         from src.app.config import load_config, save_config
@@ -594,6 +604,28 @@ class SearchPanelStateMixin:
         config[key] = panel.score_threshold(kind)
         save_config(config)
         self._refresh_search_filter_summary()
+
+    def _schedule_score_slider_research(self, min_score: float) -> None:
+        """The open result list was filtered already. Search again after the slider settles."""
+        self._pending_score_research = float(min_score)
+        timer = getattr(self, "_score_research_timer", None)
+        if timer is None:
+            from PySide6.QtCore import QTimer
+
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._rerun_search_for_score_slider)
+            self._score_research_timer = timer
+        timer.start(300)
+
+    def _rerun_search_for_score_slider(self) -> None:
+        controller = getattr(self, "search_controller", None)
+        if controller is None or not hasattr(controller, "restart_with_min_score"):
+            return
+        score = getattr(self, "_pending_score_research", None)
+        if score is None:
+            return
+        controller.restart_with_min_score(score)
 
     def _refresh_search_filter_summary(self) -> None:
         page = getattr(self, "search_page", None)

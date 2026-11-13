@@ -8,7 +8,12 @@ import unittest
 import numpy as np
 
 from src.domain.search_hit import SearchHit
-from src.services.search_result_groups import flatten_result_groups, focus_group_rows, group_search_hits
+from src.services.search_result_groups import (
+    flatten_result_groups,
+    focus_group_rows,
+    group_hit_batches,
+    group_search_hits,
+)
 
 
 def _hit(path: str, start: float, score: float, video_id: str = "") -> SearchHit:
@@ -80,6 +85,43 @@ class SearchResultGroupTests(unittest.TestCase):
         self.assertTrue(all(not row.show_badge for row in rows))
         self.assertEqual(rows[0].video_path, "ep1.mp4")
         self.assertEqual(rows[1].video_path, "ep2.mp4")
+
+    def test_later_batch_stays_below_a_higher_score(self):
+        first = [_hit("a.mp4", 10.0, 0.4), _hit("a.mp4", 12.0, 0.5)]
+        second = [_hit("a.mp4", 14.0, 0.99)]
+        together = group_search_hits(first + second, enabled=True)
+        batched = group_hit_batches([first, second], enabled=True)
+        self.assertEqual(len(together), 1)
+        self.assertEqual(len(batched), 2)
+        self.assertEqual(float(batched[0].representative.score), 0.5)
+        self.assertEqual(float(batched[1].representative.start_sec), 14.0)
+        rows = flatten_result_groups(batched)
+        self.assertEqual([row.display_rank for row in rows], [1, 2])
+        self.assertEqual(float(rows[0].score), 0.5)
+        self.assertEqual(float(rows[1].score), 0.99)
+
+    def test_later_batch_does_not_cross_merge(self):
+        first = [_hit("ep1.mp4", 1.0, 0.7, "1")]
+        second = [_hit("ep2.mp4", 2.0, 0.95, "2")]
+        vectors = [np.array([1.0, 0.0], dtype=np.float32), _unit(0.95)]
+        together = group_search_hits(first + second, vectors, enabled=True, sensitivity="standard")
+        batched = group_hit_batches(
+            [first, second],
+            [[vectors[0]], [vectors[1]]],
+            enabled=True,
+            sensitivity="standard",
+        )
+        self.assertEqual(len(together), 1)
+        self.assertEqual(together[0].kind, "cross")
+        self.assertEqual(len(batched), 2)
+        self.assertEqual(batched[0].representative.video_path, "ep1.mp4")
+        self.assertEqual(batched[1].representative.video_path, "ep2.mp4")
+
+    def test_flatten_offset_keeps_earlier_group_ids(self):
+        extra = group_search_hits([_hit("b.mp4", 1.0, 0.2)], enabled=True)
+        rows = flatten_result_groups(extra, id_offset=4)
+        self.assertEqual(rows[0].group_id, 4)
+        self.assertEqual(rows[0].display_rank, 5)
 
 
 if __name__ == "__main__":
