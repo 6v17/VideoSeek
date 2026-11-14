@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.app.logging_utils import get_logger
-from src.app.path_display import video_display_name
+from src.app.path_display import readable_media_location, video_display_name
 from src.domain.search_hit import coerce_search_hit
 from src.utils import format_timecode_range, format_timecode_seconds, open_folder_in_explorer, open_in_explorer
 from ui.dialogs.export_clip_mode_dialog import prompt_export_encode_mode
@@ -1261,7 +1261,7 @@ class PreviewGuiMixin:
         texts.setdefault("result_mode_video", "视频")
         texts.setdefault("result_mode_dialogue", "字幕")
         texts.setdefault("result_mode_tags", "标签")
-        lines = [path] if path else []
+        lines = []
         lines.append(f"{texts.get('search_preview_detail_hit', '命中')}  {format_timecode_range(start, end)}")
         lines.append(f"{texts.get('search_preview_detail_score', '相似度')}  {int(score * 100)}%")
         lines.append(
@@ -1277,7 +1277,7 @@ class PreviewGuiMixin:
             lines.append(f"{texts.get('search_preview_detail_match', '匹配')}  {matched}")
         body = "\n".join(lines)
         name = video_display_name(path) if path else ""
-        self._write_preview_detail(name, path, body)
+        self._write_preview_detail(name, readable_media_location(path), body)
         token = (path, round(float(start), 3))
         self._preview_detail_token = token
         if duration_text:

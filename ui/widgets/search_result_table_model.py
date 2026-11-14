@@ -11,7 +11,7 @@ from typing import Any, Callable
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QPixmap
 
-from src.app.path_display import video_display_name
+from src.app.path_display import readable_media_location, video_display_name
 from src.domain.search_hit import coerce_search_hit
 from src.services.search_locate import format_clip_score_percent, resolve_clip_confidence_label, resolve_clip_confidence_tier_key
 from ui.views.dialogue_highlight import highlight_dialogue_html
@@ -139,7 +139,7 @@ def build_result_row(
     base_name = video_display_name(hit.video_path)
     video_text, video_html, video_tip = _video_cell_parts(
         base_name=base_name,
-        video_path=str(hit.video_path or ""),
+        video_path=readable_media_location(str(hit.video_path or "")),
         match_kind=match_kind,
         matched_text=matched_text,
         highlight_query=highlight_query,

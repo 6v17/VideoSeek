@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from ui.widgets.button_roles import set_button_role
 from ui.widgets.search_result_table_model import group_badge_text, group_subtitle_text
 from ui.widgets.styles import repolish_widget
-from src.app.path_display import video_display_name
+from src.app.path_display import readable_media_location, video_display_name
 from src.domain.search_hit import coerce_search_hit
 from src.services.search_locate import format_clip_score_percent, resolve_clip_confidence_label
 from ui.views.table_views import format_time_range as _format_time_range
@@ -610,9 +610,9 @@ class ResultGridCard(QFrame):
 
         base_name = video_display_name(self._video_path)
         if self._match_kind in {"dialogue", "tags"} and matched_text:
-            self._set_title_text(matched_text, f"{self._video_path}\n\n{matched_text}")
+            self._set_title_text(matched_text, f"{readable_media_location(self._video_path)}\n\n{matched_text}")
         else:
-            self._set_title_text(base_name, self._video_path)
+            self._set_title_text(base_name, readable_media_location(self._video_path))
 
         time_text = ""
         if self._match_kind != "image":

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.app.path_display import video_display_name
+from src.app.path_display import readable_media_location, video_display_name
 
 
 class VideoDisplayNameTests(unittest.TestCase):
@@ -19,6 +19,16 @@ class VideoDisplayNameTests(unittest.TestCase):
     def test_team_play_url_without_encoding(self):
         url = "http://192.168.1.2:18080/videos/lib1/a.mp4"
         self.assertEqual(video_display_name(url), "a.mp4")
+
+    def test_encoded_basename_without_url(self):
+        self.assertEqual(video_display_name("%E4%B8%AD%E6%96%87.mp4"), "中文.mp4")
+
+    def test_readable_location_unquotes_the_path(self):
+        url = "http://192.168.1.4:18080/videos/lib1/%E4%B8%AD%E6%96%87.mp4"
+        self.assertEqual(
+            readable_media_location(url),
+            "http://192.168.1.4:18080/videos/lib1/中文.mp4",
+        )
 
     def test_empty(self):
         self.assertEqual(video_display_name(""), "")

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-import os
-
 import src.services.search_telemetry_store as store
 from src.services.search_telemetry_store import (
     PLAYBACK_DELTA_SAMPLE_CAP,
     is_telemetry_enabled,
     logger,
 )
+
+
+def _playback_video_name(video_path) -> str:
+    from src.app.path_display import video_display_name
+
+    return video_display_name(str(video_path or "")) or "-"
 
 
 def begin_playback_session(
@@ -70,7 +74,7 @@ def finish_playback_session(*, actual_sec: float | None, source: str = "inline")
             actual,
             delta,
             float(pending.get("playback_start_sec", suggested)),
-            os.path.basename(str(pending.get("video_path") or "")) or "-",
+            _playback_video_name(pending.get("video_path")),
         )
         return
 
@@ -94,7 +98,7 @@ def finish_playback_session(*, actual_sec: float | None, source: str = "inline")
         suggested,
         actual,
         delta,
-        os.path.basename(str(pending.get("video_path") or "")) or "-",
+        _playback_video_name(pending.get("video_path")),
     )
     store._maybe_add_profile_counter("telemetry_playback_samples")
     if abs_delta <= 1.0:
