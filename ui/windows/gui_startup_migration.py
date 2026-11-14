@@ -7,7 +7,6 @@ quick check; if work is needed, a dismissible tip points users to Settings.
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QTimer
-from PySide6.QtWidgets import QMessageBox
 
 from src.app.config import set_startup_migration_summary
 from src.app.logging_utils import get_logger
@@ -62,11 +61,7 @@ class StartupMigrationGuiMixin:
             summary = run_startup_migration_quick()
         except Exception as exc:
             logger.exception("Startup migration quick check failed")
-            QMessageBox.critical(
-                self,
-                self.texts["startup_migration_failed_title"],
-                self.texts["startup_migration_failed_body"].format(error=exc),
-            )
+            self.show_error_dialog(self.texts["startup_migration_failed_title"], exc)
             self.close()
             return
         logger.info("run_startup_migration_quick %.2fs", time.perf_counter() - t0)
@@ -177,11 +172,7 @@ class StartupMigrationGuiMixin:
         self._hide_startup_migration_banner()
         self._refresh_legacy_migration_settings_ui()
         logger.error("Background data migration failed: %s", error_text)
-        QMessageBox.critical(
-            self,
-            self.texts["startup_migration_failed_title"],
-            self.texts["startup_migration_failed_body"].format(error=error_text),
-        )
+        self.show_error_dialog(self.texts["startup_migration_failed_title"], error_text)
         # Tip can come back if legacy work is still pending.
         from src.storage.migration_runner import needs_background_startup_migration
 

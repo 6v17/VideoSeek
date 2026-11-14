@@ -45,7 +45,10 @@ if __name__ == "__main__":
     # seeks still land, but the slider and times never move on screen.
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
     app = QApplication(sys.argv)
+    from ui.dialogs.error_hook import install_uncaught_exception_hook
     from ui.widgets.tooltip_utils import install_wrapped_tooltips
+
+    install_uncaught_exception_hook()
 
     install_wrapped_tooltips()
 

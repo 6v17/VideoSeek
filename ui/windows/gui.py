@@ -648,6 +648,7 @@ class MainWindow(
         self.settings_page.btn_remove_model_profile.clicked.connect(self.remove_current_model_profile)
         self.settings_page.input_active_model_profile.currentIndexChanged.connect(self._on_active_model_profile_changed)
         self.settings_page.btn_show_runtime_diagnostics.clicked.connect(self.show_runtime_diagnostics)
+        self.settings_page.btn_export_logs.clicked.connect(self.export_app_logs)
         self.settings_page.btn_refresh_search_telemetry.clicked.connect(self.refresh_search_telemetry_panel)
         self.settings_page.btn_cleanup_old_data_root.clicked.connect(self.cleanup_old_data_root)
         self.settings_page.btn_cleanup_old_model_dir.clicked.connect(self.cleanup_old_model_dir)
@@ -2339,16 +2340,33 @@ class MainWindow(
         self.app_meta_controller.refresh(self.language)
 
     def show_error_dialog(self, message, exc=None):
-        detail = self.texts["generic_detail"].format(detail=str(exc)) if exc else ""
-        text = f"{message}\n\n{detail}".strip()
-        AppMessageDialog(
-            self.texts["error_title"],
-            text,
-            kind="error",
-            parent=self,
-            is_dark=self.is_dark_mode,
+        from ui.dialogs.app_message import present_error_dialog
+
+        present_error_dialog(
+            self,
+            message,
+            exc,
             language=self.language,
-        ).exec()
+            is_dark=self.is_dark_mode,
+            page=self._current_nav_page_id(),
+            title=str(self.texts.get("error_title") or ""),
+        )
+
+    def _current_nav_page_id(self) -> str:
+        order = list(getattr(self, "_nav_page_order", ()) or ())
+        pages = getattr(self, "pages", None)
+        if not order or pages is None:
+            return ""
+        try:
+            index = int(pages.currentIndex())
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui.py:current_nav_page")
+            return ""
+        if 0 <= index < len(order):
+            return str(order[index])
+        return ""
 
     def show_info_dialog(self, title, text, kind="info"):
         AppMessageDialog(

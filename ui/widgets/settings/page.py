@@ -123,6 +123,12 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_show_runtime_diagnostics.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
         )
+        self.btn_export_logs = QPushButton()
+        self.btn_export_logs.setObjectName("AccentGhostButton")
+        self.btn_export_logs.setMinimumHeight(30)
+        self.btn_export_logs.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
+        )
         self.runtime_status_ffmpeg = QLabel()
         self.runtime_status_ffmpeg.setObjectName("StatusHint")
         self.runtime_status_ffmpeg.setWordWrap(True)
@@ -134,6 +140,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         )
         runtime_status_header_layout.addWidget(self.runtime_status_title, 1)
         runtime_status_header_layout.addWidget(self.btn_show_runtime_diagnostics, 0)
+        runtime_status_header_layout.addWidget(self.btn_export_logs, 0)
 
         self.search_telemetry_title = QLabel()
         self.search_telemetry_title.setObjectName("CardTitle")
@@ -1530,6 +1537,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         )
         self.hint_inference_backend.setProperty("state", "neutral")
         self.btn_show_runtime_diagnostics.setText(texts.get("setting_show_runtime_diagnostics", "Diagnostics"))
+        self.btn_export_logs.setText(texts.get("setting_export_logs", "Export logs"))
         self.hint_gpu_runtime.setText(texts["setting_gpu_runtime_link_only"])
         self.hint_gpu_runtime.setOpenExternalLinks(True)
         self.hint_gpu_runtime.setTextFormat(Qt.RichText)

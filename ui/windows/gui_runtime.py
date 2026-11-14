@@ -395,6 +395,46 @@ class RuntimeGuiMixin:
         if dialog.confirmed():
             self.copy_runtime_diagnostics(status)
 
+    def export_app_logs(self) -> None:
+        """Save app.log and its backups as a zip. Users should not have to find the log folder."""
+        from datetime import datetime
+
+        from PySide6.QtCore import QStandardPaths
+        from PySide6.QtWidgets import QFileDialog
+
+        from src.app.logging_utils import export_logs_zip
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M")
+        default_name = f"VideoSeek-logs-{stamp}.zip"
+        desktop = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
+        start_dir = desktop if desktop and os.path.isdir(desktop) else os.path.expanduser("~")
+        path, _selected = QFileDialog.getSaveFileName(
+            self,
+            self.texts.get("setting_export_logs_title", "导出日志"),
+            os.path.join(start_dir, default_name),
+            self.texts.get("setting_export_logs_filter", "Zip (*.zip)"),
+        )
+        if not str(path or "").strip():
+            return
+        if not str(path).lower().endswith(".zip"):
+            path = f"{path}.zip"
+        try:
+            count = export_logs_zip(path)
+        except FileNotFoundError:
+            self.settings_page.lbl_status.setText(
+                self.texts.get("setting_export_logs_empty", "还没有日志文件。")
+            )
+            return
+        except Exception as exc:
+            self.show_error_dialog(self.texts.get("setting_export_logs_failed", "导出日志失败"), exc)
+            return
+        self.settings_page.lbl_status.setText(
+            self.texts.get(
+                "setting_export_logs_done",
+                "已导出 {count} 个日志文件：{path}",
+            ).format(count=count, path=path)
+        )
+
     def refresh_search_telemetry_panel(self):
         from src.services.search_telemetry import (
             format_telemetry_panel,

@@ -1,7 +1,10 @@
 import logging
 import os
 import time
+import zipfile
+from collections import deque
 from logging.handlers import RotatingFileHandler
+from threading import Lock
 
 
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
@@ -26,6 +29,47 @@ def get_log_dir() -> str:
 
 def get_log_file():
     return os.path.join(get_log_dir(), "app.log")
+
+
+def _is_log_filename(name: str) -> bool:
+    lower = str(name or "").lower()
+    return lower.endswith(".log") or ".log." in lower
+
+
+def flush_app_logs() -> None:
+    """Push buffered lines to disk before a user exports the log folder."""
+    root_logger = logging.getLogger(LOGGER_NAME)
+    for handler in list(root_logger.handlers):
+        try:
+            handler.flush()
+        except Exception as exc:
+            note_swallowed(exc, "logging_utils.flush_app_logs")
+
+
+def export_logs_zip(dest_path: str, log_dir: str | None = None) -> int:
+    """Pack app.log and its rotated backups into a zip. Returns how many files were written."""
+    root = str(log_dir or get_log_dir() or "").strip()
+    dest = str(dest_path or "").strip()
+    if not dest:
+        raise ValueError("missing destination")
+    if log_dir is None:
+        flush_app_logs()
+    names = []
+    if root and os.path.isdir(root):
+        try:
+            names = sorted(name for name in os.listdir(root) if _is_log_filename(name))
+        except OSError:
+            names = []
+    files = [os.path.join(root, name) for name in names if os.path.isfile(os.path.join(root, name))]
+    if not files:
+        raise FileNotFoundError("no log files")
+    parent = os.path.dirname(os.path.abspath(dest))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in files:
+            archive.write(path, arcname=os.path.basename(path))
+    return len(files)
 
 
 def cleanup_old_logs(
@@ -88,11 +132,56 @@ def apply_opencv_log_level() -> None:
         pass
 
 
+class RecentLogHandler(logging.Handler):
+    """Keep the last few formatted lines so an error dialog can copy them."""
+
+    def __init__(self, capacity: int = 40):
+        super().__init__(level=logging.INFO)
+        self._lines: deque[str] = deque(maxlen=max(1, int(capacity)))
+        self._lock = Lock()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            line = self.format(record)
+        except Exception:
+            return
+        if len(line) > 400:
+            line = line[:400] + "…"
+        with self._lock:
+            self._lines.append(line)
+
+    def snapshot(self, limit: int = 30) -> list[str]:
+        with self._lock:
+            lines = list(self._lines)
+        count = max(0, int(limit))
+        if count and len(lines) > count:
+            return lines[-count:]
+        return lines
+
+
+_RECENT_LOGS: RecentLogHandler | None = None
+
+
+def recent_log_handler() -> RecentLogHandler:
+    global _RECENT_LOGS
+    if _RECENT_LOGS is None:
+        _RECENT_LOGS = RecentLogHandler()
+        _RECENT_LOGS.setFormatter(logging.Formatter(LOG_FORMAT))
+    return _RECENT_LOGS
+
+
+def recent_log_lines(limit: int = 30) -> list[str]:
+    return recent_log_handler().snapshot(limit)
+
+
 def setup_logging(level=logging.INFO):
     silence_native_media_logs()
     root_logger = logging.getLogger(LOGGER_NAME)
     if root_logger.handlers:
         root_logger.setLevel(level)
+        recent = recent_log_handler()
+        if recent not in root_logger.handlers:
+            root_logger.addHandler(recent)
         return root_logger
 
     root_logger.setLevel(level)
@@ -117,6 +206,11 @@ def setup_logging(level=logging.INFO):
     file_handler.setLevel(level)
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
+
+    recent = recent_log_handler()
+    recent.setFormatter(formatter)
+    if recent not in root_logger.handlers:
+        root_logger.addHandler(recent)
 
     return root_logger
 

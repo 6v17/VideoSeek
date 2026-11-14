@@ -148,14 +148,15 @@ class SearchPresetFormDialog(VSDialogShell):
         except Exception as exc:
             from src.app.logging_utils import note_swallowed
             note_swallowed(exc, 'ui/dialogs/search_preset_dialog.py:148')
-            AppMessageDialog(
+            from ui.dialogs.app_message import present_error_dialog
+
+            present_error_dialog(
+                self,
                 self.texts.get("error_title", "Error"),
-                str(exc),
-                kind="error",
-                parent=self,
-                is_dark=self.is_dark,
+                exc,
                 language=self.language,
-            ).exec()
+                is_dark=self.is_dark,
+            )
             return
         self.accept()
 

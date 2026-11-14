@@ -2611,6 +2611,16 @@ QDialog#VSDialogShell #DialogFooter {
     background: transparent;
     line-height: 1.45em;
 }
+QPlainTextEdit#ErrorReportText {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: __RADIUS_MD__;
+    padding: __SPACE_2__ __SPACE_3__;
+    color: __TEXT__;
+    font-size: __FS_XS__;
+    selection-background-color: __ACCENT__;
+    selection-color: __INVERSE_TEXT__;
+}
 QFrame#ExportModeOptionCard {
     border: 1px solid __LINE__;
     border-radius: __RADIUS_MD__;
