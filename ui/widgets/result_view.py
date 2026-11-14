@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
 
-from ui.widgets.result_grid import RESULT_SCALE_DEFAULT, ResultGrid, clamp_result_scale_percent
+from ui.widgets.result_grid import RESULT_SCALE_DEFAULT, ResultGrid, clamp_result_scale_percent, grid_thumb_pixel_size
 from ui.widgets.result_table import ResultTable
 from ui.widgets.table_specs import LOCAL_SEARCH_TABLE_SPEC
 
@@ -23,6 +23,23 @@ def table_display_metrics(scale_percent: int = RESULT_SCALE_DEFAULT) -> tuple[in
     row_h = max(72, int(round(int(LOCAL_SEARCH_TABLE_SPEC.row_height) * factor)))
     preview_w = max(140, int(round(int(getattr(preview, "width", None) or 220) * factor)))
     return row_h, preview_w
+
+
+def shared_result_thumb_size(scale_percent: int = RESULT_SCALE_DEFAULT) -> tuple[int, int]:
+    """One decode size for the list and the grid.
+
+    The cache key includes pixel size. The two views used to ask for different
+    sizes, so switching missed and decoded again. On a user machine that decode
+    is an HTTP ffmpeg seek.
+    """
+    from ui.widgets.thumb_cell import screen_thumb_scale
+
+    grid_w, grid_h = grid_thumb_pixel_size(scale_percent)
+    row_h, preview_w = table_display_metrics(scale_percent)
+    scale = screen_thumb_scale()
+    table_w = int(round(int(preview_w) * scale))
+    table_h = int(round(int(row_h) * scale))
+    return max(int(grid_w), table_w), max(int(grid_h), table_h)
 
 
 class ResultView(QWidget):

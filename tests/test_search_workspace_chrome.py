@@ -14,8 +14,9 @@ from ui.widgets.components import LibraryPage, NavigationSidebar, SearchPage
 from ui.widgets.dialogue_library_page import DialogueLibraryPage
 from ui.widgets.image_gallery_page import ImageGalleryPage
 from ui.widgets.layout import COMPONENT_SIZES
-from ui.widgets.result_grid import grid_column_plan, grid_metrics
-from ui.widgets.result_view import VIEW_TABLE, ResultView, table_display_metrics
+from ui.widgets.result_grid import grid_column_plan, grid_metrics, grid_thumb_pixel_size
+from ui.widgets.result_view import VIEW_TABLE, ResultView, shared_result_thumb_size, table_display_metrics
+from ui.widgets.thumb_cell import screen_thumb_scale
 
 
 def _hits():
@@ -207,6 +208,19 @@ class SearchWorkspaceChromeTests(unittest.TestCase):
         self.assertTrue(page.preview_panel.isVisible())
         self.assertFalse(page.gallery_board.isVisible())
         page.hide()
+
+    def test_list_and_grid_share_one_thumb_decode_size(self):
+        scale = screen_thumb_scale()
+        for percent in (100, 160):
+            shared_w, shared_h = shared_result_thumb_size(percent)
+            grid_w, grid_h = grid_thumb_pixel_size(percent)
+            row_h, preview_w = table_display_metrics(percent)
+            table_w = int(round(preview_w * scale))
+            table_h = int(round(row_h * scale))
+            self.assertGreaterEqual(shared_w, grid_w)
+            self.assertGreaterEqual(shared_h, grid_h)
+            self.assertGreaterEqual(shared_w, table_w)
+            self.assertGreaterEqual(shared_h, table_h)
 
     def test_result_size_scales_grid_cards_and_table_rows(self):
         default_pref, _default_min, _default_thumb = grid_metrics(100)

@@ -1184,20 +1184,10 @@ class SearchController(QObject):
         cfg_w = int(config.get("thumb_width", 130) or 130)
         cfg_h = int(config.get("thumb_height", 75) or 75)
         view = self._result_view()
-        from ui.widgets.thumb_cell import screen_thumb_scale
+        from ui.widgets.result_view import shared_result_thumb_size
 
-        scale = screen_thumb_scale()
         percent = int(getattr(view, "display_scale_percent", 100) or 100)
-        if view.view_mode == "grid":
-            from ui.widgets.result_grid import grid_thumb_pixel_size
-
-            disp_w, disp_h = grid_thumb_pixel_size(percent)
-        else:
-            from ui.widgets.result_view import table_display_metrics
-
-            row_h, preview_w = table_display_metrics(percent)
-            disp_w = int(round(preview_w * scale))
-            disp_h = int(round(row_h * scale))
+        disp_w, disp_h = shared_result_thumb_size(percent)
         thumb_width = max(cfg_w, disp_w)
         thumb_height = max(cfg_h, disp_h)
         cache = get_thumb_cache()
