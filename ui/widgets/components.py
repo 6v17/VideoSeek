@@ -404,7 +404,24 @@ class NavigationSidebar(QWidget):
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
-        self.fit_to_height()
+        height = int(self.height())
+        # Already on the roomy plan and the window is only getting taller:
+        # maximizing must not remeasure the whole sidebar on every animation frame.
+        if (
+            getattr(self, "_sidebar_plan", "") == "full"
+            and int(getattr(self, "_sidebar_fit_height", 0) or 0) > 0
+            and height >= int(self._sidebar_fit_height)
+        ):
+            self._sidebar_fit_height = height
+            return
+        timer = getattr(self, "_sidebar_fit_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(40)
+            timer.timeout.connect(self.fit_to_height)
+            self._sidebar_fit_timer = timer
+        timer.start()
 
     def fit_to_height(self) -> None:
         """Drop marketing chrome, then footer icons, as the sidebar gets shorter.
@@ -426,6 +443,7 @@ class NavigationSidebar(QWidget):
                     break
         finally:
             self._sidebar_fitting = False
+        self._sidebar_fit_height = int(self.height())
 
     def _sidebar_needed_height(self) -> int:
         width = max(int(self.width()), int(COMPONENT_SIZES["sidebar_width"]))

@@ -12,7 +12,7 @@ import os
 from collections import defaultdict
 from typing import Any, Iterable
 
-from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QSize, Signal
+from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QSize, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -42,6 +42,9 @@ from ui.widgets.list_find_bar import (
 
 _COUNT_COL_MIN = 36
 _STATUS_COL_MIN = 88
+# Badge chrome: horizontal padding (8+8) plus the 1px border, so a 5-digit count is not clipped.
+_COUNT_BADGE_CHROME = 22
+_STATUS_BADGE_CHROME = 20
 _ACTION_COL_MIN = 56
 _ROW_HEIGHT = 30
 # Before the pane has a height, never stretch a long library to one widget per row.
@@ -724,29 +727,40 @@ class LibraryGroupedVideoTree(QWidget):
         self._fit_expanded_lists()
 
     def _sync_column_widths(self) -> None:
-        """English 'Action' / '999/999 extracted' is wider than the Chinese headers."""
+        """English 'Action' / '999/999 extracted' is wider than the Chinese headers.
+
+        The count badge used to be sized from the header word 「数量」. A library
+        of several thousand videos then drew 10000 inside that box and the border
+        covered the digits.
+        """
+        max_videos = max((len(block.entries) for block in self._blocks), default=0)
+        sample_n = max(999, max_videos)
         template = self._status_template or "{ready}/{total}"
         try:
-            status_sample = template.format(ready=999, total=999)
+            status_sample = template.format(ready=sample_n, total=sample_n)
         except Exception:
-            status_sample = "999/999"
+            status_sample = f"{sample_n}/{sample_n}"
         shared_sample = ""
         shared_tpl = self._shared_status_template or ""
         if shared_tpl:
             try:
-                shared_sample = shared_tpl.format(ready=999, total=999)
+                shared_sample = shared_tpl.format(ready=sample_n, total=sample_n)
             except Exception:
                 shared_sample = shared_tpl
+        count_label = next((block.count_label for block in self._blocks if block.count_label is not None), None)
+        count_fm = count_label.fontMetrics() if count_label is not None else self._header_count_label.fontMetrics()
+        count_sample = str(max_videos) if max_videos else "0"
         self._count_col_w = max(
             _COUNT_COL_MIN,
             self._header_count_label.fontMetrics().horizontalAdvance(self._header_count or "Count") + 16,
+            count_fm.horizontalAdvance(count_sample) + _COUNT_BADGE_CHROME,
         )
         status_fm = self._header_status_label.fontMetrics()
         self._status_col_w = max(
             _STATUS_COL_MIN,
-            status_fm.horizontalAdvance(self._header_status or "Status") + 12,
-            status_fm.horizontalAdvance(status_sample) + 12,
-            status_fm.horizontalAdvance(shared_sample) + 12 if shared_sample else 0,
+            status_fm.horizontalAdvance(self._header_status or "Status") + _STATUS_BADGE_CHROME,
+            status_fm.horizontalAdvance(status_sample) + _STATUS_BADGE_CHROME,
+            status_fm.horizontalAdvance(shared_sample) + _STATUS_BADGE_CHROME if shared_sample else 0,
         )
         action_fm = self._header_action_label.fontMetrics()
         self._action_col_w = max(
@@ -774,7 +788,7 @@ class LibraryGroupedVideoTree(QWidget):
     def _set_status_label_text(self, label: QLabel, text: str) -> None:
         full = str(text or "")
         label.setToolTip(full)
-        width = max(1, int(self._status_col_w) - 8)
+        width = max(1, int(self._status_col_w) - _STATUS_BADGE_CHROME)
         label.setText(
             label.fontMetrics().elidedText(full, Qt.TextElideMode.ElideRight, width)
         )
@@ -990,6 +1004,7 @@ class LibraryGroupedVideoTree(QWidget):
             self._vbox.addWidget(card)
 
         self._vbox.addStretch(1)
+        self._sync_column_widths()
         self.selection_changed.emit()
         self._sync_select_all_checkbox()
         self._rebuild_find_hits(reveal=False)
@@ -1285,7 +1300,19 @@ class LibraryGroupedVideoTree(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
         super().resizeEvent(event)
-        self._fit_expanded_lists()
+        # Maximizing the window resizes every page, including this one while it
+        # is hidden. Fitting a thousand-row list on each of those events is what
+        # makes the fullscreen toggle feel stuck.
+        if not self.isVisible():
+            return
+        timer = getattr(self, "_fit_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(40)
+            timer.timeout.connect(self._fit_expanded_lists)
+            self._fit_timer = timer
+        timer.start()
 
     def _fit_expanded_lists(self) -> None:
         outer = self._scroll.verticalScrollBar() if self._scroll is not None else None

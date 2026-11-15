@@ -751,6 +751,25 @@ class MainWindow(
         except Exception:
             return
 
+    def _queue_pinned_page_height(self, height: int) -> None:
+        """Apply the search page height once, after a maximize animation settles."""
+        self._pending_pinned_height = int(height)
+        timer = getattr(self, "_pinned_height_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(40)
+            timer.timeout.connect(self._apply_pinned_page_height)
+            self._pinned_height_timer = timer
+        timer.start()
+
+    def _apply_pinned_page_height(self) -> None:
+        page = getattr(self, "_pinned_scroll_page", None)
+        height = int(getattr(self, "_pending_pinned_height", 0) or 0)
+        if page is None or height <= 80 or page.height() == height:
+            return
+        page.setFixedHeight(height)
+
     def _schedule_preview_video_frame(self) -> None:
         """Coalesce layout shifts so the VLC picture follows the preview well."""
         timer = getattr(self, "_preview_frame_timer", None)
@@ -890,10 +909,7 @@ class MainWindow(
             event.type() == QEvent.Type.Resize
             and watched is getattr(self, "_pinned_scroll_viewport", None)
         ):
-            page = getattr(self, "_pinned_scroll_page", None)
-            height = int(watched.height())
-            if page is not None and height > 80 and page.height() != height:
-                page.setFixedHeight(height)
+            self._queue_pinned_page_height(int(watched.height()))
         if event.type() == QEvent.Type.KeyPress:
             from PySide6.QtGui import QKeySequence
 

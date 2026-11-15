@@ -917,6 +917,19 @@ class ResultGrid(QScrollArea):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if not self.isVisible():
+            return
+        timer = getattr(self, "_reflow_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(40)
+            timer.timeout.connect(lambda: self._reflow())
+            self._reflow_timer = timer
+        timer.start()
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
         self._reflow()
 
     def eventFilter(self, watched, event):  # noqa: N802

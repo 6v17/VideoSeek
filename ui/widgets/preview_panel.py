@@ -1,6 +1,6 @@
 """Embedded video preview card for the local search page."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout
 
@@ -216,6 +216,20 @@ class PreviewPanel(VSCard):
         self.preview_host.update()
         self.expanded_chrome.raise_()
         self.expanded_chrome.update()
+        # Rebinding libvlc on every resize frame is what makes maximize feel stuck.
+        self._schedule_host_rebind()
+
+    def _schedule_host_rebind(self) -> None:
+        timer = getattr(self, "_rebind_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(80)
+            timer.timeout.connect(self._rebind_host_output)
+            self._rebind_timer = timer
+        timer.start()
+
+    def _rebind_host_output(self) -> None:
         player = getattr(getattr(self.window(), "preview_controller", None), "vlc_player", None)
         rebind = getattr(player, "rebind_output_window", None)
         if callable(rebind):

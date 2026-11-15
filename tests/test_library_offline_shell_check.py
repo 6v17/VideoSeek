@@ -174,6 +174,27 @@ class LibraryEnglishColumnTests(unittest.TestCase):
         title = _ClickLabel("进击的巨人第3季-很长的库名-不应该把功能列挤出窗口")
         self.assertLessEqual(title.minimumSizeHint().width(), 64)
 
+    def test_thousands_of_videos_widen_the_count_badge(self):
+        tree = LibraryGroupedVideoTree()
+        lib = os.path.normpath("D:/lib")
+        tree.refresh_from_entries(
+            [{"library_path": lib, "video_id": "a", "source_exists": True}],
+            library_paths=[lib],
+        )
+        narrow = tree._count_col_w
+        tree.refresh_from_entries(
+            [
+                {"library_path": lib, "video_id": str(index), "source_exists": True}
+                for index in range(10000)
+            ],
+            library_paths=[lib],
+        )
+        self.assertGreater(tree._count_col_w, narrow)
+        label = tree._blocks[0].count_label
+        text_w = label.fontMetrics().horizontalAdvance("10000")
+        self.assertGreaterEqual(label.width(), text_w + 18)
+        self.assertEqual(label.text(), "10000")
+
 
 class SubtitleAdvancedRowTests(unittest.TestCase):
     @classmethod
