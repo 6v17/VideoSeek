@@ -306,24 +306,33 @@ def _app_cfg(config=None):
     return dict(config or load_config())
 
 
-# First search window. The desktop list grows by SEARCH_WINDOW_STEP once the
-# user nears the loaded rows, and stops when a larger fetch adds nothing new.
+# First search window. Each later window doubles (300, 600, 1200, …) once the
+# user nears the loaded rows, and stops at SEARCH_TOP_K_MAX.
 SEARCH_WINDOW_INITIAL = 300
-SEARCH_WINDOW_STEP = 100
 SEARCH_WINDOW_LEAD = 100
 SEARCH_CANDIDATE_LIMIT = SEARCH_WINDOW_INITIAL
-# Safety ceiling for one request. The desktop window grows by SEARCH_WINDOW_STEP
-# while lower-scoring hits still exist; this only stops a runaway top_k.
+# Safety ceiling for one request. Desktop growth doubles until this cap.
 SEARCH_TOP_K_MAX = 10000
+
+
+def _doubled_window_limit(current: int):
+    """Next fetch size. Doubles, and never passes the safety ceiling."""
+    if current >= SEARCH_TOP_K_MAX:
+        return None
+    nxt = current * 2
+    if nxt > SEARCH_TOP_K_MAX:
+        nxt = SEARCH_TOP_K_MAX
+    return nxt if nxt > current else None
 
 
 def next_result_window(limit, reached_index, exhausted=False, loaded_count=None):
     """Return the next fetch cap, or None when the current window still covers the user.
 
     ``reached_index`` is the furthest 0-based row that has entered the viewport.
-    A full window grows at ``limit - lead`` (300 → 200, then 400 → 300).
+    A full window grows at ``limit - lead`` (300 → 200, then 600 → 500).
     A short list, such as chunk search collapsing many frames into fewer segments,
     grows once the user reaches its last row. That shortfall is not the end of the index.
+    The next cap doubles, and never passes SEARCH_TOP_K_MAX.
     """
     if exhausted:
         return None
@@ -334,6 +343,9 @@ def next_result_window(limit, reached_index, exhausted=False, loaded_count=None)
         return None
     if current <= 0 or reached < 0:
         return None
+    nxt = _doubled_window_limit(current)
+    if nxt is None:
+        return None
     loaded = None
     if loaded_count is not None:
         try:
@@ -343,10 +355,10 @@ def next_result_window(limit, reached_index, exhausted=False, loaded_count=None)
     if loaded is not None and 0 < loaded < current - SEARCH_WINDOW_LEAD:
         if reached < loaded - 1:
             return None
-        return current + SEARCH_WINDOW_STEP
+        return nxt
     if reached + 1 < current - SEARCH_WINDOW_LEAD:
         return None
-    return current + SEARCH_WINDOW_STEP
+    return nxt
 
 
 def result_window_loaded_count(source_count: int, visible_count: int, *, focused: bool = False) -> int:

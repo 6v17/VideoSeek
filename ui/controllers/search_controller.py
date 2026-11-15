@@ -8,6 +8,7 @@ from src.app.search_results_paging import visible_end_index
 from src.domain.search_hit import coerce_search_hit
 from src.storage.config_store import (
     SEARCH_CANDIDATE_LIMIT,
+    SEARCH_TOP_K_MAX,
     next_result_window,
     result_window_loaded_count,
 )
@@ -411,7 +412,7 @@ class SearchController(QObject):
             return
         self._window_limit = int(SEARCH_CANDIDATE_LIMIT)
         # A short first page (chunk collapse, nearby-frame dedupe, grouping) is not the end.
-        # Growth stops only when a larger fetch adds no new hits.
+        # Growth stops when a larger fetch comes back short and adds nothing, or at the ceiling.
         self._window_exhausted = len(self._source_hits) == 0
         self._prefetch_hold = False
 
@@ -466,9 +467,11 @@ class SearchController(QObject):
         incoming = list(rows or [])
         prior = list(self._source_hits or [])
         extra = _unseen_hits(prior, incoming)
-        if not extra:
+        # A full reply keeps growing until the safety ceiling. Only a short
+        # reply that added nothing is the end of the index.
+        if (not extra and len(incoming) < requested) or requested >= SEARCH_TOP_K_MAX:
             self._window_exhausted = True
-        else:
+        if extra:
             vectors = _vectors_for_unseen(prior, incoming, getattr(worker, "hit_vectors", None))
             self._remember_result_batch(prior, extra, vectors)
             if self._grid_group_focus is None:

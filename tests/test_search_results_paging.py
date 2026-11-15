@@ -1,7 +1,7 @@
 import unittest
 
 from src.domain.search_hit import SearchHit
-from src.storage.config_store import next_result_window, result_window_loaded_count
+from src.storage.config_store import SEARCH_TOP_K_MAX, next_result_window, result_window_loaded_count
 from ui.controllers.search_controller import _unseen_hits, _vectors_for_unseen
 from src.app.search_results_paging import (
     visible_end_index,
@@ -41,11 +41,12 @@ class VisibleEndIndexTests(unittest.TestCase):
 
 
 class SearchWindowGrowthTests(unittest.TestCase):
-    def test_grows_by_100_once_the_user_is_100_short_of_the_cap(self):
+    def test_doubles_once_the_user_is_100_short_of_the_cap(self):
         self.assertIsNone(next_result_window(300, 198))
-        self.assertEqual(next_result_window(300, 199), 400)
-        self.assertEqual(next_result_window(400, 299), 500)
-        self.assertIsNone(next_result_window(400, 298))
+        self.assertEqual(next_result_window(300, 199), 600)
+        self.assertEqual(next_result_window(600, 499), 1200)
+        self.assertIsNone(next_result_window(600, 498))
+        self.assertEqual(next_result_window(1200, 1099), 2400)
 
     def test_threshold_cutoff_stops_growth(self):
         self.assertIsNone(next_result_window(300, 299, exhausted=True))
@@ -53,19 +54,23 @@ class SearchWindowGrowthTests(unittest.TestCase):
 
     def test_short_list_grows_when_the_user_reaches_its_last_row(self):
         self.assertIsNone(next_result_window(300, 100, loaded_count=120))
-        self.assertEqual(next_result_window(300, 119, loaded_count=120), 400)
+        self.assertEqual(next_result_window(300, 119, loaded_count=120), 600)
 
     def test_grouped_page_uses_the_rows_on_screen(self):
         shown = result_window_loaded_count(300, 118)
         self.assertEqual(shown, 118)
         self.assertIsNone(next_result_window(300, 100, loaded_count=shown))
-        self.assertEqual(next_result_window(300, 117, loaded_count=shown), 400)
+        self.assertEqual(next_result_window(300, 117, loaded_count=shown), 600)
         self.assertEqual(result_window_loaded_count(300, 118, focused=True), 300)
         self.assertEqual(result_window_loaded_count(300, 300), 300)
 
     def test_nearly_full_window_still_uses_the_cap_horizon(self):
-        self.assertIsNone(next_result_window(400, 298, loaded_count=399))
-        self.assertEqual(next_result_window(400, 299, loaded_count=399), 500)
+        self.assertIsNone(next_result_window(600, 498, loaded_count=599))
+        self.assertEqual(next_result_window(600, 499, loaded_count=599), 1200)
+
+    def test_doubling_stops_at_the_safety_ceiling(self):
+        self.assertEqual(next_result_window(9600, 9599), SEARCH_TOP_K_MAX)
+        self.assertIsNone(next_result_window(SEARCH_TOP_K_MAX, SEARCH_TOP_K_MAX - 1))
 
 
 class UnseenBatchTests(unittest.TestCase):
