@@ -141,23 +141,43 @@ def _build_frame_vf(fps, size=224):
     )
 
 
+def _portrait_content_crop(video_path):
+    """``(crop filter, cropped width, cropped height)``. Empty filter keeps the full frame."""
+    try:
+        from src.core.portrait_content_band import portrait_content_crop
+
+        return portrait_content_crop(video_path)
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "extract_frames.portrait_content_crop")
+        return "", 0, 0
+
+
 def _resolve_frame_layout(video_path, fps, config):
     """Return ``(height, width, vf)`` for one video.
 
     Square CLIP-family profiles use the active runtime ``image_size`` (default 224).
     FG-CLIP2 scales to the NaFlex patch grid so the rawvideo pipe has a constant
     size without stretching the frame to a square.
+
+    Portrait videos with large static bars are cropped to the moving band first,
+    so the square (or NaFlex) frame is the picture instead of the fill.
     """
     from src.storage.config_store import get_active_model_profile
 
+    crop, cropped_w, cropped_h = _portrait_content_crop(video_path)
     provider = str(get_active_model_profile(config=config).get("provider") or "")
     if provider != "fgclip2_onnx":
         size = _square_frame_size(config)
-        return size, size, _build_frame_vf(fps, size)
+        vf = _build_frame_vf(fps, size)
+        if crop:
+            vf = f"{crop},{vf}"
+        return size, size, vf
 
     info = get_video_stream_info(video_path) or {}
-    src_w = int(info.get("width") or 0)
-    src_h = int(info.get("height") or 0)
+    src_w = int(cropped_w or info.get("width") or 0)
+    src_h = int(cropped_h or info.get("height") or 0)
     if src_w > 0 and src_h > 0:
         from src.core.fgclip2_preprocess import naflex_pixel_size
 
@@ -166,6 +186,8 @@ def _resolve_frame_layout(video_path, fps, config):
         logger.warning("FG-CLIP2 frame size fell back to 224 square; video dimensions were unavailable")
         height, width = 224, 224
     vf = f"fps={float(fps):.6f},scale={int(width)}:{int(height)}:flags=bilinear"
+    if crop:
+        vf = f"{crop},{vf}"
     return int(height), int(width), vf
 
 
