@@ -769,6 +769,36 @@ class SearchControllerTests(unittest.TestCase):
             "Done 1.25s · 1 · Use Find shot"
         )
 
+    def test_results_status_names_the_fetch_ceiling(self):
+        from src.domain.search_hit import SearchHit
+
+        parent = _make_parent_window()
+        parent.texts["search_done"] = "Done {duration:.2f}s · {count}"
+        parent.texts["search_window_cap_hint"] = "Reached the 10,000 limit"
+        controller = SearchController(parent)
+        controller.worker = MagicMock()
+        controller._last_search_duration = 1.25
+        controller._window_capped = True
+        hits = [SearchHit(0.0, 1.0, 0.9, "a.mp4")]
+
+        controller._update_results_status_text(hits, {"search_kind": "image"})
+
+        parent.search_page.lbl_status.setText.assert_called_once_with(
+            "Done 1.25s · 1 · Reached the 10,000 limit"
+        )
+
+    def test_unchanged_status_still_names_the_fetch_ceiling(self):
+        parent = _make_parent_window()
+        parent.search_page.lbl_status.text.return_value = "Done 1.25s · 118"
+        parent.texts["search_window_cap_hint"] = "Reached the 10,000 limit"
+        controller = SearchController(parent)
+
+        controller._note_window_cap_on_status()
+
+        parent.search_page.lbl_status.setText.assert_called_once_with(
+            "Done 1.25s · 118 · Reached the 10,000 limit"
+        )
+
     @patch("ui.controllers.search_controller.SearchWarmupWorker")
     def test_start_warmup_starts_once(self, mock_worker_cls):
         parent = _make_parent_window()

@@ -84,6 +84,7 @@ class SearchController(QObject):
         self._search_config = None
         self._window_limit = 0
         self._window_exhausted = True
+        self._window_capped = False
         self._window_epoch = 0
         self._prefetch_hold = False
         self._scroll_hooked = False
@@ -142,6 +143,7 @@ class SearchController(QObject):
         self._window_epoch += 1
         self._window_limit = 0
         self._window_exhausted = True
+        self._window_capped = False
         self._prefetch_hold = False
         self._search_config = None
         self.stop_thumbnail_loading()
@@ -285,6 +287,7 @@ class SearchController(QObject):
         self._stop_more_worker()
         self._window_epoch += 1
         self._window_exhausted = True
+        self._window_capped = False
         self._window_limit = 0
         self._search_config = None
         self.stop_thumbnail_loading()
@@ -469,15 +472,23 @@ class SearchController(QObject):
         extra = _unseen_hits(prior, incoming)
         # A full reply keeps growing until the safety ceiling. Only a short
         # reply that added nothing is the end of the index.
-        if (not extra and len(incoming) < requested) or requested >= SEARCH_TOP_K_MAX:
+        index_short = not extra and len(incoming) < requested
+        hit_cap = requested >= SEARCH_TOP_K_MAX and len(incoming) >= requested
+        if index_short or requested >= SEARCH_TOP_K_MAX:
             self._window_exhausted = True
+        if hit_cap:
+            self._window_capped = True
+        appended = False
         if extra:
             vectors = _vectors_for_unseen(prior, incoming, getattr(worker, "hit_vectors", None))
             self._remember_result_batch(prior, extra, vectors)
             if self._grid_group_focus is None:
                 self._append_grouped_batch(extra, vectors)
+                appended = True
         if requested > 0:
             self._window_limit = requested
+        if hit_cap and not appended:
+            self._note_window_cap_on_status()
         self._maybe_grow_window(ignore_worker=worker)
 
     def _on_window_error(self, _error_text) -> None:
@@ -1010,6 +1021,22 @@ class SearchController(QObject):
             return
         filler(getattr(dialog, "video_path", ""), getattr(dialog, "start_sec", 0.0))
 
+    def _set_results_status(self, status_text: str) -> None:
+        if getattr(self, "_window_capped", False):
+            hint = str(self.parent_window.texts.get("search_window_cap_hint") or "").strip()
+            if hint and hint not in status_text:
+                status_text = f"{status_text} · {hint}"
+        self.parent_window.search_page.lbl_status.setText(status_text)
+
+    def _note_window_cap_on_status(self) -> None:
+        """The list did not grow, so say why the window stopped."""
+        label = self.parent_window.search_page.lbl_status
+        current = str(label.text() or "").strip()
+        hint = str(self.parent_window.texts.get("search_window_cap_hint") or "").strip()
+        if not current or not hint or hint in current:
+            return
+        label.setText(f"{current} · {hint}")
+
     def _update_results_status_text(self, results, context: dict) -> None:
         texts = self.parent_window.texts
         duration = float(self._last_search_duration or 0.0)
@@ -1044,7 +1071,7 @@ class SearchController(QObject):
                 "search_done_dialogue",
                 "{mode} · {duration:.2f}s · {count}",
             ).format(mode=mode_label, duration=duration, count=total_count)
-            self.parent_window.search_page.lbl_status.setText(status_text)
+            self._set_results_status(status_text)
             return
 
         if search_kind == "tags":
@@ -1069,7 +1096,7 @@ class SearchController(QObject):
                 "search_done_tags",
                 "{mode} · {duration:.2f}s · {count}",
             ).format(mode=mode_label, duration=duration, count=total_count)
-            self.parent_window.search_page.lbl_status.setText(status_text)
+            self._set_results_status(status_text)
             return
 
         status_text = texts["search_done"].format(duration=duration, count=total_count)
@@ -1125,7 +1152,7 @@ class SearchController(QObject):
                 deep_hint = str(texts.get("search_done_deep_locate_hint", "") or "").strip()
                 if deep_hint:
                     status_text = f"{status_text} · {deep_hint}"
-        self.parent_window.search_page.lbl_status.setText(status_text)
+        self._set_results_status(status_text)
 
     def _viewport_thumb_slots(self) -> int:
         """How many result rows fit on one screen."""
