@@ -45,7 +45,7 @@ class PluginRegistryTests(unittest.TestCase):
         order = resolve_nav_page_order(registry=registry)
         self.assertEqual(
             order,
-            ("search", "library", "understanding", "clone", "link", "settings"),
+            ("search", "library", "understanding", "clone", "settings"),
         )
 
     def test_register_page_accepts_visible_fn(self):

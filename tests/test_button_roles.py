@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QAbstractButton, QApplication, QCheckBox, QPushButton, QToolButton
 
 from ui.widgets.button_roles import ACTION_ROLES
-from ui.widgets.components import LibraryPage, LinkSearchPage, NavigationSidebar, SearchPage
+from ui.widgets.components import LibraryPage, NavigationSidebar, SearchPage
 from ui.widgets.dialogue_library_page import DialogueLibraryPage
 from ui.widgets.image_gallery_page import ImageGalleryPage
 from ui.widgets.settings.page import SettingsPage
@@ -45,7 +45,6 @@ class ButtonRoleTests(unittest.TestCase):
             LibraryPage(),
             DialogueLibraryPage(),
             ImageGalleryPage(),
-            LinkSearchPage(),
             UnderstandingEvidencePage(),
             SettingsPage(),
         )
@@ -64,7 +63,6 @@ class ButtonRoleTests(unittest.TestCase):
             LibraryPage(),
             DialogueLibraryPage(),
             ImageGalleryPage(),
-            LinkSearchPage(),
             UnderstandingEvidencePage(),
             SettingsPage(),
         )

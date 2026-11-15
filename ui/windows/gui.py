@@ -48,7 +48,6 @@ from ui.controllers.app_meta_controller import AppMetaController
 from ui.controllers.image_gallery_controller import ImageGalleryController
 from ui.widgets.components import (
     LibraryPage,
-    LinkSearchPage,
     NavigationSidebar,
     SearchPage,
 )
@@ -72,7 +71,6 @@ from ui.widgets.preview_panel import scroll_ancestor_vertically as _scroll_ances
 from ui.controllers.agent_api_controller import AgentApiController
 from ui.controllers.team_mode_controller import TeamModeController
 from ui.controllers.mobile_bridge_controller import MobileBridgeController
-from ui.controllers.video_download_controller import VideoDownloadController
 from ui.controllers.preview_controller import PreviewController
 from ui.controllers.runtime_resource_controller import RuntimeResourceController
 from ui.controllers.search_controller import SearchController
@@ -83,7 +81,6 @@ from ui.windows.gui_library_indexing import LibraryIndexingGuiMixin
 from ui.windows.gui_understanding import UnderstandingGuiMixin
 from ui.windows.gui_understanding_asr import UnderstandingAsrGuiMixin
 from ui.windows.gui_understanding_llm import UnderstandingLlmGuiMixin
-from ui.windows.gui_video_download import VideoDownloadGuiMixin
 from ui.windows.gui_runtime import RuntimeGuiMixin
 from ui.windows.gui_model_packages import ModelPackagesGuiMixin
 from ui.windows.gui_ui_state import AppUiStateMixin
@@ -109,7 +106,6 @@ class MainWindow(
     UnderstandingGuiMixin,
     UnderstandingLlmGuiMixin,
     UnderstandingAsrGuiMixin,
-    VideoDownloadGuiMixin,
     RuntimeGuiMixin,
     AppUiStateMixin,
     ModelPackagesGuiMixin,
@@ -118,12 +114,12 @@ class MainWindow(
     SearchPanelStateMixin,
     ShotListGuiMixin,
 ):
-    """Sidebar / stacked widget order: local search → library → gallery → evidence → link → settings.
+    """Sidebar / stacked widget order: local search → library → gallery → evidence → settings.
 
     Optional plugins may insert pages (e.g. after understanding) via ``src.app.plugins``.
     """
 
-    _BUILTIN_NAV_PAGE_ORDER = ("search", "library", "dialogue", "gallery", "understanding", "link", "settings")
+    _BUILTIN_NAV_PAGE_ORDER = ("search", "library", "dialogue", "gallery", "understanding", "settings")
 
     def __init__(self):
         super().__init__()
@@ -198,9 +194,6 @@ class MainWindow(
         self.search_page.results_scale_settled.connect(self._on_results_display_scale_settled)
         self._apply_results_view_mode_from_config()
         self._apply_search_chrome_from_config()
-        self.video_download_controller = VideoDownloadController(self)
-        self.video_download_controller.refresh_default_dir_label()
-        self.video_download_controller.load_settings_from_config()
         self._init_search_presets_ui()
         self._init_shot_list_ui()
         self.mobile_bridge_controller = MobileBridgeController(self)
@@ -285,7 +278,6 @@ class MainWindow(
 
         self.pages = QStackedWidget()
         self.search_page = SearchPage()
-        self.link_page = LinkSearchPage()
         self.library_page = LibraryPage()
         self.dialogue_page = DialogueLibraryPage()
         self._alias_dialogue_library_widgets()
@@ -317,7 +309,6 @@ class MainWindow(
             "dialogue": lambda: self._build_scroll_page(self.dialogue_page),
             "gallery": lambda: self._build_scroll_page(self.gallery_page),
             "understanding": lambda: self._build_scroll_page(self.understanding_page),
-            "link": lambda: self._build_scroll_page(self.link_page),
             "settings": lambda: self.settings_page,
         }
         for page_id in self._nav_page_order:
@@ -383,7 +374,6 @@ class MainWindow(
         self.result_table.doubleClicked.connect(self._open_result_table_preview)
 
         self.sidebar.btn_page_search.clicked.connect(lambda: self.switch_page("search"))
-        self.sidebar.btn_page_link.clicked.connect(lambda: self.switch_page("link"))
         self.sidebar.btn_page_library.clicked.connect(lambda: self.switch_page("library"))
         self.sidebar.btn_page_dialogue.clicked.connect(lambda: self.switch_page("dialogue"))
         self.sidebar.btn_page_gallery.clicked.connect(lambda: self.switch_page("gallery"))
@@ -444,15 +434,6 @@ class MainWindow(
         if hasattr(self.search_page.img_label, "image_clear_requested"):
             self.search_page.img_label.image_clear_requested.connect(self.clear_image_query)
         self._init_search_scope_state()
-        self.link_page.btn_probe.clicked.connect(self.start_video_download_probe)
-        self.link_page.btn_download.clicked.connect(self.start_video_download)
-        self.link_page.btn_clear.clicked.connect(self.clear_video_download_content)
-        self.link_page.btn_change_dir.clicked.connect(self.choose_download_default_dir)
-        self.link_page.btn_open_dir.clicked.connect(self.open_download_default_dir)
-        self.link_page.btn_browse_cookie.clicked.connect(self.browse_download_cookie_file)
-        self.link_page.btn_clear_cookie.clicked.connect(self.clear_download_cookie_file)
-        self.link_page.btn_cookie_help.clicked.connect(self.show_download_cookie_help)
-        self.link_page.btn_clear_legacy.clicked.connect(self.clear_legacy_network_data)
 
         self.library_page.btn_add_lib.clicked.connect(self.select_video_folder)
         self.library_page.btn_remove_lib.clicked.connect(self.remove_selected_libraries)
@@ -1094,8 +1075,6 @@ class MainWindow(
             self.refresh_search_telemetry_panel()
         if page_name == "understanding":
             self._settle_understanding_page_layout()
-        if page_name == "link":
-            self._settle_link_page_layout()
         if page_name in {"library", "dialogue"}:
             self._place_library_progress(page_name)
             if hasattr(self, "_on_library_tab_changed"):
@@ -1115,19 +1094,6 @@ class MainWindow(
             return
         self._understanding_page_refresh_pending = True
         QTimer.singleShot(0, self._deferred_understanding_page_refresh)
-
-    def _settle_link_page_layout(self) -> None:
-        """Refresh download page labels while painting is frozen (avoids first-open jump)."""
-        page = getattr(self, "link_page", None)
-        if page is None:
-            return
-        page.setUpdatesEnabled(False)
-        try:
-            if hasattr(self, "video_download_controller"):
-                self.video_download_controller.refresh_default_dir_label()
-            page.updateGeometry()
-        finally:
-            page.setUpdatesEnabled(True)
 
     def _update_version_info(self, version_info):
         self.version_info = version_info
@@ -1153,7 +1119,6 @@ class MainWindow(
 
         self._apply_texts_chrome(t)
         self._apply_texts_search_page(t)
-        self._apply_texts_link_page(t)
         self._apply_texts_library_page(t)
         self._apply_texts_gallery_page(t)
         self._apply_texts_understanding_page(t)
@@ -2550,18 +2515,6 @@ class MainWindow(
         urls = event.mimeData().urls()
         if urls:
             dropped_path = urls[0].toLocalFile()
-            if self.pages.currentIndex() == self._nav_page_index("link"):
-                if dropped_path.lower().endswith(".txt"):
-                    try:
-                        with open(dropped_path, "r", encoding="utf-8", errors="ignore") as handle:
-                            content = handle.read().strip()
-                        if content:
-                            existing = self.link_page.links_input.toPlainText().strip()
-                            merged = f"{existing}\n{content}".strip() if existing else content
-                            self.link_page.links_input.setPlainText(merged)
-                    except OSError:
-                        pass
-                return
             self.upload_file_path(dropped_path)
 
     def upload_file_path(self, path):

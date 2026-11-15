@@ -42,9 +42,6 @@ from ui.widgets.search_panel import SearchPanel
 from ui.widgets.button_roles import set_button_role
 from ui.widgets.styles import repolish_widget
 from ui.widgets.library_video_tree import LibraryGroupedVideoTree, LibraryIconButton
-from ui.widgets.video_download_page import VideoDownloadPage
-
-LinkSearchPage = VideoDownloadPage
 
 
 def _fallback_text(texts, key, zh_text, en_text):
@@ -332,7 +329,6 @@ class NavigationSidebar(QWidget):
         self.btn_page_dialogue = self._build_nav_button("Subtitles")
         self.btn_page_gallery = self._build_nav_button("Gallery")
         self.btn_page_understanding = self._build_nav_button("Evidence")
-        self.btn_page_link = self._build_nav_button("Link Match")
         self.btn_page_settings = self._build_nav_button("Settings")
         for page_id, button in (
             ("search", self.btn_page_search),
@@ -340,7 +336,6 @@ class NavigationSidebar(QWidget):
             ("dialogue", self.btn_page_dialogue),
             ("gallery", self.btn_page_gallery),
             ("understanding", self.btn_page_understanding),
-            ("link", self.btn_page_link),
             ("settings", self.btn_page_settings),
         ):
             self._nav_buttons[page_id] = button

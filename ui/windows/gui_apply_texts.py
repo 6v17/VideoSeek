@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.app.config import get_app_version, load_config
+from src.app.config import get_app_version
 from src.app.plugins import get_registry
 from ui.widgets.button_roles import set_button_role
 from ui.widgets.list_find_bar import list_find_text_kwargs
@@ -42,7 +42,6 @@ class ApplyTextsGuiMixin:
         self.sidebar.hero_title.setText(t["hero_title"])
         self.sidebar.hero_body.setText(t["hero_body"])
         self.sidebar.btn_page_search.setText(t["nav_search"])
-        self.sidebar.btn_page_link.setText(t["nav_link"])
         self.sidebar.btn_page_library.setText(t["nav_library"])
         self.sidebar.btn_page_dialogue.setText(t.get("nav_dialogue", "Subtitles"))
         self.sidebar.btn_page_gallery.setText(t["nav_gallery"])
@@ -146,24 +145,6 @@ class ApplyTextsGuiMixin:
         self.search_page.preview_placeholder.setText(t["preview_placeholder"])
         self.result_table.apply_header_labels(t)
         self._apply_search_idle_hint(t)
-
-    def _apply_texts_link_page(self, t):
-        self.link_page.header.title.setText(t["link_page_title"])
-        self.link_page.header.subtitle.hide()
-        self.link_page.links_input.setPlaceholderText(t["download_links_placeholder"])
-        self.link_page.btn_change_dir.setText(t["download_change_dir"])
-        cfg = load_config()
-        self.link_page.set_download_texts(t)
-        self.link_page.set_cookie_file_path(str(cfg.get("download_cookie_file", "") or ""))
-        self.video_download_controller.refresh_cookie_admin_hint()
-        self.link_page.list_title.setText(t["download_list_title"])
-        self.link_page.set_list_headers(t["download_list_headers"])
-        self.link_page.btn_probe.setText(t["download_btn_probe"])
-        self.link_page.btn_download.setText(t["download_btn_start_all"])
-        self.link_page.btn_clear.setText(t["clear"])
-        self.link_page.btn_open_dir.setText(t["download_btn_open_dir"])
-        self.link_page.btn_clear_legacy.setText(t["download_btn_clear_legacy"])
-        self.video_download_controller.refresh_default_dir_label()
 
     def _apply_texts_gallery_page(self, t):
         page = getattr(self, "gallery_page", None)

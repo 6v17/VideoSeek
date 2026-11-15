@@ -153,7 +153,7 @@ def reset_registry_for_tests() -> PluginRegistry:
 
 
 def resolve_nav_page_order(
-    builtin_order: Sequence[str] = ("search", "library", "understanding", "link", "settings"),
+    builtin_order: Sequence[str] = ("search", "library", "understanding", "settings"),
     registry: Optional[PluginRegistry] = None,
 ) -> tuple[str, ...]:
     """Insert registered plugin pages after their ``insert_after`` anchors."""

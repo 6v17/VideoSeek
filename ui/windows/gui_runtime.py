@@ -696,16 +696,14 @@ class RuntimeGuiMixin:
         disabled_text = self.texts.get("model_features_disabled", "")
         if not resources_ready:
             status_text = disabled_text
-            # Visual download / sync still need CLIP+ffmpeg; do not freeze the
+            # Visual sync still needs CLIP+ffmpeg; do not freeze the
             # search status bar (subtitle search remains usable).
-            self.link_page.lbl_status.setText(status_text)
             self.library_page.lbl_status.setText(status_text)
         elif disabled_text:
             ready_text = self.texts.get("ready", "")
             for label in (
                 getattr(self.search_page, "lbl_status", None),
                 getattr(self.library_page, "lbl_status", None),
-                getattr(self.link_page, "lbl_status", None),
             ):
                 if label is not None and label.text().strip() == disabled_text.strip():
                     label.setText(ready_text)

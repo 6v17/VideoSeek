@@ -2,10 +2,8 @@ COPY_OVERRIDES = {
     "zh": {
         "app_subtitle": "本地视频语义检索与片段预览",
         "hero_title": "用文字或截图，在素材库里找镜头",
-        "hero_body": "建库、搜索、下载、理解分区进行；索引与预览都在本机，数据不上云。",
+        "hero_body": "建库、搜索、理解分区进行；索引与预览都在本机，数据不上云。",
         "search_page_desc": "在独立工作区完成查询、预览与结果分析。",
-        "link_page_title": "视频下载",
-        "link_page_desc": "粘贴视频链接，检测后在列表中逐条或批量下载；每行可单独选画质，默认最高可用。",
         "library_page_desc": "管理本地视频目录、索引状态与向量数据。",
         "settings_page_desc": "统一管理抽帧、检索、预览与运行参数。",
         "clear": "清空输入",
@@ -41,10 +39,8 @@ COPY_OVERRIDES = {
     "en": {
         "app_subtitle": "Semantic search and clip preview for local libraries",
         "hero_title": "Find shots with text prompts or screenshots",
-        "hero_body": "Libraries, search, downloads, and notes live in separate workspaces—indexed and previewed on your machine.",
+        "hero_body": "Libraries, search, and notes live in separate workspaces—indexed and previewed on your machine.",
         "search_page_desc": "Run query, preview, and result review in a dedicated workspace.",
-        "link_page_title": "Video Download",
-        "link_page_desc": "Paste video URLs, probe them, then download one row or all. Each row has its own quality; default is highest available.",
         "library_page_desc": "Manage local folders, index status, and vector assets.",
         "settings_page_desc": "Configure sampling, retrieval, preview, and runtime behavior.",
         "clear": "Clear Input",

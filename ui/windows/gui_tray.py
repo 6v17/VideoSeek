@@ -245,7 +245,6 @@ class TrayGuiMixin:
                 note_swallowed(exc, "ui/windows/gui_tray.py:236")
                 pass
         self.search_controller.shutdown()
-        self.video_download_controller.shutdown()
         from ui.threading_utils import shutdown_thread
 
         # Stop ASR / recap / rematch workers owned by the understanding mixins (not

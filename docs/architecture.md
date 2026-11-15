@@ -242,10 +242,6 @@ sequenceDiagram
 2. `workflows/update_video.update_videos_flow` 编排扫描与提交（进程内单飞；结束时 reconcile meta↔Lance）
 3. `indexing_service`：抽帧 → `clip_embedding` → `lance_store` 写入（崩溃用 upsert 版本日志回滚）
 
-### 视频下载（可选）
-
-侧栏 **视频下载** → `video_download_service` 解析链接并下载到本地目录；下载完成后按普通视频库同步索引。不再有独立的「远程库向量检索」路径。
-
 ### 硬字幕搜索（可选）
 
 1. 侧栏 **视频库 → 字幕库** → 勾选视频提取画面字幕（OCR）
@@ -270,13 +266,13 @@ main.py
 src/
   app/           配置、i18n、日志
   domain/        SearchHit, EvidenceBundle
-  services/      search_service, indexing_service, understanding_*, search_scope, video_download_*, …
+  services/      search_service, indexing_service, understanding_*, search_scope, …
   core/          clip_embedding, extract_frames, faiss_index（仅 legacy/迁移）, understanding/, …
   storage/       config_store, lance_store, lance_search_index, migration_runner, …
   web/           agent_api/（包）, mobile_bridge, display_qr
   workflows/     update_video
 ui/
-  windows/       gui + mixin（含 gui_understanding、视频下载）
+  windows/       gui + mixin（含 gui_understanding）
   controllers/   搜索、索引、理解、Agent、手机等线程生命周期
   workers.py     QThread → services / workflows
 docs/

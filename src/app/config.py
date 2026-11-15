@@ -173,14 +173,6 @@ DEFAULT_CONFIG = {
     "model_dir": get_default_model_dir(),
     "data_root": APP_DATA_DIR,
     **build_data_storage_paths(APP_DATA_DIR),
-    "download_default_dir": "",
-    "download_cookie_file": "",
-    "download_cookie_mode": "file",
-    "download_cookie_browser": "edge",
-    "download_mode": "default_dir",
-    "download_target_library": "",
-    "download_auto_index": False,
-    "download_quality": "best",
     "auto_cleanup_missing_files": False,
     "subtitle_sample_interval_sec": 1.2,
     "subtitle_sample_strategy": "timeline",
@@ -313,9 +305,6 @@ CONFIG_ENUMS = {
     "search_result_grouping_sensitivity": {"loose", "standard", "strict"},
     "theme": {"dark", "light"},
     "language": {"zh", "en"},
-    "download_mode": {"default_dir", "library"},
-    "download_cookie_mode": {"none", "file", "browser"},
-    "download_cookie_browser": {"chrome", "edge", "firefox", "brave", "chromium", "opera", "vivaldi"},
     "close_window_action": {"exit", "tray"},
     "subtitle_sample_strategy": {"timeline", "vad"},
     "inference_ep": {"auto", "cuda", "dml", "cpu"},
@@ -691,10 +680,17 @@ def _sanitize_general_settings(config):
         sanitized.get("export_video_silent", DEFAULT_CONFIG["export_video_silent"]),
         DEFAULT_CONFIG["export_video_silent"],
     )
-    quality = str(sanitized.get("download_quality", DEFAULT_CONFIG["download_quality"]) or "").strip().lower()
-    if quality != "best" and not quality.isdigit():
-        quality = DEFAULT_CONFIG["download_quality"]
-    sanitized["download_quality"] = quality
+    for obsolete_download_key in (
+        "download_default_dir",
+        "download_cookie_file",
+        "download_cookie_mode",
+        "download_cookie_browser",
+        "download_mode",
+        "download_target_library",
+        "download_auto_index",
+        "download_quality",
+    ):
+        sanitized.pop(obsolete_download_key, None)
     export_mode = str(sanitized.get("export_encode_mode", DEFAULT_CONFIG["export_encode_mode"]) or "").strip().lower()
     if export_mode not in CONFIG_ENUMS["export_encode_mode"]:
         export_mode = DEFAULT_CONFIG["export_encode_mode"]

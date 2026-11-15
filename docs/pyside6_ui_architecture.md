@@ -32,8 +32,6 @@
 
 **结论**：图搜、文搜、组合搜、找图、字幕、标签分开走；左右检索区固定等高（`search_compare_baseline_height`）。
 
-**远程链接页（`LinkSearchPage`）** 另有链接输入、`QTextEdit` 批量链接、`QComboBox` 构建模式（下载/流式）等，属于独立的「构建 + 检索」流程。
-
 ---
 
 ## 3. 视频检索结果如何展示
@@ -55,7 +53,6 @@
 | `SearchPage` | `ui/widgets/components.py` | 本地搜索整页（查询卡、预览卡、结果表） |
 | `LibraryPage` | `ui/widgets/components.py` | 媒体库工具条、进度、库列表滚动区 |
 | `UnderstandingEvidencePage` | `ui/widgets/understanding_page.py` | 理解笔录向导。模型配置的测试/保存在选片卡片内；上一步/下一步是唯一的页级动作 |
-| `LinkSearchPage` | `ui/widgets/components.py` | 远程链接构建与检索整页 |
 | `SettingsPage` | `ui/widgets/settings/page.py`（表单行辅助：`form.py`） | 设置表单。内容区七张 `VSCard`（运行状态、搜索记录、通用、搜索与预览、索引、模型、路径），卡内用 `#SettingsSectionHeader` 分段；底栏另有保存条 |
 
 **可复用小组件（同文件）**
@@ -112,7 +109,6 @@
 - **索引更新**：`IndexingController` → `IndexUpdateWorker` 的进度信号 → **`LibraryPage`** 的 **`QProgressBar`** 与状态 **`QLabel`**。
 - **理解笔录生成**：`UnderstandingController` → `UnderstandingVideoWorker` / `UnderstandingWorker` → **`UnderstandingEvidencePage`** 进度条与 chunk 时间轴（`gui_understanding.py`）；画面描述经 **描述服务**（`remote_vlm`，LM Studio / Ollama 等 OpenAI 兼容 API）。
 - **段预览播放**：时间轴 **双击** → `open_segment_preview_dialog()`（`gui_preview.py`）→ **`PreviewDialog`** + VLC，播放 chunk 的 `[start_sec, end_sec]`。
-- **远程库构建 / 链接检索**：**`LinkSearchPage`** 内进度条与 **`lbl_build_status` / `lbl_search_status`**（由对应 controller 驱动）。
 - **首次资源下载**：`ResourceDownloadWorker` 等，多通过对话框或状态文案反馈。
 
 ### 6.3 GPU / 推理状态展示
@@ -164,7 +160,7 @@
 |------|-------------------|------|------------|
 | `VSCard` | `PanelCard` / `SubPanelCard` / `NoticeCard` / `Card`（`variant="dialog"`）及 `object_name` 覆写 | 统一卡片内边距与 `content_layout` | 各主页面 + 多处 `ui/dialogs/*` |
 | `VSProgressStatusRow` | 子控件 `StatusLabel` + 默认 `QProgressBar` | 进度条 + 状态文案横排 | `LibraryPage`（`progress_bar`、`lbl_status` 别名保留） |
-| `PageScaffold` | 子控件 `PageHeader` | 页头 + 内容区 `content_layout` | `SearchPage`、`LibraryPage`、`LinkSearchPage`、`SettingsPage` |
+| `PageScaffold` | 子控件 `PageHeader` | 页头 + 内容区 `content_layout` | `SearchPage`、`LibraryPage`、`SettingsPage` |
 | `PageHeader` | `PageHeader` | 标题 / 副标题 | 经各页 `PageScaffold.header` |
 | `make_runtime_inline_tip()` | `RuntimeInlineTip`、`RuntimeInlineTipText`、`AccentGhostButton` | 内容区顶部一条运行时提示（全页共用「前往导入」） | `MainWindow.runtime_banner` |
 | `make_runtime_banner()` | `RuntimeBanner`、`RuntimeBannerText` | 索引进行中等页内横幅 | `SearchPage.indexing_notice` |
@@ -175,8 +171,7 @@
 
 | 组件 | 文件 | objectName 要点 | 接入 |
 |------|------|-----------------|------|
-| `ResultView` | `result_view.py` | 可注入 `ResultTable` / `LinkResultTable`；`populate_local` / `populate_network` | `SearchPage`、`LinkSearchPage` |
-| `LinkResultTable` | `result_table.py` | `#ResultTable`（6 列，无缩略图列） | 链接页 `ResultView` |
+| `ResultView` | `result_view.py` | `populate_local` | `SearchPage` |
 | `DataTable` | `data_table.py` | 由 `TableSpec` 应用列宽与 resize | 表工厂基类 |
 | `TableSpec` | `table_specs.py` | `LOCAL_SEARCH` / `NETWORK_LINK` 规格 | Figma 列宽对齐入口 |
 | `LocalSearchCol` / `NetworkLinkCol` | `table_specs.py` | 列索引枚举 | `table_views.populate_*` |
