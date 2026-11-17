@@ -88,6 +88,47 @@ def _vlc_embed_instance_args():
 
 # Default preview window is 6s. Early clips open from 0 + seek; deep seeks may use :start-time.
 _LOCAL_START_TIME_MIN_SEC = 6.0
+# Extra room behind a backward reopen so the next few left-arrow steps stay seekable.
+_EARLIER_SEEK_SLACK_SEC = 12.0
+
+
+def _open_sec_on_sync(video_path: str, start_sec: float) -> float:
+    """Move a local open back to the previous keyframe.
+
+    ``:start-time`` between keyframes makes the hardware decoder show a broken
+    picture until the next sync sample. Fragmented MP4 is left at the requested
+    time: those files open through the ffmpeg demuxer, which already starts
+    from a sync sample.
+    """
+    try:
+        from src.media.mp4_sync import previous_sync_seconds
+
+        sync = previous_sync_seconds(video_path, start_sec)
+    except Exception as exc:
+        _log_vlc_debug("read previous keyframe", exc)
+        return start_sec
+    if sync is None:
+        return start_sec
+    return max(0.0, float(sync))
+
+
+def _sync_open_ms(video_path: str, target_ms: int) -> int:
+    """Keyframe at or just before ``target_ms``. Same value when the file has no index."""
+    target_ms = max(0, int(target_ms))
+    if not video_path or _is_http_media_url(video_path):
+        return target_ms
+    sync = _open_sec_on_sync(video_path, target_ms / 1000.0)
+    return int(round(sync * 1000))
+
+
+def _is_fragmented_mp4(video_path: str) -> bool:
+    try:
+        from src.media.mp4_sync import is_fragmented_mp4
+
+        return bool(is_fragmented_mp4(video_path))
+    except Exception as exc:
+        _log_vlc_debug("detect fragmented mp4", exc)
+        return False
 
 
 def _build_vlc_media_options(video_path: str, start_sec: float) -> list[str]:
@@ -101,6 +142,12 @@ def _build_vlc_media_options(video_path: str, start_sec: float) -> list[str]:
     if _is_http_media_url(video_path):
         options.append(":network-caching=800")
         return options
+    # VLC's MP4 demuxer, after a mid-file start on a fragmented file, plays for
+    # about seven seconds and then resets the clock near zero. The ffmpeg
+    # demuxer keeps the clock and still hands the decoder a keyframe, so the
+    # picture stays intact without cutting a new file.
+    if _is_fragmented_mp4(video_path):
+        options.append(":demux=avformat")
     start = max(0.0, float(start_sec or 0.0))
     if start >= _LOCAL_START_TIME_MIN_SEC:
         options.append(f":start-time={start:.3f}")
@@ -171,6 +218,7 @@ class VlcPreviewPlayer:
         self._loaded_video_path = ""
         self._media_origin_sec = 0.0
         self._pending_seek_ms = None
+        self._pending_seek_applied_ms = None
         self._play_busy = False
         self._session_active = False
         self._rebind_gen = 0
@@ -247,6 +295,7 @@ class VlcPreviewPlayer:
         self._locked_stop_at_ms = self._stop_at_ms
         self._user_unlocked = False
         self._pending_seek_ms = None
+        self._pending_seek_applied_ms = None
 
     def _finish_play_start(self, *, start_sec: float, seek_after_open: bool) -> bool:
         try:
@@ -292,12 +341,17 @@ class VlcPreviewPlayer:
         next_path = self._canonical_play_path(video_path)
         start_sec = max(0.0, float(start_sec))
         stop_sec = None if stop_sec is None else max(start_sec, float(stop_sec))
-        if self._can_seek_loaded_media(next_path, start_sec):
-            return self._play_loaded_media(start_sec, stop_sec)
+        remote = _is_http_media_url(next_path)
+        fragmented = (not remote) and _is_fragmented_mp4(next_path)
+        # Fragmented files keep the requested time. Other local files open on
+        # the previous keyframe so the hardware decoder has a reference frame.
+        open_sec = start_sec if remote or fragmented else _open_sec_on_sync(next_path, start_sec)
+        if open_sec + 0.05 >= start_sec and self._can_seek_loaded_media(next_path, open_sec):
+            return self._play_loaded_media(open_sec, stop_sec)
+        start_sec = open_sec
 
         self._current_video_path = next_path
         self._loaded_video_path = next_path
-        remote = _is_http_media_url(next_path)
         use_start_time = (not remote) and start_sec >= _LOCAL_START_TIME_MIN_SEC
         # Media opened with :start-time cannot reliably seek earlier than that origin.
         self._media_origin_sec = start_sec if use_start_time else 0.0
@@ -334,24 +388,29 @@ class VlcPreviewPlayer:
         if self._released or self._player is None or self._pending_seek_ms is None:
             return
         target_ms = int(self._pending_seek_ms)
-        applied = False
         try:
             length_ms = int(self._player.get_length() or 0)
             playing = bool(self._player.is_playing())
-            if playing or length_ms > 0 or attempt >= 4:
+            current = int(self._player.get_time() or -1)
+            # Later polls only. The first pass must still set_time, including a
+            # rewind to 0 when the clock is already there after a clip ends.
+            if attempt > 0 and current >= 0 and abs(current - target_ms) <= 1500:
+                self._pending_seek_ms = None
+                return
+            ready = playing or length_ms > 0 or attempt >= 4
+            issued = getattr(self, "_pending_seek_applied_ms", None)
+            # One set_time per target. Calling it again while the clock is still
+            # on the old (later) frame aborts the backward seek, so the picture
+            # jumps back and forth until the retries give up.
+            if ready and issued != target_ms:
                 self._player.set_time(target_ms)
-                applied = True
-                current = int(self._player.get_time() or -1)
-                if current >= 0 and abs(current - target_ms) <= 1500:
-                    self._pending_seek_ms = None
-                    return
+                self._pending_seek_applied_ms = target_ms
         except Exception as exc:
             _log_vlc_debug("pending http seek", exc)
-        if attempt >= 20:
+        if attempt >= 8:
             self._pending_seek_ms = None
             return
-        delay_ms = 80 if applied else 120
-        QTimer.singleShot(delay_ms, lambda: self._schedule_pending_seek(attempt + 1))
+        QTimer.singleShot(120, lambda: self._schedule_pending_seek(attempt + 1))
 
     def stop(self):
         """Hard stop. Prefer ``suspend()`` / ``clear_session()`` from UI paths to avoid hangs."""
@@ -370,6 +429,7 @@ class VlcPreviewPlayer:
         self._stop_at_ms = -1
         self._locked_stop_at_ms = -1
         self._pending_seek_ms = None
+        self._pending_seek_applied_ms = None
         try:
             if bool(self._player.is_playing()):
                 self._player.audio_set_mute(True)
@@ -407,6 +467,7 @@ class VlcPreviewPlayer:
         self._locked_stop_at_ms = -1
         self._user_unlocked = False
         self._pending_seek_ms = None
+        self._pending_seek_applied_ms = None
         self._current_video_path = ""
         self._loaded_video_path = ""
         self._media_origin_sec = 0.0
@@ -558,14 +619,76 @@ class VlcPreviewPlayer:
 
     def set_time(self, ms, unlock=False):
         if self._player is None or self._released:
-            return
+            return None
         if unlock:
             self.unlock_full_playback()
-        self._pending_seek_ms = max(0, int(ms))
+        target_ms = max(0, int(ms))
+        # set_time between keyframes makes the hardware decoder show a broken picture.
+        # Reopen on the previous one instead. Files without a sync index are unchanged.
+        sync_ms = _sync_open_ms(self._current_video_path, target_ms)
+        if (
+            sync_ms + 150 < target_ms
+            and not _is_fragmented_mp4(self._current_video_path)
+            and self._restart_from_ms(sync_ms)
+        ):
+            return sync_ms
+        self._pending_seek_ms = target_ms
+        origin_sec = float(getattr(self, "_media_origin_sec", 0.0) or 0.0)
+        # Media opened with :start-time cannot seek earlier than that origin.
+        # libvlc then bounces between the origin and the earlier target.
+        if origin_sec > 0.05 and (target_ms / 1000.0) + 0.05 < origin_sec:
+            if self._reopen_earlier_than_origin(target_ms):
+                return target_ms
+        self._pending_seek_applied_ms = target_ms
         try:
-            self._player.set_time(self._pending_seek_ms)
+            self._player.set_time(target_ms)
         except Exception as exc:
             _log_vlc_debug("set playback time", exc)
+        return target_ms
+
+    def _reopen_earlier_than_origin(self, target_ms: int) -> bool:
+        """Reload so a backward seek is not clamped by ``:start-time``."""
+        if (
+            self._player is None
+            or self._released
+            or not self._session_active
+            or self._instance is None
+            or not self._current_video_path
+        ):
+            return False
+        try:
+            was_playing = bool(self._player.is_playing())
+        except Exception:
+            was_playing = True
+        target_sec = max(0.0, float(target_ms) / 1000.0)
+        open_sec = max(0.0, target_sec - _EARLIER_SEEK_SLACK_SEC)
+        remote = _is_http_media_url(self._current_video_path)
+        use_start_time = (not remote) and open_sec >= _LOCAL_START_TIME_MIN_SEC
+        try:
+            options = _build_vlc_media_options(
+                self._current_video_path,
+                open_sec if use_start_time else 0.0,
+            )
+            media = self._instance.media_new(self._current_video_path, *options)
+            self.rebind_output_window()
+            self._set_media(media)
+            self.rebind_output_window()
+            result = self._player.play()
+        except Exception as exc:
+            _log_vlc_warning("reopen before start-time", exc)
+            return False
+        if result == -1:
+            return False
+        self._unmute()
+        self._schedule_rebind(delay_ms=80)
+        self._media_origin_sec = open_sec if use_start_time else 0.0
+        self._loaded_video_path = self._current_video_path
+        self._pending_seek_applied_ms = None
+        self._pending_seek_ms = int(target_sec * 1000)
+        self._schedule_pending_seek()
+        if not was_playing:
+            self._set_paused(True)
+        return True
 
     def has_locked_window(self):
         return not self._released and self._locked_stop_at_ms > 0 and not self._user_unlocked
@@ -731,6 +854,7 @@ class VlcPreviewPlayer:
         self._locked_stop_at_ms = -1
         self._user_unlocked = False
         self._pending_seek_ms = None
+        self._pending_seek_applied_ms = None
         if self._player is None:
             return
         self._set_paused(True)
@@ -771,6 +895,8 @@ class VlcPreviewPlayer:
             return False
         start_sec = max(0.0, float(target_ms) / 1000.0)
         remote = _is_http_media_url(self._current_video_path)
+        if not remote and not _is_fragmented_mp4(self._current_video_path):
+            start_sec = _open_sec_on_sync(self._current_video_path, start_sec)
         use_start_time = (not remote) and start_sec >= _LOCAL_START_TIME_MIN_SEC
         try:
             options = _build_vlc_media_options(self._current_video_path, start_sec)
@@ -791,10 +917,12 @@ class VlcPreviewPlayer:
         self._media_origin_sec = start_sec if use_start_time else 0.0
         self._loaded_video_path = self._current_video_path
         if remote or not use_start_time:
+            self._pending_seek_applied_ms = None
             self._pending_seek_ms = int(start_sec * 1000)
             self._schedule_pending_seek()
         else:
             self._pending_seek_ms = None
+            self._pending_seek_applied_ms = None
         if self._stop_at_ms > 0:
             self._timer.start()
         return True

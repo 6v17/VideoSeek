@@ -44,6 +44,23 @@ class PreviewKeyboardHelperTests(unittest.TestCase):
         self.assertEqual(display, 7900)
         self.assertIsNone(pending)
 
+    def test_resolve_display_time_keeps_backward_seek(self):
+        from ui.playback.preview_keyboard import resolve_display_time_ms
+
+        # Clock is still on the later frame. Dropping the target here makes the
+        # next nudge seek forward again, so the picture bounces.
+        display, pending = resolve_display_time_ms(10000, 7000)
+        self.assertEqual(display, 7000)
+        self.assertEqual(pending, 7000)
+
+        display, pending = resolve_display_time_ms(0, 7000)
+        self.assertEqual(display, 7000)
+        self.assertEqual(pending, 7000)
+
+        display, pending = resolve_display_time_ms(7200, 7000)
+        self.assertEqual(display, 7200)
+        self.assertIsNone(pending)
+
     def test_focus_blocks_preview_keys_for_editors(self):
         from PySide6.QtWidgets import QLineEdit, QPushButton, QWidget
 

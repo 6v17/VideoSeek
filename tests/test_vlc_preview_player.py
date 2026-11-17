@@ -66,6 +66,101 @@ class VlcSameFileSeekTests(unittest.TestCase):
         mock_mp.set_time.assert_called()
         self.assertEqual(mock_mp.set_time.call_args[0][0], 0)
 
+    @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
+    def test_pending_seek_does_not_repeat_set_time(self, _mock_timer):
+        """Repeating set_time while the clock is still ahead restarts a backward seek."""
+        player, mock_mp, mock_instance = self._player()
+        self.assertTrue(player.play("D:/videos/clip.mp4", 10.0, stop_sec=16.0))
+        mock_instance.media_new.reset_mock()
+        mock_mp.set_time.reset_mock()
+        mock_mp.get_time.return_value = 40000
+
+        self.assertTrue(player.play("D:/videos/clip.mp4", 20.0, stop_sec=26.0))
+
+        mock_instance.media_new.assert_not_called()
+        self.assertEqual(mock_mp.set_time.call_count, 1)
+        self.assertEqual(mock_mp.set_time.call_args[0][0], 20000)
+
+    @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
+    def test_set_time_before_origin_reopens_without_bouncing(self, _mock_timer):
+        player, mock_mp, mock_instance = self._player()
+        self.assertTrue(player.play("D:/videos/clip.mp4", 40.0, stop_sec=46.0))
+        mock_instance.media_new.reset_mock()
+        mock_mp.set_time.reset_mock()
+        mock_mp.set_pause.reset_mock()
+        mock_mp.get_time.return_value = 42000
+
+        player.set_time(5000, unlock=True)
+
+        mock_instance.media_new.assert_called_once()
+        options = mock_instance.media_new.call_args[0][1:]
+        self.assertFalse(any(str(opt).startswith(":start-time=") for opt in options))
+        self.assertIn(5000, [call.args[0] for call in mock_mp.set_time.call_args_list])
+        mock_mp.set_pause.assert_not_called()
+
+    @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
+    def test_set_time_after_origin_does_not_reload(self, _mock_timer):
+        player, mock_mp, mock_instance = self._player()
+        self.assertTrue(player.play("D:/videos/clip.mp4", 40.0, stop_sec=46.0))
+        mock_instance.media_new.reset_mock()
+        mock_mp.set_time.reset_mock()
+
+        player.set_time(45000, unlock=True)
+
+        mock_instance.media_new.assert_not_called()
+        mock_mp.set_time.assert_called_once_with(45000)
+
+    @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
+    def test_play_between_keyframes_opens_on_the_previous_one(self, _mock_timer):
+        import tempfile
+
+        from tests.test_mp4_sync import _write_sync_mp4
+
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "clip.mp4")
+        _write_sync_mp4(path)
+        self.addCleanup(lambda: os.remove(path))
+
+        player, _mock_mp, mock_instance = self._player()
+        self.assertTrue(player.play(path, 12.0, stop_sec=18.0))
+        options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
+        self.assertIn(":start-time=8.000", options)
+        _mock_mp.set_rate.assert_not_called()
+        mock_instance.media_new.reset_mock()
+        _mock_mp.set_time.reset_mock()
+        self.assertEqual(player.set_time(14000), 8000)
+        options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
+        self.assertIn(":start-time=8.000", options)
+        _mock_mp.set_time.assert_not_called()
+
+    @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
+    def test_fragmented_file_opens_on_time_with_avformat(self, _mock_timer):
+        import tempfile
+
+        from tests.test_mp4_sync import _write_sync_mp4
+
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "clip.mp4")
+        _write_sync_mp4(path)
+        self.addCleanup(lambda: os.remove(path))
+        player, mock_mp, mock_instance = self._player()
+        with patch("ui.playback.vlc_player._is_fragmented_mp4", return_value=True):
+            self.assertTrue(player.play(path, 12.0, stop_sec=18.0))
+            self.assertEqual(
+                mock_instance.media_new.call_args[0][0],
+                os.path.normcase(os.path.normpath(path)),
+            )
+            options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
+            self.assertIn(":demux=avformat", options)
+            self.assertIn(":start-time=12.000", options)
+            self.assertEqual(player._stop_at_ms, 18000)
+            mock_mp.set_rate.assert_not_called()
+            mock_instance.media_new.reset_mock()
+            mock_mp.set_time.reset_mock()
+            self.assertEqual(player.set_time(14000), 14000)
+            mock_mp.set_time.assert_called_once_with(14000)
+            mock_instance.media_new.assert_not_called()
+
 
 class VlcResumeSeekTests(unittest.TestCase):
     def _player(self):

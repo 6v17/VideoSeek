@@ -56,14 +56,19 @@ def resolve_display_time_ms(current_ms: int, pending_ui_seek_ms: int | None) -> 
 
     Returns ``(display_ms, updated_pending)``. Cleared pending means the player
     has caught up; otherwise keep showing / seeking from the pending target.
+
+    A backward seek leaves the clock ahead of the target until it lands. Treating
+    "clock still later" as finished made the next nudge jump forward again, so
+    the picture bounced until the last seek stuck.
     """
     if pending_ui_seek_ms is None:
         return max(0, int(current_ms)), None
     current_ms = max(0, int(current_ms))
     pending = int(pending_ui_seek_ms)
-    if abs(current_ms - pending) <= 800 or current_ms > pending:
+    if abs(current_ms - pending) <= 800:
         return current_ms, None
-    # VLC often reports ~0 while a deep seek is still applying.
+    # VLC often reports ~0 while a forward seek is still applying, and the old
+    # later clock while a backward seek is still applying.
     return pending, pending
 
 

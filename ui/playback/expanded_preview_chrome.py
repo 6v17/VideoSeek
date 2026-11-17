@@ -371,9 +371,8 @@ class ExpandedPreviewChrome(QWidget):
         new_time = clamp_seek_ms(current_ms, delta_ms, total_ms)
         if player.has_locked_window():
             player.unlock_full_playback()
-        self._pending_ui_seek_ms = new_time
-        # Seek in place — never resume()/media_new here (that reopened early clips at 0).
-        player.set_time(new_time, unlock=True)
+        landed = player.set_time(new_time, unlock=True)
+        self._pending_ui_seek_ms = new_time if not isinstance(landed, int) else landed
         self._sync_ui()
 
     def _unlock_full_playback(self):
@@ -410,8 +409,8 @@ class ExpandedPreviewChrome(QWidget):
         length = self._effective_total_ms(player)
         if length > 0:
             new_time = int((self.slider.value() / 1000.0) * length)
-            self._pending_ui_seek_ms = new_time
-            player.set_time(new_time, unlock=True)
+            landed = player.set_time(new_time, unlock=True)
+            self._pending_ui_seek_ms = new_time if not isinstance(landed, int) else landed
             player.resume()
             self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
         self._slider_dragging = False
