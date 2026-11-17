@@ -252,9 +252,17 @@ def upsert_image_vectors(root: str, rows: list[dict]) -> None:
         db.create_table(TABLE_NAME, data=payload, schema=images_table_schema(dimension))
 
 
-def search_image_vectors(root: str, query_vector, *, profile_id: str, top_k: int = 60) -> list[tuple[str, float]]:
-    """Exact cosine over the Lance candidates for one profile. Empty when the table is missing."""
-    limit = max(0, int(top_k))
+def search_image_vectors(root: str, query_vector, *, profile_id: str, top_k: int | None = None) -> list[tuple[str, float]]:
+    """Exact cosine over the Lance candidates for one profile. Empty when the table is missing.
+
+    Omitted ``top_k`` is the shared first search window, not a private cap of 60.
+    """
+    if top_k is None:
+        from src.storage.config_store import SEARCH_CANDIDATE_LIMIT
+
+        limit = int(SEARCH_CANDIDATE_LIMIT)
+    else:
+        limit = max(0, int(top_k))
     if limit <= 0:
         return []
     query = np.asarray(query_vector, dtype=np.float32).reshape(-1)

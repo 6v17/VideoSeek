@@ -2060,7 +2060,6 @@ class ImageGallerySyncWorker(QThread):
 
 class ImageGallerySearchWorker(QThread):
     hits_ready = Signal(int, object)
-    thumb_ready = Signal(int, int, object)
     finished_signal = Signal(int, bool, str)
 
     def __init__(
@@ -2071,13 +2070,17 @@ class ImageGallerySearchWorker(QThread):
         image_paths=None,
         fusion=None,
         min_score: float = 0.0,
+        top_k: int | None = None,
     ):
         super().__init__()
         self.text = str(text or "")
         self.image_paths = [str(path or "").strip() for path in (image_paths or []) if str(path or "").strip()]
         self.fusion = fusion
         self.min_score = float(min_score or 0.0)
+        self.top_k = top_k
         self.generation = int(generation)
+        self.window_limit = int(top_k or 0)
+        self.replacing = True
         self._running = True
 
     def stop(self):
@@ -2085,7 +2088,6 @@ class ImageGallerySearchWorker(QThread):
         self.requestInterruption()
 
     def run(self):
-        from src.core.image_io import qimage_from_image_path
         from src.services.image_gallery_service import search_image_gallery_by_vector
         from src.services.search_preset_query import encode_mixed_query_vector
 
@@ -2098,7 +2100,11 @@ class ImageGallerySearchWorker(QThread):
                     source_image_paths=self.image_paths,
                     fusion=self.fusion,
                 )
-                hits = search_image_gallery_by_vector(vector, min_score=self.min_score)
+                hits = search_image_gallery_by_vector(
+                    vector,
+                    min_score=self.min_score,
+                    top_k=self.top_k,
+                )
         except ValueError as exc:
             self.finished_signal.emit(self.generation, False, str(exc))
             return
@@ -2107,13 +2113,33 @@ class ImageGallerySearchWorker(QThread):
             self.finished_signal.emit(self.generation, False, str(exc).strip() or repr(exc))
             return
         self.hits_ready.emit(self.generation, hits)
-        for index, hit in enumerate(hits):
+        self.finished_signal.emit(self.generation, True, "")
+
+
+class ImageGalleryThumbWorker(QThread):
+    """Decode still thumbnails for the rows on screen. The search itself does not."""
+
+    thumb_ready = Signal(int, int, object)
+
+    def __init__(self, generation: int, jobs: list[tuple[int, str]]):
+        super().__init__()
+        self.generation = int(generation)
+        self.jobs = [(int(index), str(path or "")) for index, path in (jobs or [])]
+        self._running = True
+
+    def stop(self):
+        self._running = False
+        self.requestInterruption()
+
+    def run(self):
+        from src.core.image_io import qimage_from_image_path
+
+        edge = _gallery_thumb_edge()
+        for index, path in self.jobs:
             if not self._running or self.isInterruptionRequested():
                 break
-            path = str((hit or {}).get("path") or "")
-            image = qimage_from_image_path(path, _gallery_thumb_edge()) if path else None
+            image = qimage_from_image_path(path, edge) if path else None
             self.thumb_ready.emit(self.generation, index, image)
-        self.finished_signal.emit(self.generation, True, "")
 
 
 def _gallery_thumb_edge() -> int:

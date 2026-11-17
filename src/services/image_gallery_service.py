@@ -17,6 +17,8 @@ from src.services.image_gallery_index import (
     gallery_is_stale,
     plan_image_sync,
 )
+# First still-image window (300). The desktop list doubles from here; this is not a hard cap.
+from src.storage.config_store import SEARCH_CANDIDATE_LIMIT as IMAGE_GALLERY_TOP_K
 from src.storage.image_gallery_store import (
     delete_image_paths,
     drop_record,
@@ -33,7 +35,6 @@ from src.storage.video_identity import canonicalize_library_path
 
 logger = get_logger("image_gallery")
 
-IMAGE_GALLERY_TOP_K = 60
 _EMBED_BATCH = 4
 _ENCODE_LONG_SIDE = 1024
 
@@ -741,21 +742,31 @@ def _embed_available(encode_images, images, stats, summary: dict, failed_paths: 
     return pairs
 
 
+def resolve_image_gallery_top_k(top_k: int | None = None) -> int:
+    """First window when omitted. An explicit size stays, and cannot pass the safety ceiling."""
+    from src.storage.config_store import SEARCH_CANDIDATE_LIMIT, clamp_search_top_k
+
+    if top_k is None:
+        return int(SEARCH_CANDIDATE_LIMIT)
+    return clamp_search_top_k(top_k, default=int(SEARCH_CANDIDATE_LIMIT))
+
+
 def search_image_gallery_by_vector(
     vector,
     root: str | None = None,
     *,
     config=None,
     profile_id: str | None = None,
-    top_k: int = IMAGE_GALLERY_TOP_K,
+    top_k: int | None = None,
     min_score: float = 0.0,
 ) -> list[dict]:
     """Rank gallery stills by a query vector. Text, image, and fused queries all enter here."""
     resolved = _resolve_root(root, config=config)
     active = str(profile_id if profile_id is not None else active_profile_id(config=config))
     floor = float(min_score or 0.0)
+    limit = resolve_image_gallery_top_k(top_k)
     try:
-        ranked = search_image_vectors(resolved, vector, profile_id=active, top_k=int(top_k))
+        ranked = search_image_vectors(resolved, vector, profile_id=active, top_k=limit)
     except ValueError as exc:
         if str(exc) == "model_mismatch":
             raise ValueError("model_mismatch") from exc
@@ -774,7 +785,7 @@ def search_image_gallery(
     config=None,
     profile_id: str | None = None,
     embed_text=None,
-    top_k: int = IMAGE_GALLERY_TOP_K,
+    top_k: int | None = None,
     min_score: float = 0.0,
 ) -> list[dict]:
     query = str(text or "").strip()
@@ -816,6 +827,7 @@ def open_original_image(path: str) -> bool:
 # Re-export for callers that only need the stale check next to status.
 __all__ = [
     "IMAGE_GALLERY_TOP_K",
+    "resolve_image_gallery_top_k",
     "ImageGalleryStopped",
     "active_profile_id",
     "add_image_folder",

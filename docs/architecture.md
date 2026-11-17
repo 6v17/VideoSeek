@@ -18,7 +18,7 @@
 | `clip_embedding.py` | ONNX 推理（`clip_onnx` / `siglip2_onnx` / `chinese_clip_onnx`；换模型须重建索引）。可选云嵌入走 `cloud_vl_embedding.py`（DashScope，默认关） |
 | `text_search_enhance.py` | 画面文搜多路投票。返回分仍在相似度尺度上 |
 | `search_skip_ranges.py` / `search_edge_filter.py` | 绝对时间窗过滤。同一段套在每一条视频上；重叠并成并集；剩余不足 30 秒的视频整段保留 |
-| `image_gallery_service.py` | 图片文件夹扫描，按当前模型检索。搜索页「找图」 |
+| `image_gallery_service.py` | 图片文件夹扫描，按当前模型检索。搜索页「找图」。条数规则见 [`search.md`](search.md) |
 | `team_client_search.py` | 用户机把文字搜、图片搜交给服务机。添加库、收录、刷新、同步留在本机或服务机 |
 | `lance_dialogue_search.py` / `dialogue_transcript_store.py` | 硬字幕（OCR）关键词检索；SQLite 字幕库；精确 / 模糊（**完整子集优先，再散落命中率**） |
 | `understanding_service.py` | 视频总结生成、读盘/写盘、`EvidenceBundle` 编排 |
@@ -186,6 +186,8 @@ sequenceDiagram
 
 遗留 `*_vectors.npy` / `*.faiss` 仅迁移与清理，不参与热路径读。
 
+桌面结果从 300 条起翻倍，到 1 万封顶；各 tab 的扩召回常数和找图窗口见 [`search.md`](search.md)。
+
 ## 领域模型（`src/domain/`）
 
 - **`SearchHit`**：一条本地命中（`start_sec`、`end_sec`、`score`、`video_path`）。在 `search_service` 构造；返回给 UI 与 Agent。
@@ -277,6 +279,7 @@ ui/
   workers.py     QThread → services / workflows
 docs/
   architecture.md
+  search.md
   engineering.md
   for-agents.md
   quickstart.md
@@ -286,6 +289,7 @@ docs/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-11-17 | 找图与视频搜索共用 300 起翻倍窗口；条数约定写进 `search.md` |
 | 2026-11-09 | 补画面几何：方图预处理按库锁定；空库跟各模型训练方式；FG-CLIP2 走 NaFlex |
 | 2026-11-06 | 概览补上云嵌入、文搜增强、跳过时段、图库、用户机检索。用户机可文字搜和图搜，同步留在本机或服务机 |
 | 2026-09-04 | 模糊搜索排序：完整子集优先于散落命中；CAM++ 权重入库；剪映 / 解说剪辑文档对齐 |

@@ -149,6 +149,15 @@ class ImageGalleryRankTests(unittest.TestCase):
         )
         self.assertEqual([item[0] for item in ranked], ["ok"])
 
+    def test_gallery_top_k_uses_the_shared_window(self):
+        from src.services.image_gallery_service import IMAGE_GALLERY_TOP_K, resolve_image_gallery_top_k
+        from src.storage.config_store import SEARCH_CANDIDATE_LIMIT, SEARCH_TOP_K_MAX
+
+        self.assertEqual(IMAGE_GALLERY_TOP_K, SEARCH_CANDIDATE_LIMIT)
+        self.assertEqual(resolve_image_gallery_top_k(None), SEARCH_CANDIDATE_LIMIT)
+        self.assertEqual(resolve_image_gallery_top_k(5), 5)
+        self.assertEqual(resolve_image_gallery_top_k(10**9), SEARCH_TOP_K_MAX)
+
 
 class ImageGalleryScanTests(unittest.TestCase):
     def test_supported_suffixes(self):
