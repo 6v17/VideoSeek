@@ -201,15 +201,9 @@ class ImageGalleryController(QObject):
         query = str(text or "").strip()
         paths = [str(path or "").strip() for path in (image_paths or []) if str(path or "").strip()]
         status = self.parent_window.search_page.lbl_status
-        grid = self._result_grid()
         if not query and not paths:
+            self._invalidate_gallery_search(clear_rows=True)
             status.setText(texts.get("gallery_empty_query", ""))
-            if grid is not None:
-                grid.clear()
-            self._hit_rows = []
-            self._hit_scores = {}
-            self._window_exhausted = True
-            self.clear_still()
             return
         if self._is_running(self._sync_worker):
             status.setText(texts.get("gallery_sync_busy", ""))
@@ -229,11 +223,7 @@ class ImageGalleryController(QObject):
 
     def _launch_search(self, limit: int, *, replacing: bool) -> None:
         texts = self.parent_window.texts
-        previous = self._search_worker
-        if previous is not None and previous.isRunning():
-            previous.stop()
-        self._stop_thumb_worker()
-        self._search_generation += 1
+        self._invalidate_gallery_search(clear_rows=False)
         worker = ImageGallerySearchWorker(
             self._query_text,
             self._search_generation,
@@ -258,13 +248,26 @@ class ImageGalleryController(QObject):
         worker.start()
 
     def clear_results(self) -> None:
+        self._invalidate_gallery_search(clear_rows=True)
+
+    def _invalidate_gallery_search(self, *, clear_rows: bool) -> None:
+        """Drop in-flight gallery search work so a late result cannot refill the grid."""
+        previous = self._search_worker
+        if previous is not None and previous.isRunning():
+            previous.stop()
+        self._stop_thumb_worker()
+        self._thumb_timer.stop()
+        self._search_generation += 1
+        if not clear_rows:
+            return
+        self._hit_rows = []
+        self._hit_scores = {}
+        self._thumb_loaded = set()
+        self._window_exhausted = True
+        self._prefetch_hold = False
         grid = self._result_grid()
         if grid is not None:
             grid.clear()
-        self._hit_scores = {}
-        self._hit_rows = []
-        self._thumb_loaded = set()
-        self._window_exhausted = True
         self.clear_still()
 
     def preview_selected(self, path: str) -> None:
