@@ -63,7 +63,11 @@ def build_error_report(
     if logs:
         lines.append(labels["logs"] + ":")
         lines.append(logs)
-    return "\n".join(lines).strip() + "\n"
+    # The copied report leaves this machine. Drop the user-profile prefix.
+    # Library folders and video names outside it stay, so the failure is still identifiable.
+    from src.app.logging_utils import redact_log_text
+
+    return redact_log_text("\n".join(lines).strip() + "\n")
 
 
 _LABELS_ZH = {

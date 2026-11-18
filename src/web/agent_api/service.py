@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import ipaddress
+import os
 import secrets
 import threading
 import time
@@ -54,12 +55,16 @@ logger = get_logger("agent_api")
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
+def _test_client_host_allowed() -> bool:
+    return str(os.environ.get("VIDEOSEEK_TEST_MODE", "") or "").strip() in {"1", "true", "True", "yes"}
+
+
 def _host_requires_auth(host: str) -> bool:
     """LAN / wildcard binds need a token; loopback Agent API stays open (docs)."""
     return str(host or "").strip().lower() not in _LOOPBACK_HOSTS
 
 
-_LOCAL_HOST_NAMES = frozenset({"localhost", "testserver"})
+_LOCAL_HOST_NAMES = frozenset({"localhost"})
 _WILDCARD_BINDS = frozenset({"0.0.0.0", "::", ""})
 
 
@@ -117,6 +122,9 @@ def host_header_allowed(header: str, bind_host: str, port: int) -> bool:
         return False
     if header_port is not None and int(header_port) != int(port):
         return False
+    # testserver is Starlette's TestClient default, not a name a browser sends.
+    if name == "testserver" and _test_client_host_allowed():
+        return True
     if name in _LOCAL_HOST_NAMES or _is_loopback_ip(name):
         return True
     bind = str(bind_host or "").strip().lower()

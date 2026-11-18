@@ -60,6 +60,22 @@ class ErrorReportTests(unittest.TestCase):
         self.assertIn("probe-token-xyz", report)
         self.assertIn("最近日志:", report)
 
+    def test_report_hides_the_user_profile_and_keeps_the_clip_name(self):
+        record = logging.LogRecord(
+            "videoseek.test",
+            logging.ERROR,
+            __file__,
+            1,
+            "open C:\\Users\\LiuWei\\Videos\\clip.mp4 and E:\\素材\\clip.mp4",
+            (),
+            None,
+        )
+        recent_log_handler().emit(record)
+        report = build_error_report("预览失败", "boom", language="zh")
+        self.assertIn("~\\Videos\\clip.mp4", report)
+        self.assertIn("E:\\素材\\clip.mp4", report)
+        self.assertNotIn("LiuWei", report)
+
     def test_error_dialog_copies_the_report(self):
         dialog = AppMessageDialog(
             "出错了",

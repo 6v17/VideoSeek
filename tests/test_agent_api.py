@@ -925,6 +925,13 @@ class AgentApiHostHeaderTests(unittest.TestCase):
         self.assertTrue(host_header_allowed("192.168.1.5:8765", "0.0.0.0", 8765))
         self.assertTrue(host_header_allowed("192.168.1.5:8765", "192.168.1.5", 8765))
         self.assertFalse(host_header_allowed("10.0.0.8:8765", "192.168.1.5", 8765))
+        saved = os.environ.pop("VIDEOSEEK_TEST_MODE", None)
+        try:
+            self.assertFalse(host_header_allowed("testserver", "127.0.0.1", 8765))
+        finally:
+            if saved is not None:
+                os.environ["VIDEOSEEK_TEST_MODE"] = saved
+        self.assertTrue(host_header_allowed("testserver", "127.0.0.1", 8765))
 
     def test_request_with_a_foreign_host_is_rejected(self):
         from fastapi.testclient import TestClient
