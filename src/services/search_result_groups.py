@@ -18,6 +18,8 @@ _CROSS_COSINE = {
     "standard": 0.94,
     "strict": 0.97,
 }
+# Large windows used to build one N×N matrix and then walk every pair in Python.
+_CROSS_TILE = 512
 
 
 @dataclass(frozen=True)
@@ -106,16 +108,7 @@ def group_search_hits(
             group_parent[right_root] = left_root
 
     usable = [(index, group.representative_unit) for index, group in enumerate(preliminary) if group.representative_unit is not None]
-    if len(usable) >= 2:
-        matrix = np.stack([unit for _index, unit in usable])
-        similarity = matrix @ matrix.T
-        for left_pos, (left_index, _left_unit) in enumerate(usable):
-            for right_pos in range(left_pos + 1, len(usable)):
-                right_index = usable[right_pos][0]
-                if preliminary[left_index].video_key == preliminary[right_index].video_key:
-                    continue
-                if float(similarity[left_pos, right_pos]) >= threshold:
-                    union_group(left_index, right_index)
+    _union_cross_video(preliminary, usable, threshold, union_group)
 
     merged: dict[int, list[int]] = {}
     for index in range(len(preliminary)):
@@ -258,6 +251,37 @@ class _Cluster:
     member_indexes: list[int]
     representative_unit: np.ndarray | None
     video_key: tuple
+
+
+def _union_cross_video(preliminary, usable, threshold: float, union) -> None:
+    """Merge different videos when their representative vectors clear ``threshold``.
+
+    Same-video pairs stay separate. Blocks avoid a full similarity matrix and the
+    Python walk over every pair.
+    """
+    if len(usable) < 2:
+        return
+    video_ids = np.empty(len(usable), dtype=np.int32)
+    seen: dict[tuple, int] = {}
+    for pos, (index, _unit) in enumerate(usable):
+        video_ids[pos] = seen.setdefault(preliminary[index].video_key, len(seen))
+    if len(seen) < 2:
+        return
+    matrix = np.stack([unit for _index, unit in usable])
+    count = len(usable)
+    for left_start in range(0, count, _CROSS_TILE):
+        left_end = min(count, left_start + _CROSS_TILE)
+        left_ids = video_ids[left_start:left_end]
+        for right_start in range(left_start, count, _CROSS_TILE):
+            right_end = min(count, right_start + _CROSS_TILE)
+            similarity = (matrix[left_start:left_end] @ matrix[right_start:right_end].T).astype(np.float64)
+            mask = similarity >= float(threshold)
+            mask &= left_ids[:, None] != video_ids[right_start:right_end][None, :]
+            if left_start == right_start:
+                mask = np.triu(mask, k=1)
+            left_hits, right_hits = np.nonzero(mask)
+            for local_left, local_right in zip(left_hits.tolist(), right_hits.tolist()):
+                union(usable[left_start + local_left][0], usable[right_start + local_right][0])
 
 
 def _singleton(hit: SearchHit) -> ResultGroup:

@@ -123,6 +123,68 @@ class SearchResultGroupTests(unittest.TestCase):
         self.assertEqual(rows[0].group_id, 4)
         self.assertEqual(rows[0].display_rank, 5)
 
+    def test_blocked_cross_video_matches_the_full_matrix(self):
+        count = 800
+        rng = np.random.default_rng(7)
+        raw = rng.standard_normal((count, 512)).astype(np.float32)
+        raw /= np.linalg.norm(raw, axis=1, keepdims=True)
+        step = math.acos(0.96)
+        for turn, index in enumerate((0, 500, 700)):
+            theta = step * turn
+            raw[index] = 0
+            raw[index, 0] = math.cos(theta)
+            raw[index, 1] = math.sin(theta)
+        hits = [_hit(f"v{index}.mp4", index * 100.0, 1.0 - index * 1e-6, str(index)) for index in range(count)]
+        groups = group_search_hits(hits, [row.copy() for row in raw], enabled=True, sensitivity="standard")
+        self.assertEqual(_member_sets(groups), _full_matrix_sets(hits, raw, 0.94))
+        chained = {0.0, 50000.0, 70000.0}
+        self.assertTrue(any(chained <= {start for _path, start in members} for members in _member_sets(groups)))
+
+    def test_one_video_spread_stays_unmerged(self):
+        count = 400
+        hits = [_hit("same.mp4", index * 30.0, 1.0 - index * 1e-6, "same") for index in range(count)]
+        vector = np.zeros(32, dtype=np.float32)
+        vector[0] = 1
+        groups = group_search_hits(hits, [vector.copy() for _index in range(count)], enabled=True)
+        self.assertEqual(len(groups), count)
+        self.assertTrue(all(group.kind == "single" for group in groups))
+
+
+def _member_sets(groups) -> set[frozenset]:
+    return {
+        frozenset((hit.video_path, float(hit.start_sec)) for hit in group.members)
+        for group in groups
+    }
+
+
+def _full_matrix_sets(hits, vectors, threshold: float) -> set[frozenset]:
+    """Previous cross-video rule: one similarity matrix, then every pair above the threshold."""
+    units = []
+    for vector in vectors:
+        array = np.asarray(vector, dtype=np.float32).reshape(-1)
+        array = array / float(np.linalg.norm(array))
+        units.append(array)
+    similarity = np.stack(units) @ np.stack(units).T
+    parent = list(range(len(hits)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    for left in range(len(hits)):
+        for right in range(left + 1, len(hits)):
+            if hits[left].video_id == hits[right].video_id:
+                continue
+            if float(similarity[left, right]) >= threshold:
+                root = find(right)
+                parent[root] = find(left)
+    found: dict[int, set] = {}
+    for index, hit in enumerate(hits):
+        found.setdefault(find(index), set()).add((hit.video_path, float(hit.start_sec)))
+    return {frozenset(members) for members in found.values()}
+
 
 if __name__ == "__main__":
     unittest.main()
