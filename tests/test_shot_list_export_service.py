@@ -32,6 +32,19 @@ class ShotListExportServiceTests(unittest.TestCase):
             self.assertTrue(items[0].output_path.endswith("01_ep01_10.mp4"))
             self.assertTrue(items[1].output_path.endswith("02_ep02_3.mp4"))
 
+    def test_batch_export_decodes_a_team_play_url(self):
+        item = ShotListItem(
+            "c",
+            "http://192.168.1.8:18080/videos/lib1/%E4%B8%AD%E6%96%87.mp4",
+            1.0,
+            2.0,
+            0.5,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("src.services.shot_list_export_service._normalize_export_output_dir", return_value=tmp):
+                items = build_shot_list_batch_export_items([item], tmp)
+        self.assertTrue(items[0].output_path.endswith("01_中文_1.mp4"))
+
 
 if __name__ == "__main__":
     unittest.main()

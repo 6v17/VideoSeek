@@ -58,6 +58,14 @@ def export_save_dialog_start(filename: str, config=None) -> str:
     return name
 
 
+def suggested_export_clip_name(video_path, start_sec: float) -> str:
+    """Save-dialog name. Team play URLs keep the decoded title, not the %xx form."""
+    from src.app.path_display import video_display_name
+
+    stem = os.path.splitext(video_display_name(video_path))[0].strip() or "clip"
+    return f"{stem}_clip_{int(float(start_sec)):06d}.mp4"
+
+
 EXPORT_CLIP_TIMEOUT_SEC = 120.0
 BATCH_EXPORT_TIMEOUT_MIN_SEC = 120.0
 BATCH_EXPORT_TIMEOUT_MAX_SEC = 900.0

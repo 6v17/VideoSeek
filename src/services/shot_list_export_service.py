@@ -7,6 +7,7 @@ import re
 from types import SimpleNamespace
 from typing import Any, Dict, List, Sequence
 
+from src.app.path_display import video_display_name
 from src.services.shot_list_service import ShotListItem
 
 from src.services.clip_export_service import MAX_BATCH_EXPORT_CLIPS
@@ -97,7 +98,7 @@ def build_shot_list_batch_export_items(
     batch_items: List[SimpleNamespace] = []
     used_names: set[str] = set()
     for index, item in enumerate(items, start=1):
-        base_name = os.path.splitext(os.path.basename(item.video_path))[0] or "clip"
+        base_name = os.path.splitext(video_display_name(item.video_path))[0].strip() or "clip"
         stem = _sanitize_export_filename_stem(f"{index:02d}_{base_name}_{int(float(item.start_sec))}")
         filename = f"{stem}.mp4"
         suffix = 1

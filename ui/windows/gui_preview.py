@@ -2136,9 +2136,13 @@ class PreviewGuiMixin:
         encode_mode = self._prompt_export_encode_mode(segment_duration_sec=segment_duration)
         if encode_mode is None:
             return
-        base_name = os.path.splitext(os.path.basename(path))[0]
-        suggested_name = f"{base_name}_clip_{int(float(sec)):06d}.mp4"
-        from src.services.clip_export_service import export_save_dialog_start, remember_export_path
+        from src.services.clip_export_service import (
+            export_save_dialog_start,
+            remember_export_path,
+            suggested_export_clip_name,
+        )
+
+        suggested_name = suggested_export_clip_name(path, sec)
 
         save_path, _ = QFileDialog.getSaveFileName(
             self,
