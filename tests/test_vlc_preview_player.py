@@ -190,7 +190,7 @@ class VlcSameFileSeekTests(unittest.TestCase):
         self.assertIn(":start-time=8.000", options)
 
     @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
-    def test_fragmented_file_opens_on_time_with_avformat(self, _mock_timer):
+    def test_fragmented_file_opens_on_the_keyframe_with_avformat(self, _mock_timer):
         import tempfile
 
         from tests.test_mp4_sync import _write_sync_mp4
@@ -208,14 +208,30 @@ class VlcSameFileSeekTests(unittest.TestCase):
             )
             options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
             self.assertIn(":demux=avformat", options)
-            self.assertIn(":start-time=12.000", options)
+            self.assertIn(":start-time=8.000", options)
             self.assertEqual(player._stop_at_ms, 18000)
+            self.assertIn(12000, [call.args[0] for call in mock_mp.set_time.call_args_list])
             mock_mp.set_rate.assert_not_called()
             mock_instance.media_new.reset_mock()
             mock_mp.set_time.reset_mock()
-            self.assertEqual(player.set_time(14000), 14000)
-            mock_mp.set_time.assert_called_once_with(14000)
-            mock_instance.media_new.assert_not_called()
+            self.assertEqual(player.set_time(14000), 8000)
+            options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
+            self.assertIn(":demux=avformat", options)
+            self.assertIn(":start-time=8.000", options)
+            mock_mp.set_time.assert_not_called()
+
+    @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
+    def test_long_gop_fragment_opens_on_the_sync_sample(self, _mock_timer):
+        path = r"E:\素材\网络素材\13384448_1920_1080_30fps.mp4"
+        if not os.path.isfile(path):
+            self.skipTest("sample file is not on this machine")
+        player, mock_mp, mock_instance = self._player()
+        self.assertTrue(player.play(path, 12.0, stop_sec=18.0))
+        options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
+        self.assertIn(":demux=avformat", options)
+        self.assertIn(":start-time=8.341667", options)
+        self.assertFalse(any(item.startswith(":start-time=12") for item in options))
+        self.assertIn(12000, [call.args[0] for call in mock_mp.set_time.call_args_list])
 
 
 class VlcResumeSeekTests(unittest.TestCase):

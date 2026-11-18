@@ -96,13 +96,26 @@ def _sync_test_mode() -> bool:
     return str(os.environ.get("VIDEOSEEK_TEST_MODE", "") or "").strip() in {"1", "true", "True", "yes"}
 
 
+def _format_start_time(start_sec: float) -> str:
+    """VLC ``:start-time`` text.
+
+    Three decimals match a whole millisecond. A sync sample that falls between
+    milliseconds must not be rounded up: 8.341667 would become 8.342 and the
+    hardware decoder would miss the keyframe.
+    """
+    start = max(0.0, float(start_sec or 0.0))
+    millis = round(start * 1000.0)
+    if abs(start * 1000.0 - millis) <= 0.05:
+        return f"{millis / 1000.0:.3f}"
+    return f"{start:.6f}".rstrip("0").rstrip(".") or "0.000"
+
+
 def _open_sec_on_sync(video_path: str, start_sec: float) -> float:
     """Move a local open back to the previous keyframe.
 
     ``:start-time`` between keyframes makes the hardware decoder show a broken
-    picture until the next sync sample. Fragmented MP4 is left at the requested
-    time: those files open through the ffmpeg demuxer, which already starts
-    from a sync sample.
+    picture until the next sync sample. Fragmented MP4 uses the ffmpeg demuxer
+    so the clock does not jump, and it still has to open on a sync sample.
     """
     try:
         from src.media.mp4_sync import previous_sync_seconds
@@ -149,13 +162,13 @@ def _build_vlc_media_options(video_path: str, start_sec: float) -> list[str]:
         return options
     # VLC's MP4 demuxer, after a mid-file start on a fragmented file, plays for
     # about seven seconds and then resets the clock near zero. The ffmpeg
-    # demuxer keeps the clock and still hands the decoder a keyframe, so the
-    # picture stays intact without cutting a new file.
+    # demuxer keeps the clock. The open time itself still has to be a keyframe;
+    # avformat does not walk back to one, and a long GOP then stays broken.
     if _is_fragmented_mp4(video_path):
         options.append(":demux=avformat")
     start = max(0.0, float(start_sec or 0.0))
     if start >= _LOCAL_START_TIME_MIN_SEC:
-        options.append(f":start-time={start:.3f}")
+        options.append(f":start-time={_format_start_time(start)}")
     return options
 
 
@@ -398,12 +411,10 @@ class VlcPreviewPlayer:
         start_sec = max(0.0, float(start_sec))
         stop_sec = None if stop_sec is None else max(start_sec, float(stop_sec))
         remote = _is_http_media_url(next_path)
-        fragmented = (not remote) and _is_fragmented_mp4(next_path)
         target_sec = start_sec
-        # Fragmented files keep the requested time. Other local files open on
-        # the previous keyframe so the hardware decoder has a reference frame,
-        # then seek to the hit once playback has started.
-        open_sec = target_sec if remote or fragmented else _open_sec_on_sync(next_path, target_sec)
+        # Local files, including fragmented ones, open on the previous keyframe
+        # so the hardware decoder has a reference frame, then seek to the hit.
+        open_sec = target_sec if remote else _open_sec_on_sync(next_path, target_sec)
         if open_sec + 0.05 >= target_sec and self._can_seek_loaded_media(next_path, open_sec):
             return self._play_loaded_media(open_sec, stop_sec)
 
@@ -689,11 +700,7 @@ class VlcPreviewPlayer:
         # set_time between keyframes makes the hardware decoder show a broken picture.
         # Reopen on the previous one instead. Files without a sync index are unchanged.
         sync_ms = _sync_open_ms(self._current_video_path, target_ms)
-        if (
-            sync_ms + 150 < target_ms
-            and not _is_fragmented_mp4(self._current_video_path)
-            and self._restart_from_ms(sync_ms)
-        ):
+        if sync_ms + 150 < target_ms and self._restart_from_ms(sync_ms):
             return sync_ms
         self._pending_seek_ms = target_ms
         origin_sec = float(getattr(self, "_media_origin_sec", 0.0) or 0.0)
@@ -726,9 +733,8 @@ class VlcPreviewPlayer:
         target_sec = max(0.0, float(target_ms) / 1000.0)
         open_sec = max(0.0, target_sec - _EARLIER_SEEK_SLACK_SEC)
         remote = _is_http_media_url(self._current_video_path)
-        fragmented = (not remote) and _is_fragmented_mp4(self._current_video_path)
         # Same rule as a forward open: :start-time has to land on a sync sample.
-        if not remote and not fragmented:
+        if not remote:
             open_sec = _open_sec_on_sync(self._current_video_path, open_sec)
         use_start_time = (not remote) and open_sec >= _LOCAL_START_TIME_MIN_SEC
         try:
@@ -962,7 +968,7 @@ class VlcPreviewPlayer:
             return False
         start_sec = max(0.0, float(target_ms) / 1000.0)
         remote = _is_http_media_url(self._current_video_path)
-        if not remote and not _is_fragmented_mp4(self._current_video_path):
+        if not remote:
             start_sec = _open_sec_on_sync(self._current_video_path, start_sec)
         use_start_time = (not remote) and start_sec >= _LOCAL_START_TIME_MIN_SEC
         try:
