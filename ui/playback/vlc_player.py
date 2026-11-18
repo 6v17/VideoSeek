@@ -166,6 +166,10 @@ def _build_vlc_media_options(video_path: str, start_sec: float) -> list[str]:
     # avformat does not walk back to one, and a long GOP then stays broken.
     if _is_fragmented_mp4(video_path):
         options.append(":demux=avformat")
+        # D3D11VA draws a broken picture for the rest of a long GOP once it
+        # loses the keyframe. Software decode does not. DirectML indexing on
+        # the same GPU makes that hardware path fail even more often.
+        options.append(":avcodec-hw=none")
     start = max(0.0, float(start_sec or 0.0))
     if start >= _LOCAL_START_TIME_MIN_SEC:
         options.append(f":start-time={_format_start_time(start)}")
@@ -411,11 +415,18 @@ class VlcPreviewPlayer:
         start_sec = max(0.0, float(start_sec))
         stop_sec = None if stop_sec is None else max(start_sec, float(stop_sec))
         remote = _is_http_media_url(next_path)
+        fragmented = (not remote) and _is_fragmented_mp4(next_path)
         target_sec = start_sec
-        # Local files, including fragmented ones, open on the previous keyframe
-        # so the hardware decoder has a reference frame, then seek to the hit.
+        # Local files open on the previous keyframe so the decoder has a
+        # reference frame. Fragmented files then stay there: a libvlc seek
+        # into that GOP drops the reference and the picture stays broken
+        # until the next keyframe, which on a long GOP is the whole preview.
         open_sec = target_sec if remote else _open_sec_on_sync(next_path, target_sec)
-        if open_sec + 0.05 >= target_sec and self._can_seek_loaded_media(next_path, open_sec):
+        if (
+            not fragmented
+            and open_sec + 0.05 >= target_sec
+            and self._can_seek_loaded_media(next_path, open_sec)
+        ):
             return self._play_loaded_media(open_sec, stop_sec)
 
         self._current_video_path = next_path
@@ -443,8 +454,9 @@ class VlcPreviewPlayer:
         self._apply_clip_window(stop_sec)
         # Same order as a backward reopen. :start-time stays on the sync sample.
         # set_time runs after play() so libvlc can roll forward to the hit.
+        # Fragmented files skip that seek; rolling forward keeps the keyframe.
         land_on_target = (target_sec - open_sec) > 0.15
-        seek_after_open = remote or (not use_start_time) or land_on_target
+        seek_after_open = (not fragmented) and (remote or (not use_start_time) or land_on_target)
         shown_sec = target_sec if seek_after_open else open_sec
         return self._finish_play_start(
             start_sec=shown_sec,
