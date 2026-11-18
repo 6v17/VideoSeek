@@ -210,7 +210,11 @@ def focus_group_rows(group: ResultGroup, *, group_id: int) -> list[GroupDisplayR
 
 
 def fetch_hit_frame_vectors(hits, config) -> list[np.ndarray | None]:
-    """Best-effort frame vectors for the hits. Missing rows stay None so time grouping still works."""
+    """Best-effort frame vectors for the hits. Missing rows stay None so time grouping still works.
+
+    Chunk rows score one frame and keep it on ``peak_sec``. The lookup uses that
+    frame, then the nearest indexed timestamp inside the small neighbor window.
+    """
     rows = list(hits or [])
     empty: list[np.ndarray | None] = [None] * len(rows)
     if not rows:
@@ -228,7 +232,7 @@ def fetch_hit_frame_vectors(hits, config) -> list[np.ndarray | None]:
     if not callable(fetch):
         return empty
     seeds = [
-        (str(hit.video_path or ""), float(hit.start_sec), str(getattr(hit, "video_id", "") or ""))
+        (str(hit.video_path or ""), _vector_lookup_sec(hit), str(getattr(hit, "video_id", "") or ""))
         for hit in rows
     ]
     try:
@@ -240,7 +244,7 @@ def fetch_hit_frame_vectors(hits, config) -> list[np.ndarray | None]:
         return empty
     found: list[np.ndarray | None] = []
     for hit, neighbors in zip(rows, grouped):
-        found.append(_closest_vector(float(hit.start_sec), neighbors))
+        found.append(_closest_vector(_vector_lookup_sec(hit), neighbors))
     if len(found) < len(rows):
         found.extend([None] * (len(rows) - len(found)))
     return found[: len(rows)]
@@ -374,6 +378,14 @@ def _display_row(hit: SearchHit, **kwargs) -> GroupDisplayRow:
         peak_sec=getattr(hit, "peak_sec", None),
         **kwargs,
     )
+
+
+def _vector_lookup_sec(hit) -> float:
+    """Timestamp of the frame that scored. Chunk hits store it on ``peak_sec``."""
+    peak = getattr(hit, "peak_sec", None)
+    if peak is not None:
+        return float(peak)
+    return float(getattr(hit, "start_sec", 0.0) or 0.0)
 
 
 def _closest_vector(target: float, neighbors) -> np.ndarray | None:

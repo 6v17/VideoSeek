@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import math
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from src.domain.search_hit import SearchHit
 from src.services.search_result_groups import (
+    fetch_hit_frame_vectors,
     flatten_result_groups,
     focus_group_rows,
     group_hit_batches,
@@ -148,6 +150,53 @@ class SearchResultGroupTests(unittest.TestCase):
         groups = group_search_hits(hits, [vector.copy() for _index in range(count)], enabled=True)
         self.assertEqual(len(groups), count)
         self.assertTrue(all(group.kind == "single" for group in groups))
+
+    def test_chunk_vector_follows_the_scoring_frame(self):
+        chunk_start = np.array([1.0, 0.0], dtype=np.float32)
+        scoring = np.array([0.0, 1.0], dtype=np.float32)
+        neighbor = np.array([0.2, 0.8], dtype=np.float32)
+        hit = SearchHit(10.0, 18.0, 0.9, "ep.mp4", video_id="7", peak_sec=16.0)
+        seen = {}
+
+        def fetch(seeds, window_sec=0.0):
+            seen["seeds"] = list(seeds)
+            seen["window"] = window_sec
+            return [[_Frame(10.0, chunk_start), _Frame(16.0, scoring), _Frame(16.3, neighbor)]]
+
+        vectors = _fetch_vectors([hit], fetch)
+        self.assertEqual(seen["seeds"], [("ep.mp4", 16.0, "7")])
+        self.assertEqual(seen["window"], 0.45)
+        self.assertTrue(np.allclose(vectors[0], scoring))
+
+    def test_close_frame_hits_keep_their_own_vectors(self):
+        first = np.array([1.0, 0.0], dtype=np.float32)
+        second = np.array([0.0, 1.0], dtype=np.float32)
+        hits = [
+            SearchHit(10.0, 10.0, 0.8, "a.mp4", video_id="1"),
+            SearchHit(10.2, 10.2, 0.7, "a.mp4", video_id="1"),
+        ]
+        shared = [_Frame(10.0, first), _Frame(10.2, second)]
+
+        def fetch(seeds, window_sec=0.0):
+            self.assertEqual([seed[1] for seed in seeds], [10.0, 10.2])
+            self.assertEqual(window_sec, 0.45)
+            return [shared, shared]
+
+        vectors = _fetch_vectors(hits, fetch)
+        self.assertTrue(np.allclose(vectors[0], first))
+        self.assertTrue(np.allclose(vectors[1], second))
+
+
+class _Frame:
+    def __init__(self, timestamp: float, vector: np.ndarray):
+        self.timestamp = timestamp
+        self.vector = vector
+
+
+def _fetch_vectors(hits, fetch):
+    index = type("Index", (), {"fetch_neighbor_rows_grouped": staticmethod(fetch)})()
+    with patch("src.services.search_assets.load_search_assets", return_value=(index, None, None)):
+        return fetch_hit_frame_vectors(hits, {})
 
 
 def _member_sets(groups) -> set[frozenset]:
