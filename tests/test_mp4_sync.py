@@ -186,6 +186,56 @@ class Mp4SyncTests(unittest.TestCase):
         self.assertEqual(previous_sync_seconds(path, 0.5), 0.0)
         self.assertEqual(previous_sync_seconds(path, 1.5), 1.0)
 
+    def test_edit_list_moves_sync_times_onto_the_playback_clock(self):
+        from src.media.mp4_sync import previous_sync_seconds
+
+        folder = tempfile.mkdtemp()
+        delayed = os.path.join(folder, "delayed.mp4")
+        trimmed = os.path.join(folder, "trimmed.mp4")
+        unusual = os.path.join(folder, "unusual.mp4")
+        for path in (delayed, trimmed, unusual):
+            self.addCleanup(lambda path=path: os.remove(path) if os.path.exists(path) else None)
+
+        # One blank second, then the media plays from the start.
+        _write_edited_sync_mp4(delayed, [(1000, -1, 1), (10000, 0, 1)])
+        self.assertEqual(previous_sync_seconds(delayed, 1.0), 1.0)
+        self.assertEqual(previous_sync_seconds(delayed, 8.5), 1.0)
+        self.assertEqual(previous_sync_seconds(delayed, 12.0), 9.0)
+
+        # The first media second is not shown. The 8s keyframe lands at 7s.
+        _write_edited_sync_mp4(trimmed, [(9000, 1000, 1)])
+        self.assertEqual(previous_sync_seconds(trimmed, 7.5), 7.0)
+
+        # A non-1 rate is left on the media clock.
+        _write_edited_sync_mp4(unusual, [(10000, 0, 2)])
+        self.assertEqual(previous_sync_seconds(unusual, 12.0), 8.0)
+
+        # A zero-length edit is a start hint, not a playback shift.
+        hint = os.path.join(folder, "hint.mp4")
+        self.addCleanup(lambda: os.remove(hint) if os.path.exists(hint) else None)
+        _write_edited_sync_mp4(hint, [(0, 2002, 1)])
+        self.assertEqual(previous_sync_seconds(hint, 12.0), 8.0)
+
+
+def _write_edited_sync_mp4(path: str, edits: list[tuple[int, int, int]]) -> None:
+    """Same 0s/8s keyframes as ``_write_sync_mp4``, plus ``mvhd`` and ``elst``."""
+    mdhd = _box(b"mdhd", struct.pack(">IIIIIHH", 0, 0, 0, 1000, 10000, 0x55C4, 0))
+    hdlr = _box(b"hdlr", struct.pack(">II4s", 0, 0, b"vide") + b"\x00" * 12 + b"Video\x00")
+    stts = _box(b"stts", struct.pack(">IIII", 0, 1, 10, 1000))
+    stss = _box(b"stss", struct.pack(">III", 0, 2, 1) + struct.pack(">I", 9))
+    mdia = _box(b"mdia", mdhd + hdlr + _box(b"minf", _box(b"stbl", stts + stss)))
+    elst = struct.pack(">II", 0, len(edits))
+    for duration, media_time, rate in edits:
+        elst += struct.pack(">IiHH", int(duration), int(media_time), int(rate), 0)
+    video = _box(b"trak", _box(b"edts", _box(b"elst", elst)) + mdia)
+    audio = _box(
+        b"trak",
+        _box(b"mdia", _box(b"hdlr", struct.pack(">II4s", 0, 0, b"soun") + b"\x00" * 12 + b"Audio\x00")),
+    )
+    mvhd = _box(b"mvhd", struct.pack(">IIII", 0, 0, 0, 1000))
+    with open(path, "wb") as handle:
+        handle.write(_box(b"ftyp", b"isom" + b"\x00" * 4 + b"isom") + _box(b"moov", mvhd + audio + video))
+
 
 def _write_gop_mp4(path: str, samples: int, keyframes: list[int]) -> None:
     mdhd = _box(b"mdhd", struct.pack(">IIIIIHH", 0, 0, 0, 1000, samples * 1000, 0x55C4, 0))

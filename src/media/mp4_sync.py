@@ -5,7 +5,8 @@ keyframes, D3D11VA decodes without references and the picture stays broken
 until the next keyframe. Starting on the previous sync sample avoids that.
 
 This is not a demuxer. It reads only the boxes needed to name a sync sample
-(stts/stss/ctts, or the first sample of a fragment). Anything incomplete,
+(stts/stss/ctts, or the first sample of a fragment). A normal 1x edit
+list shifts those times onto the playback clock. Anything incomplete,
 over the caps, or past the time budget becomes "no index": playback still
 opens at the requested time. A file that contains ``moof`` is still marked
 fragmented so the player can pick the ffmpeg demuxer.
@@ -33,6 +34,7 @@ _MAX_MOOF = 20_000
 _MAX_PARSE_SECONDS = 0.35
 # ISO/IEC 14496-12 sample_flags bit: sample_is_non_sync_sample.
 _SAMPLE_NON_SYNC = 0x00010000
+_MAX_EDIT_ENTRIES = 32
 
 
 class _ParseLimit(Exception):
@@ -199,7 +201,10 @@ def _read_sync_points(path: str) -> tuple[list[float], bool]:
             track = _video_track(handle, moov_start, moov_end, deadline)
             if track is None:
                 return [], _saw_moof(handle, file_end, deadline)
-            track_id, timescale, points = track
+            track_id, timescale, points, trak_start, trak_end = track
+            points = _apply_edit_list(
+                handle, moov_start, moov_end, trak_start, trak_end, points, timescale
+            )
             if points:
                 return points, False
             trex = _read_trex_flags(handle, moov_start, moov_end)
@@ -210,6 +215,9 @@ def _read_sync_points(path: str) -> tuple[list[float], bool]:
                 timescale,
                 trex,
                 deadline,
+            )
+            fragment_points = _apply_edit_list(
+                handle, moov_start, moov_end, trak_start, trak_end, fragment_points, timescale
             )
             return fragment_points, saw_moof
         except _ParseLimit:
@@ -246,10 +254,100 @@ def _video_track(handle, moov_start: int, moov_end: int, deadline: float):
         track_id = _track_id(handle, trak_start, trak_end)
         timescale = _track_timescale(handle, trak_start, trak_end)
         if points:
-            return track_id or 0, timescale or 1, points
+            return track_id or 0, timescale or 1, points, trak_start, trak_end
         if track_id is None or timescale <= 0:
             continue
-        return track_id, timescale, points
+        return track_id, timescale, points, trak_start, trak_end
+    return None
+
+
+def _apply_edit_list(handle, moov_start, moov_end, trak_start, trak_end, points, media_timescale):
+    """Move sync times onto the playback clock when ``elst`` is a plain 1x list.
+
+    A missing list, a non-1 rate, or a list we cannot read leaves the media
+    times unchanged. Samples that the list does not show are dropped.
+    """
+    if not points:
+        return list(points)
+    edits = _read_rate1_edits(handle, trak_start, trak_end)
+    if not edits:
+        return list(points)
+    movie_timescale = _movie_timescale(handle, moov_start, moov_end)
+    if movie_timescale <= 0 or media_timescale <= 0:
+        return list(points)
+    mapped = []
+    for raw in points:
+        presented = _media_to_presentation(float(raw), edits, movie_timescale, int(media_timescale))
+        if presented is not None:
+            mapped.append(max(0.0, presented))
+    mapped.sort()
+    return mapped
+
+
+def _read_rate1_edits(handle, trak_start: int, trak_end: int):
+    """Return ``(segment_duration, media_time)`` pairs, or None if not a 1x list."""
+    edts = _find_child(handle, trak_start, trak_end, b"edts")
+    if edts is None:
+        return None
+    elst = _find_child(handle, edts[0], edts[1], b"elst")
+    if elst is None or elst[1] - elst[0] < 8:
+        return None
+    handle.seek(elst[0])
+    header = handle.read(8)
+    if len(header) < 8:
+        return None
+    version = header[0]
+    if version not in (0, 1):
+        return None
+    count = struct.unpack(">I", header[4:8])[0]
+    if count <= 0 or count > _MAX_EDIT_ENTRIES:
+        return None
+    entry_size = 20 if version == 1 else 12
+    if elst[1] - elst[0] < 8 + count * entry_size:
+        return None
+    edits = []
+    for _ in range(count):
+        raw = handle.read(entry_size)
+        if len(raw) < entry_size:
+            return None
+        if version == 0:
+            duration, media_time, rate_i, rate_f = struct.unpack(">IiHH", raw)
+        else:
+            duration, media_time, rate_i, rate_f = struct.unpack(">QqHH", raw)
+        if int(rate_i) != 1 or int(rate_f) != 0:
+            return None
+        # Duration 0 does not occupy the playback clock. Fragmented files often
+        # store only a start hint this way; it is not a shift we can apply.
+        if int(duration) <= 0:
+            continue
+        edits.append((int(duration), int(media_time)))
+    return edits or None
+
+
+def _movie_timescale(handle, moov_start: int, moov_end: int) -> int:
+    mvhd = _find_child(handle, moov_start, moov_end, b"mvhd")
+    if mvhd is None:
+        return 0
+    return _timescale(handle, mvhd[0], mvhd[1])
+
+
+def _media_to_presentation(media_sec: float, edits, movie_timescale: int, media_timescale: int):
+    cursor = 0.0
+    last = len(edits) - 1
+    for index, (duration, media_time) in enumerate(edits):
+        segment = max(0, int(duration)) / float(movie_timescale)
+        if int(media_time) < 0:
+            cursor += segment
+            continue
+        start = int(media_time) / float(media_timescale)
+        end = start + segment
+        if index == last:
+            covers = start <= media_sec <= end
+        else:
+            covers = start <= media_sec < end
+        if covers:
+            return cursor + (media_sec - start)
+        cursor += segment
     return None
 
 
