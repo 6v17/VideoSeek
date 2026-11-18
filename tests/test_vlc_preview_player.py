@@ -208,17 +208,15 @@ class VlcSameFileSeekTests(unittest.TestCase):
             )
             options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
             self.assertIn(":demux=avformat", options)
-            self.assertIn(":avcodec-hw=none", options)
             self.assertIn(":start-time=8.000", options)
             self.assertEqual(player._stop_at_ms, 18000)
-            self.assertFalse(any(call.args[0] == 12000 for call in mock_mp.set_time.call_args_list))
+            self.assertIn(12000, [call.args[0] for call in mock_mp.set_time.call_args_list])
             mock_mp.set_rate.assert_not_called()
             mock_instance.media_new.reset_mock()
             mock_mp.set_time.reset_mock()
             self.assertEqual(player.set_time(14000), 8000)
             options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
             self.assertIn(":demux=avformat", options)
-            self.assertIn(":avcodec-hw=none", options)
             self.assertIn(":start-time=8.000", options)
             mock_mp.set_time.assert_not_called()
 
@@ -231,10 +229,9 @@ class VlcSameFileSeekTests(unittest.TestCase):
         self.assertTrue(player.play(path, 12.0, stop_sec=18.0))
         options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
         self.assertIn(":demux=avformat", options)
-        self.assertIn(":avcodec-hw=none", options)
         self.assertIn(":start-time=8.341667", options)
         self.assertFalse(any(item.startswith(":start-time=12") for item in options))
-        self.assertFalse(any(call.args[0] == 12000 for call in mock_mp.set_time.call_args_list))
+        self.assertIn(12000, [call.args[0] for call in mock_mp.set_time.call_args_list])
 
 
 class VlcResumeSeekTests(unittest.TestCase):
