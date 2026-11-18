@@ -805,6 +805,88 @@ class SearchControllerTests(unittest.TestCase):
             "Done 1.25s · 1 · End of the results"
         )
 
+    def test_short_ceiling_page_that_still_adds_rows_says_the_list_ended(self):
+        from src.domain.search_hit import SearchHit
+        from src.storage.config_store import SEARCH_TOP_K_MAX
+
+        parent = _make_parent_window()
+        parent.texts["search_done"] = "Done {duration:.2f}s · {count}"
+        parent.texts["search_window_end_hint"] = "End of the results"
+        controller = SearchController(parent)
+        controller.worker = MagicMock()
+        controller._last_search_duration = 0.71
+        controller._result_display_context = {"search_kind": "image"}
+        controller._window_epoch = 0
+        prior = [SearchHit(0.0, 1.0, 0.2, "a.mp4")]
+        incoming = prior + [SearchHit(2.0, 3.0, 0.18, "b.mp4")]
+        controller._source_hits = list(prior)
+        controller._more_worker = MagicMock(
+            window_epoch=0,
+            window_limit=SEARCH_TOP_K_MAX,
+            hit_vectors=None,
+        )
+
+        def _append(extra, vectors):
+            controller._all_results = list(incoming)
+            controller._update_results_status_text(
+                incoming, {"search_kind": "image"}
+            )
+
+        with patch.object(controller, "sender", return_value=controller._more_worker), patch.object(
+            controller, "_append_grouped_batch", side_effect=_append
+        ), patch.object(controller, "_maybe_grow_window"):
+            controller._on_window_ready(incoming)
+
+        self.assertTrue(controller._window_ended)
+        self.assertTrue(controller._window_exhausted)
+        self.assertFalse(controller._window_capped)
+        parent.search_page.lbl_status.setText.assert_called_with(
+            "Done 0.71s · 2 · End of the results"
+        )
+
+    def test_precise_and_locate_lists_do_not_grow(self):
+        from src.domain.search_hit import SearchHit
+        from ui.workers import SearchConfig
+
+        parent = _make_parent_window()
+        controller = SearchController(parent)
+        controller._source_hits = [SearchHit(1.0, 2.0, 0.9, "a.mp4")]
+
+        controller._search_config = SearchConfig(
+            query="shot.png",
+            is_text=False,
+            search_precision_mode="precise",
+        )
+        controller._arm_result_window()
+        self.assertTrue(controller._window_exhausted)
+        self.assertTrue(controller._window_ended)
+        controller._maybe_grow_window()
+        self.assertIsNone(controller._more_worker)
+
+        controller._search_config = SearchConfig(
+            query="shot.png",
+            is_text=False,
+            search_precision_mode="precise",
+            preview_anchor_sec=12.0,
+            scope_video_paths=["a.mp4"],
+        )
+        controller._window_exhausted = False
+        controller._window_ended = False
+        controller._arm_result_window()
+        self.assertTrue(controller._window_exhausted)
+        controller._maybe_grow_window()
+        self.assertIsNone(controller._more_worker)
+
+        controller._search_config = SearchConfig(
+            query="girl",
+            is_text=False,
+            search_precision_mode="fast",
+            video_discovery_enabled=True,
+        )
+        controller._arm_result_window()
+        self.assertFalse(controller._window_exhausted)
+        self.assertFalse(controller._window_ended)
+
     def test_unchanged_status_still_names_the_fetch_ceiling(self):
         parent = _make_parent_window()
         parent.search_page.lbl_status.text.return_value = "Done 1.25s · 118"

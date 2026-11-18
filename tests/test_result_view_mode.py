@@ -61,6 +61,22 @@ class ResultViewModeTests(unittest.TestCase):
         self.assertEqual(view.grid.count(), 0)
         self.assertEqual(view.table.rowCount(), 0)
 
+    def test_rank_badge_fits_four_digits(self):
+        from ui.widgets.result_grid import ResultGridCard
+
+        card = ResultGridCard()
+        hit = SearchHit(1.0, 2.0, 0.18, "a.mp4")
+        texts = {"thumb_loading": "...", "time_preview_label": "Preview ~{time}"}
+        card.bind(rank=9, hit=hit, texts=texts, on_preview=lambda *args: None)
+        narrow = card.rank_label.width()
+        card.bind(rank=4010, hit=hit, texts=texts, on_preview=lambda *args: None)
+        self.assertEqual(card.rank_label.text(), "4010")
+        self.assertGreater(card.rank_label.width(), narrow)
+        self.assertGreaterEqual(
+            card.rank_label.width(),
+            card.rank_label.fontMetrics().horizontalAdvance("4010"),
+        )
+
     def test_grid_card_elides_title_and_opens_preview_on_double_click(self):
         from PySide6.QtCore import QEvent, QPointF, Qt
         from PySide6.QtGui import QMouseEvent

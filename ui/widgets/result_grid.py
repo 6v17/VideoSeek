@@ -280,6 +280,13 @@ class ResultGridCard(QFrame):
             self.action_buttons.raise_()
             self.rank_label.raise_()
 
+    def _fit_rank_label(self, rank: int) -> None:
+        """The badge used to be 22px wide, so 3991 painted as 991."""
+        text = str(int(rank))
+        self.rank_label.setText(text)
+        width = self.rank_label.fontMetrics().horizontalAdvance(text) + 12
+        self.rank_label.setFixedSize(max(22, width), 22)
+
     def _set_title_text(self, text: str, tooltip: str) -> None:
         self._title_full = str(text or "")
         self.title_label.setToolTip(tooltip or self._title_full)
@@ -601,7 +608,7 @@ class ResultGridCard(QFrame):
         self._on_deep_locate = on_deep_locate
         self._on_add_to_shot_list = on_add_to_shot_list
 
-        self.rank_label.setText(str(rank))
+        self._fit_rank_label(rank)
         # Drop the previous hit's frame before apply_slot. Otherwise a recycled
         # card paints that pixmap back and fast scrolling never replaces it.
         self._source_pixmap = None

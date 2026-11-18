@@ -409,6 +409,13 @@ class SearchController(QObject):
             1,
         )
 
+    def _precision_list_stays_fixed(self, config) -> bool:
+        """Deep search and in-video locate are for the shot, so the list does not grow."""
+        precision = str(getattr(config, "search_precision_mode", "") or "").strip().lower()
+        if precision == "precise":
+            return True
+        return getattr(config, "preview_anchor_sec", None) is not None
+
     def _arm_result_window(self) -> None:
         """Desktop searches start at 300 and grow. An explicit top_k stays fixed."""
         config = self._search_config
@@ -416,16 +423,24 @@ class SearchController(QObject):
             self._window_limit = int(getattr(config, "top_k", 0) or 0)
             self._window_exhausted = True
             return
+        if self._precision_list_stays_fixed(config):
+            self._window_limit = int(SEARCH_CANDIDATE_LIMIT)
+            self._window_exhausted = True
+            self._window_ended = bool(self._source_hits)
+            return
         self._window_limit = int(SEARCH_CANDIDATE_LIMIT)
         # A short first page (chunk collapse, nearby-frame dedupe, grouping) is not the end.
         # Growth stops when a larger fetch comes back short and adds nothing, or at the ceiling.
         self._window_exhausted = len(self._source_hits) == 0
+        self._window_ended = False
         self._prefetch_hold = False
 
     def _maybe_grow_window(self, *, ignore_worker=None) -> None:
         if self._suppress_window_growth or self._is_shutdown or self._window_exhausted or self._prefetch_hold:
             return
         if self._search_config is None or self._search_config.top_k is not None:
+            return
+        if self._precision_list_stays_fixed(self._search_config):
             return
         active = self._more_worker
         if active is not None and active is not ignore_worker and active.isRunning():
@@ -473,13 +488,16 @@ class SearchController(QObject):
         incoming = list(rows or [])
         prior = list(self._source_hits or [])
         extra = _unseen_hits(prior, incoming)
-        # A full reply keeps growing until the safety ceiling. Only a short
-        # reply that added nothing is the end of the index.
+        # A full reply keeps growing until the safety ceiling. A short ceiling
+        # reply is the end even when it still added rows: nothing past 10,000
+        # will be requested, so the list must say so.
+        ceiling = requested >= SEARCH_TOP_K_MAX
         index_short = not extra and len(incoming) < requested
-        hit_cap = requested >= SEARCH_TOP_K_MAX and len(incoming) >= requested
-        if index_short or requested >= SEARCH_TOP_K_MAX:
+        reached_end = index_short or (ceiling and len(incoming) < requested)
+        hit_cap = ceiling and len(incoming) >= requested
+        if reached_end or ceiling:
             self._window_exhausted = True
-        if index_short:
+        if reached_end:
             self._window_ended = True
         if hit_cap:
             self._window_capped = True
@@ -494,7 +512,7 @@ class SearchController(QObject):
             self._window_limit = requested
         if hit_cap and not appended:
             self._note_window_cap_on_status()
-        elif index_short:
+        elif reached_end and not appended:
             self._note_window_end_on_status()
         self._maybe_grow_window(ignore_worker=worker)
 
