@@ -125,6 +125,8 @@ class VlcSameFileSeekTests(unittest.TestCase):
         self.assertTrue(player.play(path, 12.0, stop_sec=18.0))
         options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
         self.assertIn(":start-time=8.000", options)
+        self.assertEqual(player._media_origin_sec, 8.0)
+        self.assertIn(12000, [call.args[0] for call in _mock_mp.set_time.call_args_list])
         _mock_mp.set_rate.assert_not_called()
         mock_instance.media_new.reset_mock()
         _mock_mp.set_time.reset_mock()
@@ -148,6 +150,7 @@ class VlcSameFileSeekTests(unittest.TestCase):
         self.assertTrue(player.play(path, 44.0, stop_sec=50.0))
         options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
         self.assertIn(":start-time=40.000", options)
+        self.assertIn(44000, [call.args[0] for call in mock_mp.set_time.call_args_list])
 
         mock_instance.media_new.reset_mock()
         mock_mp.set_time.reset_mock()

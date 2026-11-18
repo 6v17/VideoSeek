@@ -399,18 +399,19 @@ class VlcPreviewPlayer:
         stop_sec = None if stop_sec is None else max(start_sec, float(stop_sec))
         remote = _is_http_media_url(next_path)
         fragmented = (not remote) and _is_fragmented_mp4(next_path)
+        target_sec = start_sec
         # Fragmented files keep the requested time. Other local files open on
-        # the previous keyframe so the hardware decoder has a reference frame.
-        open_sec = start_sec if remote or fragmented else _open_sec_on_sync(next_path, start_sec)
-        if open_sec + 0.05 >= start_sec and self._can_seek_loaded_media(next_path, open_sec):
+        # the previous keyframe so the hardware decoder has a reference frame,
+        # then seek to the hit once playback has started.
+        open_sec = target_sec if remote or fragmented else _open_sec_on_sync(next_path, target_sec)
+        if open_sec + 0.05 >= target_sec and self._can_seek_loaded_media(next_path, open_sec):
             return self._play_loaded_media(open_sec, stop_sec)
-        start_sec = open_sec
 
         self._current_video_path = next_path
         self._loaded_video_path = next_path
-        use_start_time = (not remote) and start_sec >= _LOCAL_START_TIME_MIN_SEC
+        use_start_time = (not remote) and open_sec >= _LOCAL_START_TIME_MIN_SEC
         # Media opened with :start-time cannot reliably seek earlier than that origin.
-        self._media_origin_sec = start_sec if use_start_time else 0.0
+        self._media_origin_sec = open_sec if use_start_time else 0.0
 
         self._reset_for_replay()
         if not self.is_available():
@@ -419,7 +420,7 @@ class VlcPreviewPlayer:
         # standalone "VLC (Direct3D11 output)" window on the second play.
         self.rebind_output_window()
         try:
-            options = _build_vlc_media_options(next_path, start_sec)
+            options = _build_vlc_media_options(next_path, open_sec if use_start_time else 0.0)
             media = self._instance.media_new(next_path, *options)
             self._set_media(media)
             self.rebind_output_window()
@@ -429,10 +430,14 @@ class VlcPreviewPlayer:
             _log_vlc_warning("prepare media playback", exc)
             return False
         self._apply_clip_window(stop_sec)
+        # Same order as a backward reopen. :start-time stays on the sync sample.
+        # set_time runs after play() so libvlc can roll forward to the hit.
+        land_on_target = (target_sec - open_sec) > 0.15
+        seek_after_open = remote or (not use_start_time) or land_on_target
+        shown_sec = target_sec if seek_after_open else open_sec
         return self._finish_play_start(
-            start_sec=start_sec,
-            # HTTP and early local clips: open then set_time (including rewind to 0).
-            seek_after_open=(remote or not use_start_time),
+            start_sec=shown_sec,
+            seek_after_open=seek_after_open,
         )
 
     def release_native_output(self):
