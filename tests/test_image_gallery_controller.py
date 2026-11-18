@@ -1,4 +1,4 @@
-"""Gallery search state must ignore a worker that finishes after the user clears it."""
+"""Gallery search state: a cleared search stays clear, and a later window only appends."""
 
 from __future__ import annotations
 
@@ -119,6 +119,140 @@ class ImageGallerySearchLifetimeTests(unittest.TestCase):
         self.assertEqual(controller._hit_rows, [{"path": "old.jpg", "score": 0.9}])
         controller._on_hits(5, [{"path": "new.jpg", "score": 0.8}])
         self.assertEqual([row["path"] for row in controller._hit_rows], ["new.jpg"])
+
+    def test_next_window_appends_new_paths_only(self):
+        controller, parent = _controller(self)
+        board = _ResultBoard()
+        parent.search_page.gallery_results = board
+        controller._scroll_hooked = True
+        controller._search_generation = 3
+        controller._window_limit = 300
+        controller._window_exhausted = False
+        controller._hit_rows = [{"path": "a.jpg", "score": 0.9}]
+        controller._search_worker = MagicMock(replacing=False, window_limit=600)
+
+        with patch.object(controller, "_maybe_grow_window"), patch.object(controller, "_schedule_thumbs"):
+            controller._on_hits(
+                3,
+                [
+                    {"path": "a.jpg", "score": 0.9},
+                    {"path": "b.jpg", "score": 0.4},
+                    {"path": "", "score": 0.1},
+                ],
+            )
+
+        self.assertEqual([row["path"] for row in controller._hit_rows], ["a.jpg", "b.jpg"])
+        self.assertEqual(board.populated, [])
+        self.assertEqual(board.appended, [(["b.jpg"], 1)])
+        self.assertEqual(controller._hit_scores["b.jpg"], 0.4)
+        self.assertEqual(controller._window_limit, 600)
+        self.assertFalse(controller._window_exhausted)
+        parent.search_page.lbl_status.setText.assert_called_with("2")
+
+    def test_short_reply_with_nothing_new_stops_growth(self):
+        controller, _parent = _controller(self)
+        controller._search_generation = 3
+        controller._window_exhausted = False
+        controller._hit_rows = [{"path": "a.jpg", "score": 0.9}]
+        controller._search_worker = MagicMock(replacing=False, window_limit=600)
+
+        with patch.object(controller, "_maybe_grow_window"), patch.object(controller, "_schedule_thumbs"):
+            controller._on_hits(3, [{"path": "a.jpg", "score": 0.9}])
+
+        self.assertEqual([row["path"] for row in controller._hit_rows], ["a.jpg"])
+        self.assertTrue(controller._window_exhausted)
+
+    def test_ceiling_reply_shows_the_cap_and_does_not_fetch_again(self):
+        controller, parent = _controller(self)
+        parent.texts["search_window_cap_hint"] = "cap"
+        parent.search_page.gallery_results = None
+        controller._search_generation = 2
+        controller._window_exhausted = False
+        controller._hit_rows = [{"path": "0.jpg", "score": 0.5}]
+        controller._search_worker = MagicMock(replacing=False, window_limit=10000, isRunning=lambda: False)
+        rows = [{"path": f"{index}.jpg", "score": 0.5} for index in range(10000)]
+
+        with patch.object(controller, "_schedule_thumbs"):
+            controller._on_hits(2, rows)
+
+        self.assertEqual(len(controller._hit_rows), 10000)
+        self.assertTrue(controller._window_capped)
+        self.assertTrue(controller._window_exhausted)
+        parent.search_page.lbl_status.setText.assert_called_with("10000 · cap")
+        launched = controller._search_worker
+        controller._maybe_grow_window()
+        self.assertIs(controller._search_worker, launched)
+
+    def test_reaching_the_loaded_rows_fetches_the_next_window(self):
+        controller, _parent = _controller(self)
+        controller._query_text = "cat"
+        controller._window_limit = 300
+        controller._window_exhausted = False
+        controller._hit_rows = [{"path": f"{index}.jpg", "score": 0.5} for index in range(300)]
+        controller._search_worker = MagicMock(isRunning=lambda: False)
+        fresh = MagicMock()
+        fresh.isRunning.return_value = False
+
+        with patch(
+            "ui.controllers.image_gallery_controller.ImageGallerySearchWorker",
+            return_value=fresh,
+        ) as created:
+            with patch.object(controller, "_furthest_visible_index", return_value=10):
+                controller._maybe_grow_window()
+            created.assert_not_called()
+            with patch.object(controller, "_furthest_visible_index", return_value=299):
+                controller._maybe_grow_window()
+
+        self.assertEqual(created.call_args.kwargs["top_k"], 600)
+        self.assertFalse(fresh.replacing)
+        self.assertEqual(fresh.window_limit, 600)
+        fresh.start.assert_called_once()
+        self.assertEqual(len(controller._hit_rows), 300)
+
+    def test_old_thumbnail_and_failure_leave_the_new_search(self):
+        controller, parent = _controller(self)
+        parent.show_error_dialog = MagicMock()
+        board = _ResultBoard()
+        parent.search_page.gallery_results = board
+        controller._search_generation = 5
+        controller._hit_rows = [{"path": "new.jpg", "score": 0.8}]
+        controller._search_worker = MagicMock(replacing=False)
+
+        controller._on_thumb(4, 0, MagicMock())
+        controller._on_search_finished(4, False, "boom")
+
+        self.assertEqual(board.thumbs, [])
+        self.assertEqual(controller._hit_rows, [{"path": "new.jpg", "score": 0.8}])
+        self.assertFalse(controller._prefetch_hold)
+        parent.show_error_dialog.assert_not_called()
+
+        controller._on_search_finished(5, False, "boom")
+
+        self.assertTrue(controller._prefetch_hold)
+        self.assertEqual(controller._hit_rows, [{"path": "new.jpg", "score": 0.8}])
+        parent.show_error_dialog.assert_not_called()
+
+
+class _ResultBoard:
+    def __init__(self):
+        self.populated = []
+        self.appended = []
+        self.thumbs = []
+
+    def set_busy(self, _busy: bool) -> None:
+        return None
+
+    def set_empty_message(self, _message: str) -> None:
+        return None
+
+    def populate_local(self, packed, *_args) -> None:
+        self.populated.append([hit.video_path for hit in packed])
+
+    def append_local(self, packed, *_args, rank_offset: int = 0) -> None:
+        self.appended.append(([hit.video_path for hit in packed], rank_offset))
+
+    def set_thumbnail(self, index: int, _image) -> None:
+        self.thumbs.append(index)
 
 
 if __name__ == "__main__":
