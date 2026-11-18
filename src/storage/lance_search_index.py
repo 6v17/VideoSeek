@@ -557,7 +557,7 @@ class LanceTableSearchIndex:
         window_sec: float,
         limit_per_seed: int = 512,
     ) -> list[list[LanceSearchRow]]:
-        """One Lance read per video for every seed window on that video."""
+        """Neighbor rows for each seed. One video is read in small OR batches."""
         window = max(0.0, float(window_sec))
         per_seed = max(int(limit_per_seed), 1)
         restrict_by_seed_id = "video_id IN (" in str(self._where or "")
@@ -571,32 +571,49 @@ class LanceTableSearchIndex:
             key = (path, video_id if restrict_by_seed_id else "")
             grouped.setdefault(key, []).append((index, float(seed[1])))
         for (path, video_id), items in grouped.items():
-            clauses = [
-                f"(timestamp >= {center - window} AND timestamp <= {center + window})"
-                for _, center in items
-            ]
-            predicates = [
-                f"video_path = {_sql_literal(path)}",
-                "(" + " OR ".join(clauses) + ")",
-            ]
-            predicates[0:0] = self._neighbor_scope_predicates(video_id)
-            try:
-                arrow = (
-                    self._table.search()
-                    .where(" AND ".join(predicates))
-                    .select(["timestamp", "video_path", "vector"])
-                    .limit(per_seed * len(items))
-                    .to_arrow()
-                )
-            except Exception as exc:
-                logger.debug("Lance neighbor fetch failed for %s: %s", path, exc)
-                continue
-            rows = _neighbor_rows_from_arrow(arrow)
-            for seed_index, center in items:
-                lo = center - window
-                hi = center + window
-                results[seed_index] = [row for row in rows if row.timestamp is not None and lo <= float(row.timestamp) <= hi]
+            scope = self._neighbor_scope_predicates(video_id)
+            path_sql = f"video_path = {_sql_literal(path)}"
+            for batch in _neighbor_clause_batches(items, window):
+                clauses = [
+                    f"(timestamp >= {lo} AND timestamp <= {hi})"
+                    for _index, lo, hi in batch
+                ]
+                predicates = scope + [path_sql, "(" + " OR ".join(clauses) + ")"]
+                try:
+                    arrow = (
+                        self._table.search()
+                        .where(" AND ".join(predicates))
+                        .select(["timestamp", "video_path", "vector"])
+                        .limit(per_seed * len(batch))
+                        .to_arrow()
+                    )
+                except Exception as exc:
+                    logger.debug("Lance neighbor fetch failed for %s: %s", path, exc)
+                    continue
+                rows = _neighbor_rows_from_arrow(arrow)
+                for seed_index, lo, hi in batch:
+                    results[seed_index] = [
+                        row
+                        for row in rows
+                        if row.timestamp is not None and lo <= float(row.timestamp) <= hi
+                    ]
         return results
+
+
+# Lance parses a filter by recursing once per OR. A few hundred hit windows on one
+# video overflow the native stack (0xc00000fd) and take the process down.
+_NEIGHBOR_CLAUSE_BATCH = 32
+
+
+def _neighbor_clause_batches(items, window: float, batch_size: int = _NEIGHBOR_CLAUSE_BATCH):
+    """Split one video's seed windows so each Lance filter stays shallow."""
+    windows = [
+        (int(index), float(center) - window, float(center) + window)
+        for index, center in items
+    ]
+    size = max(1, int(batch_size))
+    for start in range(0, len(windows), size):
+        yield windows[start : start + size]
 
 
 class InMemoryFlatSearchIndex:

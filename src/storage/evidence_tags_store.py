@@ -28,6 +28,17 @@ _WRITE_LOCK = __import__("threading").RLock()
 _SUGGEST_CACHE: dict[tuple[Any, ...], list[str]] = {}
 _SUGGEST_CACHE_GEN = 0
 _SUGGEST_CACHE_MAX = 96
+# SQLite parses OR as a deep tree (default depth 1000). A long tag hit list
+# used to be one statement, the same shape that overflowed Lance.
+_TAG_OR_BATCH = 64
+_TAG_IN_BATCH = 400
+
+
+def _chunks(items, size: int):
+    values = list(items)
+    step = max(1, int(size))
+    for start in range(0, len(values), step):
+        yield values[start : start + step]
 
 
 def _invalidate_suggest_cache() -> None:
@@ -806,11 +817,13 @@ def _fetch_tag_rows_exact(
         WHERE instr(tag_cf, ?) > 0
     """
     params: list[Any] = [needle]
-    if want_ids is not None:
-        placeholders = ",".join("?" for _ in want_ids)
-        sql += f" AND video_id IN ({placeholders})"
-        params.extend(want_ids)
-    return list(conn.execute(sql, params))
+    if want_ids is None:
+        return list(conn.execute(sql, params))
+    rows: list[sqlite3.Row] = []
+    for chunk in _chunks(want_ids, _TAG_IN_BATCH):
+        placeholders = ",".join("?" for _ in chunk)
+        rows.extend(conn.execute(sql + f" AND video_id IN ({placeholders})", [*params, *chunk]))
+    return rows
 
 
 def _fetch_tag_rows_fuzzy(
@@ -829,11 +842,13 @@ def _fetch_tag_rows_fuzzy(
         WHERE ({' OR '.join(or_parts)})
     """
     params: list[Any] = list(probes)
-    if want_ids is not None:
-        placeholders = ",".join("?" for _ in want_ids)
-        sql += f" AND video_id IN ({placeholders})"
-        params.extend(want_ids)
-    return list(conn.execute(sql, params))
+    if want_ids is None:
+        return list(conn.execute(sql, params))
+    rows: list[sqlite3.Row] = []
+    for chunk in _chunks(want_ids, _TAG_IN_BATCH):
+        placeholders = ",".join("?" for _ in chunk)
+        rows.extend(conn.execute(sql + f" AND video_id IN ({placeholders})", [*params, *chunk]))
+    return rows
 
 
 def _tag_matches_needle(tag_cf: str, needle: str, mode: str) -> bool:
@@ -854,18 +869,20 @@ def _aggregate_and_hits(
 ) -> list[dict[str, Any]]:
     if not keys:
         return []
-    clauses: list[str] = []
-    params: list[Any] = []
-    for vid, chunk_index in keys:
-        clauses.append("(video_id = ? AND chunk_index = ?)")
-        params.extend([vid, chunk_index])
-    sql = f"""
-        SELECT video_id, video_path, library_path, chunk_index,
-               start_sec, end_sec, tag, tag_cf
-        FROM tag_rows
-        WHERE {' OR '.join(clauses)}
-    """
-    rows = list(conn.execute(sql, params))
+    rows: list[sqlite3.Row] = []
+    for chunk in _chunks(keys, _TAG_OR_BATCH):
+        clauses: list[str] = []
+        params: list[Any] = []
+        for vid, chunk_index in chunk:
+            clauses.append("(video_id = ? AND chunk_index = ?)")
+            params.extend([vid, chunk_index])
+        sql = f"""
+            SELECT video_id, video_path, library_path, chunk_index,
+                   start_sec, end_sec, tag, tag_cf
+            FROM tag_rows
+            WHERE {' OR '.join(clauses)}
+        """
+        rows.extend(conn.execute(sql, params))
     grouped: dict[tuple[str, int], dict[str, Any]] = {}
     for row in rows:
         vid = str(row["video_id"] or "")
@@ -921,26 +938,27 @@ def _attach_full_chunk_tags(
             item["chunk_tags"] = list(item.get("matched_tags") or [])
         return hits
 
-    clauses: list[str] = []
-    params: list[Any] = []
-    for vid, chunk_index in keys:
-        clauses.append("(video_id = ? AND chunk_index = ?)")
-        params.extend([vid, chunk_index])
-    sql = f"""
-        SELECT video_id, chunk_index, tag
-        FROM tag_rows
-        WHERE {' OR '.join(clauses)}
-        ORDER BY video_id, chunk_index, rowid
-    """
     by_key: dict[tuple[str, int], list[str]] = {}
-    for row in conn.execute(sql, params):
-        key = (str(row["video_id"] or ""), int(row["chunk_index"]))
-        tag = str(row["tag"] or "").strip()
-        if not tag:
-            continue
-        bucket = by_key.setdefault(key, [])
-        if tag not in bucket:
-            bucket.append(tag)
+    for chunk in _chunks(keys, _TAG_OR_BATCH):
+        clauses: list[str] = []
+        params: list[Any] = []
+        for vid, chunk_index in chunk:
+            clauses.append("(video_id = ? AND chunk_index = ?)")
+            params.extend([vid, chunk_index])
+        sql = f"""
+            SELECT video_id, chunk_index, tag
+            FROM tag_rows
+            WHERE {' OR '.join(clauses)}
+            ORDER BY video_id, chunk_index, rowid
+        """
+        for row in conn.execute(sql, params):
+            key = (str(row["video_id"] or ""), int(row["chunk_index"]))
+            tag = str(row["tag"] or "").strip()
+            if not tag:
+                continue
+            bucket = by_key.setdefault(key, [])
+            if tag not in bucket:
+                bucket.append(tag)
 
     for item in hits:
         key = (str(item.get("video_id") or ""), int(item.get("chunk_index")))

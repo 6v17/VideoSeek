@@ -91,6 +91,30 @@ class SearchHotPathScanTests(unittest.TestCase):
         self.assertIn("timestamp >= -1.0", table.where_sql[0])
         self.assertIn("timestamp >= 38.0", table.where_sql[0])
 
+    def test_many_windows_on_one_video_stay_in_small_filters(self):
+        from src.storage.lance_search_index import _NEIGHBOR_CLAUSE_BATCH
+
+        class _Always:
+            def __init__(self):
+                self.where_sql = []
+
+            def search(self, *_args, **_kwargs):
+                return _Query(self, [{"timestamp": 0.0, "video_path": "D:/a.mp4", "vector": [1.0, 0.0]}])
+
+        table = _Always()
+        seeds = [("D:/a.mp4", float(index)) for index in range(_NEIGHBOR_CLAUSE_BATCH + 8)]
+        with patch.object(LanceTableSearchIndex, "_count_rows", return_value=2):
+            with patch.object(LanceTableSearchIndex, "_read_dimension", return_value=2):
+                with patch.object(LanceTableSearchIndex, "_detect_vector_index", return_value=False):
+                    index = LanceTableSearchIndex(table, config={"lance_ann_enabled": False})
+        grouped = index.fetch_neighbor_rows_grouped(seeds, window_sec=0.45)
+        self.assertEqual(len(table.where_sql), 2)
+        for sql in table.where_sql:
+            self.assertLessEqual(sql.count("timestamp >="), _NEIGHBOR_CLAUSE_BATCH)
+        self.assertEqual(len(grouped), len(seeds))
+        self.assertEqual(grouped[0][0].timestamp, 0.0)
+        self.assertEqual(grouped[-1], [])
+
     def test_neighbor_read_does_not_repeat_a_video_id_list(self):
         table = _Table()
         huge = "video_id IN (" + ", ".join(f"'v{i}'" for i in range(40)) + ")"

@@ -273,6 +273,39 @@ class EvidenceTagsStoreTests(unittest.TestCase):
                 hits = store.search_tags("orange_chair", match_mode="exact", top_k=5)
                 self.assertEqual([hit["video_id"] for hit in hits], ["vid2"])
 
+    def test_long_tag_filters_stay_in_short_statements(self):
+        from src.storage import evidence_tags_store as store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                store._SCHEMA_READY.clear()
+                store.replace_video_tags_from_bundle("vid1", _sample_bundle())
+                extra_ids = [f"missing-{index}" for index in range(5)]
+                with mock.patch.object(store, "_TAG_IN_BATCH", 2), mock.patch.object(store, "_TAG_OR_BATCH", 2):
+                    hits = store.search_tags(
+                        "orange_chair",
+                        match_mode="exact",
+                        top_k=5,
+                        video_ids=[*extra_ids, "vid1"],
+                    )
+                    self.assertEqual(len(hits), 1)
+                    self.assertEqual(hits[0]["chunk_tags"], ["orange_chair", "table"])
+                    with store._db() as conn:
+                        padded = [
+                            {"video_id": "vid1", "chunk_index": 0, "matched_tags": ["orange_chair"]},
+                            *[
+                                {"video_id": "vid1", "chunk_index": 100 + index, "matched_tags": []}
+                                for index in range(5)
+                            ],
+                        ]
+                        attached = store._attach_full_chunk_tags(conn, padded)
+                    self.assertEqual(attached[0]["chunk_tags"], ["orange_chair", "table"])
+
 
 class RunTagSearchTests(unittest.TestCase):
     def test_run_tag_search_exact(self):
