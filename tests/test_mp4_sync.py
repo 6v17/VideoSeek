@@ -170,6 +170,22 @@ class Mp4SyncTests(unittest.TestCase):
         self.assertTrue(is_fragmented_mp4(tfhd_blocks))
         self.assertIsNone(previous_sync_seconds(tfhd_blocks, 9.0))
 
+    def test_fragmented_fixture_exposes_sync_samples(self):
+        """A real fragmented MP4 keeps sync samples in moof/trun, not moov/stss.
+
+        tests/data/fragmented_short.mp4 is 2 seconds of 10 fps video with a
+        keyframe every 10 frames, so the sync times are 0.0 and 1.0.
+        """
+        from src.media.mp4_sync import is_fragmented_mp4, previous_sync_seconds
+
+        path = os.path.join(os.path.dirname(__file__), "data", "fragmented_short.mp4")
+        self.assertTrue(os.path.isfile(path), "bundled fragmented fixture is missing")
+
+        self.assertTrue(is_fragmented_mp4(path))
+        self.assertEqual(previous_sync_seconds(path, 0.0), 0.0)
+        self.assertEqual(previous_sync_seconds(path, 0.5), 0.0)
+        self.assertEqual(previous_sync_seconds(path, 1.5), 1.0)
+
 
 def _write_gop_mp4(path: str, samples: int, keyframes: list[int]) -> None:
     mdhd = _box(b"mdhd", struct.pack(">IIIIIHH", 0, 0, 0, 1000, samples * 1000, 0x55C4, 0))
