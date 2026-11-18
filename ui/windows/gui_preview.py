@@ -1284,6 +1284,11 @@ class PreviewGuiMixin:
             return
         QTimer.singleShot(700, lambda marker=token: self._refresh_preview_detail_duration(marker, 1))
 
+    def _clear_preview_detail(self) -> None:
+        """Drop the card under the player. A later duration refresh must not refill it."""
+        self._preview_detail_token = None
+        self._write_preview_detail("", "", "")
+
     def _write_preview_detail(self, name: str, path: str, body: str) -> None:
         page = getattr(self, "search_page", None)
         panel = getattr(page, "preview_panel", None) if page is not None else None
@@ -1805,10 +1810,10 @@ class PreviewGuiMixin:
             QTimer.singleShot(80, player.rebind_output_window)
 
     def _reset_preview_chrome(self):
-        chrome = getattr(self.search_page, "expanded_chrome", None)
-        if chrome is None:
-            return
-        chrome.reset()
+        chrome = getattr(getattr(self, "search_page", None), "expanded_chrome", None)
+        if chrome is not None:
+            chrome.reset()
+        self._clear_preview_detail()
 
     def _on_preview_maximize_toggled(self, maximized: bool):
         """Docked player: this button opens the full-page layer instead of covering the list."""

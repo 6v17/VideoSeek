@@ -46,6 +46,24 @@ class SearchWorkspaceChromeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_clear_drops_the_preview_detail_card(self):
+        from ui.windows.gui_preview import PreviewGuiMixin
+
+        page = SearchPage()
+        panel = page.preview_panel
+        panel.detail_name.setText("遭到流放的转生重骑士凭借游戏知识大开无双-06.mp4")
+        panel.detail_body.setText("命中  00:13:45\n相似度  86%")
+        host = PreviewGuiMixin()
+        host.search_page = page
+        host._preview_detail_token = ("clip.mp4", 825.0)
+
+        host._clear_preview_detail()
+
+        self.assertEqual(panel.detail_name.text(), "")
+        self.assertEqual(panel.detail_body.text(), "")
+        self.assertEqual(panel.detail_name.toolTip(), "")
+        self.assertIsNone(host._preview_detail_token)
+
     def test_search_and_preview_cards_collapse_like_the_sidebar(self):
         page = SearchPage()
         page.resize(1400, 800)
