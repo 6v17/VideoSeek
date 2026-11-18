@@ -33,7 +33,8 @@ class ResourceTableDialogChromeTests(unittest.TestCase):
         self.addCleanup(dialog.deleteLater)
 
         self.assertFalse(dialog.btn_utility.isHidden())
-        self.assertIsNotNone(dialog.btn_utility.menu())
+        self.assertIsNone(dialog.btn_utility.menu())
+        self.assertTrue(dialog.btn_utility.text().endswith("▾"))
         self.assertTrue(dialog.btn_copy.isHidden())
         self.assertTrue(dialog.btn_copy_row.isHidden())
         self.assertEqual(len(dialog._footer_extra_buttons), 1)

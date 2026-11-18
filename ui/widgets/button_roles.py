@@ -20,6 +20,25 @@ ACTION_ROLES = frozenset(
 )
 
 
+def bind_popup_menu(button, menu) -> None:
+    """Open ``menu`` from a normal button.
+
+    ``QPushButton.setMenu`` paints the platform arrow, which turns the control
+    into a pale dropdown that does not match the other footer buttons.
+    """
+    from PySide6.QtCore import QPoint
+
+    label = str(button.text() or "").replace(" ▾", "").rstrip()
+    button.setText(f"{label} ▾" if label else "▾")
+
+    def _open(*_args):
+        if not button.isEnabled():
+            return
+        menu.exec(button.mapToGlobal(QPoint(0, button.height())))
+
+    button.clicked.connect(_open)
+
+
 def set_button_role(button: QAbstractButton, role: str, *, chrome: str = "") -> None:
     """Assign an action role objectName and optional chrome property."""
     role_name = str(role or "").strip()

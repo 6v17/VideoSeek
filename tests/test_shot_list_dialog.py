@@ -34,7 +34,8 @@ class ShotListDialogChromeTests(unittest.TestCase):
         self.addCleanup(dialog.deleteLater)
 
         self.assertTrue(hasattr(dialog, "btn_export"))
-        self.assertIsNotNone(dialog.btn_export.menu())
+        self.assertIsNone(dialog.btn_export.menu())
+        self.assertTrue(dialog.btn_export.text().endswith("▾"))
         self.assertFalse(hasattr(dialog, "btn_preview"))
         self.assertFalse(hasattr(dialog, "btn_locate"))
         self.assertFalse(hasattr(dialog, "btn_export_manifest"))

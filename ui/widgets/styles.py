@@ -554,6 +554,12 @@ QPushButton:disabled {
     border-color: __LINE__;
     background: __FIELD__;
 }
+QPushButton::menu-indicator {
+    image: none;
+    width: 0px;
+    height: 0px;
+    border: none;
+}
 #PrimaryButton {
     background: __ACCENT__;
     border-color: __ACCENT__;

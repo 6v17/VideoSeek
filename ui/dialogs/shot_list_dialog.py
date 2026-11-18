@@ -18,6 +18,7 @@ from src.services.shot_list_service import ShotListStore
 from src.services.search_locate import format_clip_score_percent
 from ui.dialogs.shell import VSDialogShell
 from ui.views.table_views import format_time_range as _format_time_range
+from ui.widgets.button_roles import bind_popup_menu
 from ui.widgets.scaffold import VSCard
 
 
@@ -112,7 +113,7 @@ class ShotListDialog(VSDialogShell):
             self.footer_layout.addWidget(button)
 
         self.btn_export = QPushButton(self.texts.get("shot_list_export", "Export"))
-        self.btn_export.setObjectName("AccentGhostButton")
+        self.btn_export.setObjectName("GhostButton")
         self.btn_export.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_export.setAutoDefault(False)
         self.btn_export.setDefault(False)
@@ -152,7 +153,7 @@ class ShotListDialog(VSDialogShell):
                     "未安装 pyJianYingDraft。请在 VideoSeek 环境执行：pip install pyJianYingDraft",
                 )
             )
-        self.btn_export.setMenu(self._export_menu)
+        bind_popup_menu(self.btn_export, self._export_menu)
         self.footer_layout.addWidget(self.btn_export)
 
         self.footer_layout.addStretch(1)

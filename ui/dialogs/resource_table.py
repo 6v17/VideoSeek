@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.app.i18n import get_texts
+from ui.widgets.button_roles import bind_popup_menu
 from ui.widgets.styles import theme_color_map
 
 from .common import SortableTableWidgetItem
@@ -177,7 +178,7 @@ class ResourceTableDialog(VSDialogShell):
             self._utility_menu = QMenu(self.btn_utility)
             self._utility_menu.addAction(self.texts["details_copy_json"], self._copy_json)
             self._utility_menu.addAction(self.texts["details_export_json"], self._export_json)
-            self.btn_utility.setMenu(self._utility_menu)
+            bind_popup_menu(self.btn_utility, self._utility_menu)
         else:
             self.btn_utility = QPushButton(self.texts.get("details_export_menu", "Export"))
             self.btn_utility.hide()
