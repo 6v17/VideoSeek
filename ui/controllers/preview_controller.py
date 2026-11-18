@@ -25,6 +25,7 @@ class PreviewController:
         self._warmup_done_callbacks: list = []
         self._prepare_worker = None
         self._prepare_token = 0
+        self._deferred_open = None
 
     def resolve_clip_window(self, video_path, start_sec, end_sec=None):
         from src.media.export_clip import resolve_base_clip_window as _resolve_base_clip_window
@@ -52,6 +53,9 @@ class PreviewController:
 
         clip_start, clip_duration = self.resolve_clip_window(video_path, start_sec, end_sec=end_sec)
         clip_end = clip_start + clip_duration
+        self._deferred_open = None
+        if self.vlc_player is not None:
+            self.vlc_player.cancel_pending_open()
         self.cleanup_previous_preview()
         self._cancel_prepare_worker()
 
@@ -107,9 +111,43 @@ class PreviewController:
         except Exception as exc:
             logger.debug("Assert main preview host skipped: %s", exc)
         if vlc_player.play(playback_path, clip_start, stop_sec=clip_end):
+            # The index is read off this thread. Keep the placeholder up until
+            # the open actually happens, and keep the clip fallback if it fails.
+            if getattr(vlc_player, "_waiting_for_sync_index", False):
+                self._deferred_open = (
+                    vlc_player._canonical_play_path(playback_path),
+                    video_path,
+                    playback_path,
+                    clip_start,
+                    clip_duration,
+                )
+                return True
             self._set_preview_surface_idle(False)
             return True
 
+        return self._fallback_local_preview(
+            video_path,
+            playback_path,
+            clip_start,
+            clip_duration,
+        )
+
+    def _on_deferred_vlc_opened(self, path: str) -> None:
+        pending = self._deferred_open
+        if not pending or pending[0] != path:
+            return
+        self._deferred_open = None
+        self._set_preview_surface_idle(False)
+
+    def _on_deferred_vlc_failed(self, path: str) -> None:
+        pending = self._deferred_open
+        if not pending or pending[0] != path:
+            return
+        self._deferred_open = None
+        _canon, video_path, playback_path, clip_start, clip_duration = pending
+        self._fallback_local_preview(video_path, playback_path, clip_start, clip_duration)
+
+    def _fallback_local_preview(self, video_path, playback_path, clip_start, clip_duration) -> bool:
         # Team play_url: never ffmpeg-remux remote HTTP on the UI thread (can hang / crash).
         if is_http_media_url(video_path):
             return False
@@ -286,6 +324,8 @@ class PreviewController:
                 )
             else:
                 self.vlc_player = VlcPreviewPlayer(host)
+            self.vlc_player._sync_bridge.opened.connect(self._on_deferred_vlc_opened)
+            self.vlc_player._sync_bridge.open_failed.connect(self._on_deferred_vlc_failed)
         return self.vlc_player
 
     def suspend_for_dialog(self, *, skip_telemetry: bool = True):
@@ -461,6 +501,7 @@ class PreviewController:
 
     def shutdown(self):
         self._cancel_prepare_worker()
+        self._deferred_open = None
         if self.vlc_player is not None:
             self.vlc_player.shutdown(fast=True)
             self.vlc_player = None

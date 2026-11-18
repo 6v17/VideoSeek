@@ -134,6 +134,59 @@ class VlcSameFileSeekTests(unittest.TestCase):
         _mock_mp.set_time.assert_not_called()
 
     @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
+    def test_reverse_reopen_snaps_to_a_keyframe(self, _mock_timer):
+        import tempfile
+
+        from tests.test_mp4_sync import _write_gop_mp4
+
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "clip.mp4")
+        _write_gop_mp4(path, 50, [1, 21, 41])
+        self.addCleanup(lambda: os.remove(path))
+
+        player, mock_mp, mock_instance = self._player()
+        self.assertTrue(player.play(path, 44.0, stop_sec=50.0))
+        options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
+        self.assertIn(":start-time=40.000", options)
+
+        mock_instance.media_new.reset_mock()
+        mock_mp.set_time.reset_mock()
+        mock_mp.get_time.return_value = 40000
+        self.assertEqual(player.set_time(20050), 20050)
+        options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
+        self.assertFalse(any(item.startswith(":start-time=") for item in options))
+        self.assertIn(20050, [call.args[0] for call in mock_mp.set_time.call_args_list])
+
+    @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
+    def test_play_waits_for_the_background_index(self, _mock_timer):
+        import tempfile
+
+        from src.media.mp4_sync import ensure_sync_index
+        from tests.test_mp4_sync import _write_sync_mp4
+
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "clip.mp4")
+        _write_sync_mp4(path)
+        self.addCleanup(lambda: os.remove(path))
+        saved = os.environ.pop("VIDEOSEEK_TEST_MODE", None)
+        self.addCleanup(lambda: os.environ.__setitem__("VIDEOSEEK_TEST_MODE", saved or "1"))
+        captured = {}
+
+        def _capture(ready_path, on_ready):
+            captured["path"] = ready_path
+            captured["callback"] = on_ready
+
+        player, _mock_mp, mock_instance = self._player()
+        with patch("src.media.mp4_sync.schedule_sync_index", side_effect=_capture):
+            self.assertTrue(player.play(path, 12.0, stop_sec=18.0))
+            self.assertTrue(player._waiting_for_sync_index)
+        mock_instance.media_new.assert_not_called()
+        ensure_sync_index(captured["path"])
+        captured["callback"](captured["path"])
+        options = [str(item) for item in mock_instance.media_new.call_args[0][1:]]
+        self.assertIn(":start-time=8.000", options)
+
+    @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
     def test_fragmented_file_opens_on_time_with_avformat(self, _mock_timer):
         import tempfile
 

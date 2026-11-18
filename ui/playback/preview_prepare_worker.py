@@ -49,6 +49,9 @@ class PreviewPrepareWorker(QThread):
                 if self._cancel_requested:
                     self.finished_prepare.emit({"cancelled": True, "mode": self.mode})
                     return
+                from src.media.mp4_sync import ensure_sync_index
+
+                ensure_sync_index(playback_path)
                 self.finished_prepare.emit(
                     {
                         "cancelled": False,
@@ -71,6 +74,9 @@ class PreviewPrepareWorker(QThread):
                 if self._cancel_requested:
                     self.finished_prepare.emit({"cancelled": True, "mode": self.mode})
                     return
+                from src.media.mp4_sync import ensure_sync_index
+
+                ensure_sync_index(self.cache_path or input_path)
                 self.finished_prepare.emit(
                     {
                         "cancelled": False,

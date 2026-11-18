@@ -1,7 +1,7 @@
 import os
 import sys
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
 from src.app.logging_utils import get_logger
 from src.utils import get_resource_path
@@ -92,6 +92,10 @@ _LOCAL_START_TIME_MIN_SEC = 6.0
 _EARLIER_SEEK_SLACK_SEC = 12.0
 
 
+def _sync_test_mode() -> bool:
+    return str(os.environ.get("VIDEOSEEK_TEST_MODE", "") or "").strip() in {"1", "true", "True", "yes"}
+
+
 def _open_sec_on_sync(video_path: str, start_sec: float) -> float:
     """Move a local open back to the previous keyframe.
 
@@ -103,7 +107,8 @@ def _open_sec_on_sync(video_path: str, start_sec: float) -> float:
     try:
         from src.media.mp4_sync import previous_sync_seconds
 
-        sync = previous_sync_seconds(video_path, start_sec)
+        # Cache only. play() fills the index off the UI thread before opening.
+        sync = previous_sync_seconds(video_path, start_sec, load=False)
     except Exception as exc:
         _log_vlc_debug("read previous keyframe", exc)
         return start_sec
@@ -125,7 +130,7 @@ def _is_fragmented_mp4(video_path: str) -> bool:
     try:
         from src.media.mp4_sync import is_fragmented_mp4
 
-        return bool(is_fragmented_mp4(video_path))
+        return bool(is_fragmented_mp4(video_path, load=False))
     except Exception as exc:
         _log_vlc_debug("detect fragmented mp4", exc)
         return False
@@ -199,6 +204,14 @@ def warmup_vlc_runtime():
                 _log_vlc_debug("release warmup instance", exc)
 
 
+class _Mp4SyncBridge(QObject):
+    """Marshal a worker-thread index callback onto the player thread."""
+
+    ready = Signal(str)
+    opened = Signal(str)
+    open_failed = Signal(str)
+
+
 class VlcPreviewPlayer:
     def __init__(self, host_widget, *, shared_instance=None):
         self.host_widget = host_widget
@@ -222,6 +235,10 @@ class VlcPreviewPlayer:
         self._play_busy = False
         self._session_active = False
         self._rebind_gen = 0
+        self._pending_sync_play = None
+        self._waiting_for_sync_index = False
+        self._sync_bridge = _Mp4SyncBridge(self.host_widget)
+        self._sync_bridge.ready.connect(self._on_sync_index_ready)
         if shared_instance is not None:
             self._instance = shared_instance
             try:
@@ -242,17 +259,56 @@ class VlcPreviewPlayer:
             return False
         # Starting libvlc before the embed host exists opens a separate
         # "VLC (Direct3D11 output)" window that the app cannot close.
+        self._waiting_for_sync_index = False
         if not self._host_output_ready():
             self._queued_play = (video_path, start_sec, stop_sec)
             self._bind_retry_left = 40
             QTimer.singleShot(80, self._flush_queued_play)
             return True
         self._queued_play = None
+        if not self._sync_index_ready_for_play(video_path, start_sec, stop_sec):
+            self._waiting_for_sync_index = True
+            return True
         self._play_busy = True
         try:
             return self._play_impl(video_path, start_sec, stop_sec=stop_sec)
         finally:
             self._play_busy = False
+
+    def _sync_index_ready_for_play(self, video_path, start_sec, stop_sec) -> bool:
+        """True when play() may open now. A cold index is filled off this thread."""
+        next_path = self._canonical_play_path(video_path)
+        if _is_http_media_url(next_path):
+            return True
+        from src.media.mp4_sync import ensure_sync_index, schedule_sync_index, sync_index_ready
+
+        if sync_index_ready(next_path):
+            self._pending_sync_play = None
+            return True
+        self._pending_sync_play = (next_path, video_path, start_sec, stop_sec)
+        if _sync_test_mode():
+            ensure_sync_index(next_path)
+            self._pending_sync_play = None
+            return True
+        schedule_sync_index(next_path, self._sync_bridge.ready.emit)
+        return False
+
+    def cancel_pending_open(self) -> None:
+        """Drop a play that has not opened yet. A newer preview takes its place."""
+        self._pending_sync_play = None
+        self._queued_play = None
+        self._waiting_for_sync_index = False
+
+    def _on_sync_index_ready(self, path: str) -> None:
+        pending = self._pending_sync_play
+        if self._released or not pending or pending[0] != path:
+            return
+        _path, video_path, start_sec, stop_sec = pending
+        self._pending_sync_play = None
+        if self.play(video_path, start_sec, stop_sec):
+            self._sync_bridge.opened.emit(path)
+        else:
+            self._sync_bridge.open_failed.emit(path)
 
     def _flush_queued_play(self) -> None:
         queued = getattr(self, "_queued_play", None)
@@ -425,6 +481,7 @@ class VlcPreviewPlayer:
         """
         if self._released or self._player is None:
             return
+        self._pending_sync_play = None
         self._timer.stop()
         self._stop_at_ms = -1
         self._locked_stop_at_ms = -1
@@ -462,6 +519,7 @@ class VlcPreviewPlayer:
         if self._released:
             return
         self._released = True
+        self._pending_sync_play = None
         self._timer.stop()
         self._stop_at_ms = -1
         self._locked_stop_at_ms = -1
@@ -663,6 +721,10 @@ class VlcPreviewPlayer:
         target_sec = max(0.0, float(target_ms) / 1000.0)
         open_sec = max(0.0, target_sec - _EARLIER_SEEK_SLACK_SEC)
         remote = _is_http_media_url(self._current_video_path)
+        fragmented = (not remote) and _is_fragmented_mp4(self._current_video_path)
+        # Same rule as a forward open: :start-time has to land on a sync sample.
+        if not remote and not fragmented:
+            open_sec = _open_sec_on_sync(self._current_video_path, open_sec)
         use_start_time = (not remote) and open_sec >= _LOCAL_START_TIME_MIN_SEC
         try:
             options = _build_vlc_media_options(
