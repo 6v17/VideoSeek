@@ -149,6 +149,14 @@ def _is_fragmented_mp4(video_path: str) -> bool:
         return False
 
 
+def _http_mp4_url(video_path: str) -> bool:
+    """True for a team play URL whose path is an MP4-family file."""
+    from urllib.parse import urlsplit
+
+    path = urlsplit(str(video_path or "")).path.lower()
+    return path.endswith((".mp4", ".m4v", ".mov"))
+
+
 def _build_vlc_media_options(video_path: str, start_sec: float) -> list[str]:
     """Media options for preview.
 
@@ -159,6 +167,11 @@ def _build_vlc_media_options(video_path: str, start_sec: float) -> list[str]:
     options: list[str] = []
     if _is_http_media_url(video_path):
         options.append(":network-caching=800")
+        # Client playback is this URL, then a seek to the hit. VLC's own MP4
+        # demuxer lands between keyframes and the picture stays broken on a
+        # long GOP. The ffmpeg demuxer is the one that stays intact locally.
+        if _http_mp4_url(video_path):
+            options.append(":demux=avformat")
         return options
     # VLC's MP4 demuxer, after a mid-file start on a fragmented file, plays for
     # about seven seconds and then resets the clock near zero. The ffmpeg

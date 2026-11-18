@@ -999,8 +999,11 @@ class VlcPreviewPlayerTests(unittest.TestCase):
 
         options = _build_vlc_media_options("http://host/videos/lib1/a.mp4", 64.0)
         self.assertIn(":network-caching=800", options)
+        self.assertIn(":demux=avformat", options)
         self.assertTrue(all(not item.startswith(":start-time=") for item in options))
         self.assertTrue(all(not item.startswith(":http-caching=") for item in options))
+        other = _build_vlc_media_options("http://host/videos/lib1/a.mkv", 64.0)
+        self.assertNotIn(":demux=avformat", other)
 
         local = _build_vlc_media_options(r"D:\videos\a.mp4", 64.0)
         self.assertIn(":start-time=64.000", local)
