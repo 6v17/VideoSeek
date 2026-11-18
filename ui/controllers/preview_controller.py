@@ -113,7 +113,7 @@ class PreviewController:
         if vlc_player.play(playback_path, clip_start, stop_sec=clip_end):
             # The index is read off this thread. Keep the placeholder up until
             # the open actually happens, and keep the clip fallback if it fails.
-            if getattr(vlc_player, "_waiting_for_sync_index", False):
+            if getattr(vlc_player, "_waiting_for_sync_index", False) is True:
                 self._deferred_open = (
                     vlc_player._canonical_play_path(playback_path),
                     video_path,
