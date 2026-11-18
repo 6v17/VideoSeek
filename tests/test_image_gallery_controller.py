@@ -150,7 +150,8 @@ class ImageGallerySearchLifetimeTests(unittest.TestCase):
         parent.search_page.lbl_status.setText.assert_called_with("2")
 
     def test_short_reply_with_nothing_new_stops_growth(self):
-        controller, _parent = _controller(self)
+        controller, parent = _controller(self)
+        parent.texts["search_window_end_hint"] = "end"
         controller._search_generation = 3
         controller._window_exhausted = False
         controller._hit_rows = [{"path": "a.jpg", "score": 0.9}]
@@ -161,6 +162,7 @@ class ImageGallerySearchLifetimeTests(unittest.TestCase):
 
         self.assertEqual([row["path"] for row in controller._hit_rows], ["a.jpg"])
         self.assertTrue(controller._window_exhausted)
+        parent.search_page.lbl_status.setText.assert_called_with("1 · end")
 
     def test_ceiling_reply_shows_the_cap_and_does_not_fetch_again(self):
         controller, parent = _controller(self)

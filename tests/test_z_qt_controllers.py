@@ -787,6 +787,24 @@ class SearchControllerTests(unittest.TestCase):
             "Done 1.25s · 1 · Reached the 10,000 limit"
         )
 
+    def test_results_status_names_the_end_of_the_index(self):
+        from src.domain.search_hit import SearchHit
+
+        parent = _make_parent_window()
+        parent.texts["search_done"] = "Done {duration:.2f}s · {count}"
+        parent.texts["search_window_end_hint"] = "End of the results"
+        controller = SearchController(parent)
+        controller.worker = MagicMock()
+        controller._last_search_duration = 1.25
+        controller._window_ended = True
+        hits = [SearchHit(0.0, 1.0, -0.02, "a.mp4")]
+
+        controller._update_results_status_text(hits, {"search_kind": "text"})
+
+        parent.search_page.lbl_status.setText.assert_called_once_with(
+            "Done 1.25s · 1 · End of the results"
+        )
+
     def test_unchanged_status_still_names_the_fetch_ceiling(self):
         parent = _make_parent_window()
         parent.search_page.lbl_status.text.return_value = "Done 1.25s · 118"

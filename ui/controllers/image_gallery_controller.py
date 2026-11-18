@@ -472,6 +472,10 @@ class ImageGalleryController(QObject):
             hint = str(texts.get("search_window_cap_hint") or "").strip()
             if hint and hint not in text:
                 text = f"{text} · {hint}"
+        elif self._window_exhausted and count:
+            hint = str(texts.get("search_window_end_hint") or "").strip()
+            if hint and hint not in text:
+                text = f"{text} · {hint}"
         self.parent_window.search_page.lbl_status.setText(text)
 
     def _ensure_scroll_hooks(self) -> None:

@@ -85,6 +85,7 @@ class SearchController(QObject):
         self._window_limit = 0
         self._window_exhausted = True
         self._window_capped = False
+        self._window_ended = False
         self._window_epoch = 0
         self._prefetch_hold = False
         self._scroll_hooked = False
@@ -144,6 +145,7 @@ class SearchController(QObject):
         self._window_limit = 0
         self._window_exhausted = True
         self._window_capped = False
+        self._window_ended = False
         self._prefetch_hold = False
         self._search_config = None
         self.stop_thumbnail_loading()
@@ -288,6 +290,7 @@ class SearchController(QObject):
         self._window_epoch += 1
         self._window_exhausted = True
         self._window_capped = False
+        self._window_ended = False
         self._window_limit = 0
         self._search_config = None
         self.stop_thumbnail_loading()
@@ -476,6 +479,8 @@ class SearchController(QObject):
         hit_cap = requested >= SEARCH_TOP_K_MAX and len(incoming) >= requested
         if index_short or requested >= SEARCH_TOP_K_MAX:
             self._window_exhausted = True
+        if index_short:
+            self._window_ended = True
         if hit_cap:
             self._window_capped = True
         appended = False
@@ -489,6 +494,8 @@ class SearchController(QObject):
             self._window_limit = requested
         if hit_cap and not appended:
             self._note_window_cap_on_status()
+        elif index_short:
+            self._note_window_end_on_status()
         self._maybe_grow_window(ignore_worker=worker)
 
     def _on_window_error(self, _error_text) -> None:
@@ -1026,7 +1033,20 @@ class SearchController(QObject):
             hint = str(self.parent_window.texts.get("search_window_cap_hint") or "").strip()
             if hint and hint not in status_text:
                 status_text = f"{status_text} · {hint}"
+        elif getattr(self, "_window_ended", False):
+            hint = str(self.parent_window.texts.get("search_window_end_hint") or "").strip()
+            if hint and hint not in status_text:
+                status_text = f"{status_text} · {hint}"
         self.parent_window.search_page.lbl_status.setText(status_text)
+
+    def _note_window_end_on_status(self) -> None:
+        """A larger fetch added nothing, so the list is the whole index."""
+        label = self.parent_window.search_page.lbl_status
+        current = str(label.text() or "").strip()
+        hint = str(self.parent_window.texts.get("search_window_end_hint") or "").strip()
+        if not current or not hint or hint in current:
+            return
+        label.setText(f"{current} · {hint}")
 
     def _note_window_cap_on_status(self) -> None:
         """The list did not grow, so say why the window stopped."""
