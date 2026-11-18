@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import unittest
 from unittest.mock import MagicMock, patch
@@ -15,14 +16,56 @@ from src.domain.search_hit import SearchHit
 from src.services.search_result_groups import group_hit_batches, group_search_hits
 
 _SCALE = 2048
+_WINDOW_SQL = re.compile(r"timestamp >= ([0-9eE.+\-]+) AND timestamp <= ([0-9eE.+\-]+)")
+
+
+class _Column:
+    def __init__(self, values):
+        self._values = values
+
+    def to_pylist(self):
+        return list(self._values)
+
+
+class _Arrow:
+    def __init__(self, rows):
+        self.num_rows = len(rows)
+        self._rows = rows
+
+    def __getitem__(self, key):
+        return _Column([row[key] for row in self._rows])
+
+
+def _rows_for_windows(sql: str) -> list[dict]:
+    """One frame at each requested center, plus a row that sits outside every window."""
+    windows = [(float(lo), float(hi)) for lo, hi in _WINDOW_SQL.findall(sql)]
+    rows = [
+        {
+            "timestamp": (lo + hi) / 2.0,
+            "video_path": "D:/one.mp4",
+            "vector": [1.0, 0.0],
+        }
+        for lo, hi in windows
+    ]
+    if windows:
+        rows.append(
+            {
+                "timestamp": windows[0][0] - 5.0,
+                "video_path": "D:/one.mp4",
+                "vector": [0.0, 1.0],
+            }
+        )
+    return rows
 
 
 class _Query:
     def __init__(self, owner):
         self.owner = owner
+        self.sql = ""
 
     def where(self, sql):
-        self.owner.where_sql.append(sql)
+        self.sql = str(sql)
+        self.owner.where_sql.append(self.sql)
         return self
 
     def select(self, _columns):
@@ -32,17 +75,7 @@ class _Query:
         return self
 
     def to_arrow(self):
-        return _EmptyArrow()
-
-
-class _EmptyArrow:
-    num_rows = 0
-
-    def __getitem__(self, _key):
-        return self
-
-    def to_pylist(self):
-        return []
+        return _Arrow(_rows_for_windows(self.sql))
 
 
 class _Table:
@@ -85,6 +118,11 @@ class SearchScaleTests(unittest.TestCase):
         for sql in table.where_sql:
             self.assertLessEqual(sql.count("timestamp >="), _NEIGHBOR_CLAUSE_BATCH)
             self.assertLess(len(sql), 8000)
+        for index, rows in enumerate(grouped):
+            self.assertEqual(len(rows), 1, index)
+            self.assertAlmostEqual(float(rows[0].timestamp), float(index))
+            self.assertEqual(rows[0].video_path, "D:/one.mp4")
+            self.assertEqual(rows[0].vector.tolist(), [1.0, 0.0])
 
     def test_tag_statements_stay_short_for_a_long_id_list(self):
         from src.storage.evidence_tags_store import (
