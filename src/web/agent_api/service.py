@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import secrets
 import threading
 import time
@@ -58,6 +59,72 @@ def _host_requires_auth(host: str) -> bool:
     return str(host or "").strip().lower() not in _LOOPBACK_HOSTS
 
 
+_LOCAL_HOST_NAMES = frozenset({"localhost", "testserver"})
+_WILDCARD_BINDS = frozenset({"0.0.0.0", "::", ""})
+
+
+def _parse_host_header(value: str) -> tuple[str, int | None]:
+    """Return ``(hostname, port)``. An unusable header yields an empty name."""
+    text = str(value or "").strip()
+    if not text:
+        return "", None
+    if text.startswith("["):
+        end = text.find("]")
+        if end < 0:
+            return "", None
+        name = text[1:end].strip().lower()
+        rest = text[end + 1 :]
+        if not rest:
+            return name, None
+        if not rest.startswith(":"):
+            return "", None
+        port_text = rest[1:]
+        if not port_text.isdigit():
+            return "", None
+        return name, int(port_text)
+    if ":" in text:
+        name, _, port_text = text.rpartition(":")
+        if name and port_text.isdigit():
+            return name.strip().lower(), int(port_text)
+    return text.lower(), None
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_loopback_ip(host: str) -> bool:
+    try:
+        return bool(ipaddress.ip_address(host).is_loopback)
+    except ValueError:
+        return False
+
+
+def host_header_allowed(header: str, bind_host: str, port: int) -> bool:
+    """True when ``Host`` is this server, not an arbitrary DNS name.
+
+    Browsers put the name they looked up into ``Host``. A rebinding name can
+    resolve to this machine while still saying ``evil.example``. Team clients
+    use an IP literal, so names other than localhost are rejected. A wildcard
+    bind accepts any IP literal because the packet can arrive on any interface.
+    """
+    name, header_port = _parse_host_header(header)
+    if not name:
+        return False
+    if header_port is not None and int(header_port) != int(port):
+        return False
+    if name in _LOCAL_HOST_NAMES or _is_loopback_ip(name):
+        return True
+    bind = str(bind_host or "").strip().lower()
+    if bind in _WILDCARD_BINDS:
+        return _is_ip_literal(name)
+    return name == bind
+
+
 class AgentApiService:
     def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *, access_token: str | None = None):
         if _IMPORT_ERROR is not None:
@@ -78,6 +145,8 @@ class AgentApiService:
         self.app = FastAPI(title="VideoSeek Agent API", version=API_VERSION)
         if self.require_auth:
             self.app.middleware("http")(self._auth_middleware)
+        # Registered last so it runs before auth and route handlers.
+        self.app.middleware("http")(self._host_middleware)
         self._register_exception_handlers()
         self.app.get("/api/v1/health")(self._health)
         self.app.get("/api/v1/agent-starter")(self._agent_starter)
@@ -207,6 +276,14 @@ class AgentApiService:
                 status_code=401,
                 detail=api_error_payload("unauthorized", "Invalid or missing access token."),
             )
+
+    async def _host_middleware(self, request: Request, call_next):
+        if host_header_allowed(request.headers.get("host", ""), self.host, self.port):
+            return await call_next(request)
+        return JSONResponse(
+            status_code=400,
+            content=api_error_payload("invalid_host", "Unexpected Host header."),
+        )
 
     async def _auth_middleware(self, request: Request, call_next):
         try:

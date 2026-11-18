@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import time
 import zipfile
 from collections import deque
@@ -46,8 +47,32 @@ def flush_app_logs() -> None:
             note_swallowed(exc, "logging_utils.flush_app_logs")
 
 
+# Home-directory prefix only. The rest of the path stays so a shared log is still readable.
+_USER_DIR_PREFIX = re.compile(
+    r"(?i)(?:\\\\\?\\)?"
+    r"(?:[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/][^\\/\r\n]+"
+    r"|[\\/](?:Users|home)[\\/][^\\/\r\n]+)"
+)
+
+
+def redact_log_text(text: str) -> str:
+    """Replace a user-profile prefix with ``~``. Other paths are left as written."""
+    return _USER_DIR_PREFIX.sub("~", str(text or ""))
+
+
+def _redacted_log_bytes(path: str) -> bytes:
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    text = raw.decode("utf-8", errors="replace")
+    return redact_log_text(text).encode("utf-8")
+
+
 def export_logs_zip(dest_path: str, log_dir: str | None = None) -> int:
-    """Pack app.log and its rotated backups into a zip. Returns how many files were written."""
+    """Pack app.log and its rotated backups into a zip. Returns how many files were written.
+
+    The zip is what gets sent out, so user-profile prefixes are removed there.
+    The log files on disk stay intact for local debugging.
+    """
     root = str(log_dir or get_log_dir() or "").strip()
     dest = str(dest_path or "").strip()
     if not dest:
@@ -68,7 +93,7 @@ def export_logs_zip(dest_path: str, log_dir: str | None = None) -> int:
         os.makedirs(parent, exist_ok=True)
     with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in files:
-            archive.write(path, arcname=os.path.basename(path))
+            archive.writestr(os.path.basename(path), _redacted_log_bytes(path))
     return len(files)
 
 

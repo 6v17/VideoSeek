@@ -4,7 +4,7 @@ import time
 import unittest
 import zipfile
 
-from src.app.logging_utils import cleanup_old_logs, export_logs_zip
+from src.app.logging_utils import cleanup_old_logs, export_logs_zip, redact_log_text
 
 
 class LoggingUtilsTests(unittest.TestCase):
@@ -41,6 +41,23 @@ class LoggingUtilsTests(unittest.TestCase):
             with zipfile.ZipFile(dest) as archive:
                 self.assertEqual(set(archive.namelist()), {"app.log", "app.log.1"})
                 self.assertEqual(archive.read("app.log").decode("utf-8"), "hello-log")
+
+    def test_export_logs_zip_hides_the_user_profile(self):
+        with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as dst:
+            with open(os.path.join(src, "app.log"), "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(
+                    "open C:\\Users\\LiuWei\\Videos\\clip.mp4 and /home/liuwei/Videos/clip.mp4\n"
+                )
+            dest = os.path.join(dst, "out.zip")
+            export_logs_zip(dest, log_dir=src)
+            with zipfile.ZipFile(dest) as archive:
+                text = archive.read("app.log").decode("utf-8")
+            self.assertEqual(text, "open ~\\Videos\\clip.mp4 and ~/Videos/clip.mp4\n")
+            self.assertNotIn("LiuWei", text)
+            self.assertNotIn("liuwei", text)
+            with open(os.path.join(src, "app.log"), encoding="utf-8") as handle:
+                self.assertIn("LiuWei", handle.read())
+        self.assertEqual(redact_log_text("E:\\素材\\clip.mp4"), "E:\\素材\\clip.mp4")
 
     def test_export_logs_zip_rejects_an_empty_folder(self):
         with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as dst:

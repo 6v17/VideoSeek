@@ -912,5 +912,48 @@ class AgentApiPresetTests(unittest.TestCase):
         self.assertEqual(payload["file_path"], "C:/tmp/search_telemetry.json")
 
 
+class AgentApiHostHeaderTests(unittest.TestCase):
+    def test_host_header_allows_this_server_only(self):
+        from src.web.agent_api.service import host_header_allowed
+
+        self.assertTrue(host_header_allowed("127.0.0.1:8765", "127.0.0.1", 8765))
+        self.assertTrue(host_header_allowed("localhost", "127.0.0.1", 8765))
+        self.assertTrue(host_header_allowed("[::1]:8765", "127.0.0.1", 8765))
+        self.assertFalse(host_header_allowed("evil.example", "127.0.0.1", 8765))
+        self.assertFalse(host_header_allowed("127.0.0.1:80", "127.0.0.1", 8765))
+        self.assertFalse(host_header_allowed("evil.example:8765", "0.0.0.0", 8765))
+        self.assertTrue(host_header_allowed("192.168.1.5:8765", "0.0.0.0", 8765))
+        self.assertTrue(host_header_allowed("192.168.1.5:8765", "192.168.1.5", 8765))
+        self.assertFalse(host_header_allowed("10.0.0.8:8765", "192.168.1.5", 8765))
+
+    def test_request_with_a_foreign_host_is_rejected(self):
+        from fastapi.testclient import TestClient
+        from src.web.agent_api import AgentApiService
+
+        app = AgentApiService(host="127.0.0.1", port=8765).app
+        client = TestClient(app)
+        rejected = client.get("/nope", headers={"Host": "evil.example"})
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(rejected.json()["error"]["code"], "invalid_host")
+        allowed = client.get("/nope", headers={"Host": "127.0.0.1:8765"})
+        self.assertEqual(allowed.status_code, 404)
+
+    def test_lan_bind_accepts_an_ip_and_still_requires_the_token(self):
+        from fastapi.testclient import TestClient
+        from src.web.agent_api import AgentApiService
+
+        app = AgentApiService(host="0.0.0.0", port=8765, access_token="team-token").app
+        client = TestClient(app)
+        foreign = client.get("/nope", headers={"Host": "evil.example", "Authorization": "Bearer team-token"})
+        self.assertEqual(foreign.status_code, 400)
+        missing = client.get("/nope", headers={"Host": "192.168.1.5:8765"})
+        self.assertEqual(missing.status_code, 401)
+        present = client.get(
+            "/nope",
+            headers={"Host": "192.168.1.5:8765", "Authorization": "Bearer team-token"},
+        )
+        self.assertEqual(present.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()
