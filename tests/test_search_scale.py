@@ -171,6 +171,90 @@ class SearchScaleTests(unittest.TestCase):
             f"Done 0.71s · {len(incoming)} · End of the results"
         )
 
+    def test_a_full_ten_thousand_reply_that_adds_rows_is_capped(self):
+        from PySide6.QtCore import QObject
+
+        from src.storage.config_store import SEARCH_TOP_K_MAX
+        from ui.controllers.search_controller import SearchController
+
+        parent = QObject()
+        parent.texts = {
+            "search_done": "Done {duration:.2f}s · {count}",
+            "search_window_end_hint": "End of the results",
+            "search_window_cap_hint": "Reached the 10,000 limit",
+        }
+        parent.search_page = MagicMock()
+        controller = SearchController(parent)
+        controller.worker = MagicMock()
+        controller._last_search_duration = 0.71
+        controller._result_display_context = {"search_kind": "image"}
+        controller._window_epoch = 0
+        incoming = _hits(SEARCH_TOP_K_MAX, gap=30.0)
+        prior = incoming[: SEARCH_TOP_K_MAX - 400]
+        controller._source_hits = list(prior)
+        controller._more_worker = MagicMock(
+            window_epoch=0,
+            window_limit=SEARCH_TOP_K_MAX,
+            hit_vectors=None,
+        )
+        seen = {}
+
+        def _append(rows, vectors):
+            seen["count"] = len(rows)
+            controller._all_results = list(incoming)
+            controller._update_results_status_text(incoming, {"search_kind": "image"})
+
+        with patch.object(controller, "sender", return_value=controller._more_worker), patch.object(
+            controller, "_append_grouped_batch", side_effect=_append
+        ):
+            controller._on_window_ready(incoming)
+
+        self.assertEqual(seen["count"], 400)
+        self.assertEqual(len(incoming), SEARCH_TOP_K_MAX)
+        self.assertTrue(controller._window_capped)
+        self.assertTrue(controller._window_exhausted)
+        self.assertFalse(controller._window_ended)
+        parent.search_page.lbl_status.setText.assert_called_with(
+            f"Done 0.71s · {SEARCH_TOP_K_MAX} · Reached the 10,000 limit"
+        )
+
+    def test_a_full_ten_thousand_reply_with_nothing_new_marks_the_cap(self):
+        from PySide6.QtCore import QObject
+
+        from src.storage.config_store import SEARCH_TOP_K_MAX
+        from ui.controllers.search_controller import SearchController
+
+        parent = QObject()
+        parent.texts = {
+            "search_done": "Done {duration:.2f}s · {count}",
+            "search_window_end_hint": "End of the results",
+            "search_window_cap_hint": "Reached the 10,000 limit",
+        }
+        parent.search_page = MagicMock()
+        parent.search_page.lbl_status.text.return_value = f"Done 0.71s · {SEARCH_TOP_K_MAX}"
+        controller = SearchController(parent)
+        controller._window_epoch = 0
+        incoming = _hits(SEARCH_TOP_K_MAX, gap=30.0)
+        controller._source_hits = list(incoming)
+        controller._more_worker = MagicMock(
+            window_epoch=0,
+            window_limit=SEARCH_TOP_K_MAX,
+            hit_vectors=None,
+        )
+
+        with patch.object(controller, "sender", return_value=controller._more_worker), patch.object(
+            controller, "_append_grouped_batch"
+        ) as append:
+            controller._on_window_ready(incoming)
+
+        append.assert_not_called()
+        self.assertTrue(controller._window_capped)
+        self.assertTrue(controller._window_exhausted)
+        self.assertFalse(controller._window_ended)
+        parent.search_page.lbl_status.setText.assert_called_with(
+            f"Done 0.71s · {SEARCH_TOP_K_MAX} · Reached the 10,000 limit"
+        )
+
     def test_grouping_thousands_of_videos_stays_block_shaped(self):
         count = _SCALE
         hits = _hits(count, gap=30.0)
