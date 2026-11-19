@@ -450,13 +450,27 @@ def _gui_launch_command() -> tuple[list[str], str]:
     return [sys.executable], os.path.dirname(os.path.abspath(sys.executable))
 
 
+def _mcp_client_env() -> dict[str, str]:
+    """Env keys written into a client config.
+
+    Cursor merges these onto the system environment. Some clients pass only
+    this map. Windows Python then never sees SystemRoot and aborts in hash
+    initialization before main(). A short Path is not included: clients that
+    merge would replace the inherited Path with it.
+    """
+    env = {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    if sys.platform != "win32":
+        return env
+    system_root = str(os.environ.get("SystemRoot") or os.environ.get("SYSTEMROOT") or r"C:\Windows")
+    env["SystemRoot"] = system_root
+    return env
+
+
 def cursor_mcp_config() -> dict[str, Any]:
     """Cursor mcp.json fragment. Packaged builds call the exe; source uses Python."""
     from src.infra.paths import get_app_install_dir, is_standalone_app
 
-    # Interpreter startup reads these before main(). The server also reconfigures
-    # its pipes, so a client that drops env still gets UTF-8 on the wire.
-    utf8_env = {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    client_env = _mcp_client_env()
     if is_standalone_app():
         return {
             "mcpServers": {
@@ -464,7 +478,7 @@ def cursor_mcp_config() -> dict[str, Any]:
                     "command": sys.executable,
                     "args": ["--mcp-stdio"],
                     "cwd": get_app_install_dir(),
-                    "env": utf8_env,
+                    "env": client_env,
                 }
             }
         }
@@ -474,7 +488,7 @@ def cursor_mcp_config() -> dict[str, Any]:
                 "command": sys.executable,
                 "args": ["-m", "src.web.mcp_server"],
                 "cwd": repo_root(),
-                "env": utf8_env,
+                "env": client_env,
             }
         }
     }

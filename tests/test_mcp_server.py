@@ -68,6 +68,9 @@ class McpProtocolTests(unittest.TestCase):
         self.assertTrue(server["cwd"])
         self.assertEqual(server["env"]["PYTHONUTF8"], "1")
         self.assertEqual(server["env"]["PYTHONIOENCODING"], "utf-8")
+        self.assertNotIn("Path", server["env"])
+        if sys.platform == "win32":
+            self.assertTrue(server["env"]["SystemRoot"])
 
     def test_packaged_cursor_config_calls_the_exe(self):
         with patch("src.infra.paths.is_standalone_app", return_value=True):
@@ -78,6 +81,22 @@ class McpProtocolTests(unittest.TestCase):
         self.assertEqual(server["cwd"], "D:/VideoSeek")
         self.assertTrue(server["command"])
         self.assertEqual(server["env"]["PYTHONIOENCODING"], "utf-8")
+        self.assertNotIn("Path", server["env"])
+
+    def test_windows_client_env_keeps_system_root_without_a_short_path(self):
+        with patch.dict(os.environ, {"SystemRoot": r"D:\Win"}, clear=False):
+            env = cursor_mcp_config()["mcpServers"]["videoseek"]["env"]
+        if sys.platform == "win32":
+            self.assertEqual(env["SystemRoot"], r"D:\Win")
+        else:
+            self.assertNotIn("SystemRoot", env)
+        self.assertNotIn("Path", env)
+        self.assertEqual(env["PYTHONUTF8"], "1")
+
+        with patch.dict(os.environ, {"SystemRoot": ""}, clear=False):
+            bare = cursor_mcp_config()["mcpServers"]["videoseek"]["env"]
+        if sys.platform == "win32":
+            self.assertEqual(bare["SystemRoot"], r"C:\Windows")
 
     def test_tool_list_is_utf8_when_stdout_locale_is_gbk(self):
         raw = io.BytesIO()
