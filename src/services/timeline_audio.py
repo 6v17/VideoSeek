@@ -6,6 +6,8 @@ import os
 import re
 from typing import Any, Dict, Mapping, Optional
 
+from src.app.logging_utils import note_swallowed
+
 
 def probe_audio_duration_seconds(path: str) -> Optional[float]:
     """Best-effort duration of a local audio file. None when it cannot be read."""
@@ -71,7 +73,8 @@ def _duration_from_mediainfo(path: str) -> Optional[float]:
         return None
     try:
         info = MediaInfo.parse(path)
-    except Exception:
+    except Exception as exc:
+        note_swallowed(exc, "src/services/timeline_audio.py:_duration_from_mediainfo")
         return None
     general = None
     for track in getattr(info, "tracks", []) or []:
@@ -96,7 +99,8 @@ def _duration_from_ffmpeg(path: str) -> Optional[float]:
 
     try:
         from src.infra.ffmpeg_paths import get_ffmpeg_path
-    except Exception:
+    except Exception as exc:
+        note_swallowed(exc, "src/services/timeline_audio.py:_duration_from_ffmpeg")
         return None
     ffmpeg = get_ffmpeg_path()
     if not ffmpeg:
@@ -106,7 +110,8 @@ def _duration_from_ffmpeg(path: str) -> Optional[float]:
         from src.infra.win_process import hidden_subprocess_kwargs
 
         run_kwargs = hidden_subprocess_kwargs()
-    except Exception:
+    except Exception as exc:
+        note_swallowed(exc, "src/services/timeline_audio.py:hidden_subprocess_kwargs")
         run_kwargs = {}
     try:
         result = subprocess.run(

@@ -318,7 +318,7 @@ class McpToolRoutingTests(unittest.TestCase):
         result = self._call(api, "export_timeline", {"format": "jianying", "items": items})
         text = result["result"]["content"][0]["text"]
         self.assertTrue(result["result"]["isError"])
-        self.assertIn("60", text)
+        self.assertIn("180", text)
         self.assertIn("manifest", text)
 
     def test_bool_query_uses_lowercase_true(self):
