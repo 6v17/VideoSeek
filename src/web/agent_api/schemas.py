@@ -80,6 +80,7 @@ class AgentSearchRequest(BaseModel):
     # Opt-in JPEG on each distinct shot. Off by default so a normal search stays small.
     return_thumbs: Optional[bool] = None
     thumb_max_edge: Optional[int] = None
+    thumb_limit: Optional[int] = None
 
 
 class AgentBatchSearchExportOptions(BaseModel):
@@ -112,6 +113,7 @@ class AgentBatchSearchRequest(BaseModel):
     pad_after_sec: float = _pad_field(DEFAULT_FRAME_PAD_AFTER_SEC)
     return_thumbs: Optional[bool] = None
     thumb_max_edge: Optional[int] = None
+    thumb_limit: Optional[int] = None
     export: Optional[AgentBatchSearchExportOptions] = None
 
 

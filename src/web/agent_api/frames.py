@@ -18,6 +18,7 @@ MAX_BATCH_FRAME_EXTRACT = 16
 DEFAULT_SEARCH_THUMB_EDGE = 320
 _MAX_SEARCH_THUMB_EDGE = 640
 _SEARCH_THUMB_JPEG_QUALITY = 80
+DEFAULT_SEARCH_THUMB_COUNT = 4
 MAX_SEARCH_THUMBS = 16
 
 
@@ -53,6 +54,17 @@ def _clamp_max_edge(max_edge: Optional[int]) -> int:
     except (TypeError, ValueError) as exc:
         raise ValueError("max_edge must be an integer") from exc
     return max(_MIN_FRAME_MAX_EDGE, min(_MAX_FRAME_MAX_EDGE, value))
+
+
+def clamp_search_thumb_limit(limit: Optional[int]) -> int:
+    """How many distinct shots get a picture. Omitted requests stay at four."""
+    if limit is None:
+        return DEFAULT_SEARCH_THUMB_COUNT
+    try:
+        value = int(limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("thumb_limit must be an integer") from exc
+    return max(1, min(MAX_SEARCH_THUMBS, value))
 
 
 def clamp_search_thumb_edge(max_edge: Optional[int]) -> int:

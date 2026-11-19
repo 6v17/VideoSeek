@@ -317,6 +317,19 @@ class AgentApiHelperTests(unittest.TestCase):
         self.assertEqual(merged.pad_before_sec, 1.0)
         self.assertEqual(merged.pad_after_sec, 3.0)
 
+    def test_batch_line_inherits_page_size_and_thumbs(self):
+        from src.web.agent_api.search import _merge_search_request
+
+        merged = _merge_search_request(
+            AgentSearchRequest(query="他们说那是被神抛弃的孩子"),
+            AgentBatchSearchRequest(top_k=2, return_thumbs=True, thumb_limit=2, thumb_max_edge=160),
+        )
+        self.assertEqual(merged.query, "他们说那是被神抛弃的孩子")
+        self.assertEqual(merged.top_k, 2)
+        self.assertIs(merged.return_thumbs, True)
+        self.assertEqual(merged.thumb_limit, 2)
+        self.assertEqual(merged.thumb_max_edge, 160)
+
     @patch("src.web.agent_api.health._index_snapshot")
     def test_build_health_payload_includes_timeout_fields(self, mock_snapshot):
         mock_snapshot.return_value = {
@@ -514,11 +527,15 @@ class AgentApiSearchTests(unittest.TestCase):
         self.assertEqual(labeled[0].match_kind, "chunk")
 
     def test_search_thumb_edge_stays_small(self):
-        from src.web.agent_api.frames import clamp_search_thumb_edge
+        from src.web.agent_api.frames import clamp_search_thumb_edge, clamp_search_thumb_limit
 
         self.assertEqual(clamp_search_thumb_edge(None), 320)
+        self.assertEqual(clamp_search_thumb_edge(160), 160)
         self.assertEqual(clamp_search_thumb_edge(900), 640)
         self.assertEqual(clamp_search_thumb_edge(10), 64)
+        self.assertEqual(clamp_search_thumb_limit(None), 4)
+        self.assertEqual(clamp_search_thumb_limit(16), 16)
+        self.assertEqual(clamp_search_thumb_limit(40), 16)
         with self.assertRaises(ValueError):
             clamp_search_thumb_edge("no")
 
@@ -569,6 +586,7 @@ class AgentApiSearchTests(unittest.TestCase):
         self.assertEqual(payload["meta"]["thumbs_attached"], 2)
         self.assertEqual(payload["meta"]["thumbs_omitted"], 0)
         self.assertEqual(payload["meta"]["thumb_max_edge"], 320)
+        self.assertEqual(payload["meta"]["thumb_limit"], 4)
         self.assertEqual(payload["hits"][0]["thumb_time_sec"], 4.0)
         self.assertEqual(payload["hits"][1]["duplicate_of_rank"], 1)
         self.assertNotIn("thumb_base64", payload["hits"][1])
@@ -597,10 +615,19 @@ class AgentApiSearchTests(unittest.TestCase):
         payload = execute_agent_search(
             AgentSearchRequest(query="crowd", top_k=17, mode="frame", return_thumbs=True)
         )
+        self.assertEqual(payload["meta"]["thumbs_attached"], 4)
+        self.assertEqual(payload["meta"]["thumb_limit"], 4)
+        self.assertEqual(payload["meta"]["thumbs_omitted"], 13)
+        self.assertNotIn("thumb_base64", payload["hits"][4])
+        self.assertEqual(mock_encode.call_count, 4)
+
+        payload = execute_agent_search(
+            AgentSearchRequest(
+                query="crowd", top_k=17, mode="frame", return_thumbs=True, thumb_limit=16
+            )
+        )
         self.assertEqual(payload["meta"]["thumbs_attached"], 16)
         self.assertEqual(payload["meta"]["thumbs_omitted"], 1)
-        self.assertNotIn("thumb_base64", payload["hits"][16])
-        self.assertEqual(mock_encode.call_count, 16)
 
     @patch("src.web.agent_api.search._index_snapshot")
     @patch("src.web.agent_api.search.run_search")
@@ -765,6 +792,29 @@ class AgentApiBatchTests(unittest.TestCase):
         self.assertEqual(payload["meta"]["succeeded"], 1)
         self.assertEqual(payload["meta"]["failed"], 1)
         self.assertEqual(len(payload["results"]), 2)
+
+    @patch("src.web.agent_api.search.execute_agent_search")
+    @patch("src.web.agent_api.search._index_snapshot")
+    def test_batch_keeps_each_line(self, mock_snapshot, mock_search):
+        mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
+        mock_search.side_effect = [
+            {"ok": True, "query": "第一句", "hits": [{"rank": 1}], "meta": {}},
+            {"ok": True, "query": "第二句", "hits": [{"rank": 1}, {"rank": 2}], "meta": {}},
+        ]
+        payload = execute_agent_batch_search(
+            AgentBatchSearchRequest(
+                queries=[
+                    AgentSearchRequest(query="第一句"),
+                    AgentSearchRequest(query="第二句"),
+                ],
+                top_k=2,
+                return_thumbs=True,
+            )
+        )
+        self.assertEqual([item["query"] for item in payload["results"]], ["第一句", "第二句"])
+        self.assertEqual(len(payload["results"][1]["hits"]), 2)
+        self.assertEqual(mock_search.call_args_list[0].args[0].top_k, 2)
+        self.assertIs(mock_search.call_args_list[0].args[0].return_thumbs, True)
 
     @patch("src.web.agent_api.search.execute_agent_search")
     @patch("src.web.agent_api.search._index_snapshot")

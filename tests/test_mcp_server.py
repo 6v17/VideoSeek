@@ -55,6 +55,10 @@ class McpProtocolTests(unittest.TestCase):
         resources = handle_message({"jsonrpc": "2.0", "id": 3, "method": "resources/list"}, api)
         uris = [item["uri"] for item in resources["result"]["resources"]]
         self.assertEqual(uris, ["videoseek://status", "videoseek://presets"])
+        search = next(item for item in tools["result"]["tools"] if item["name"] == "search")
+        self.assertIn("不会并成一页", search["description"])
+        query_fields = search["inputSchema"]["properties"]["queries"]["items"]["properties"]
+        self.assertIn("query", query_fields)
 
     def test_notification_has_no_response(self):
         stdout = io.StringIO()
@@ -219,6 +223,24 @@ class McpToolRoutingTests(unittest.TestCase):
         self.assertNotIn("abcd", text)
         self.assertEqual(result["result"]["content"][1]["type"], "image")
         self.assertEqual(result["result"]["content"][1]["data"], "abcd")
+
+    def test_search_thumbs_leave_the_json_as_image_blocks(self):
+        api = FakeApi()
+        api.next_payload = {
+            "ok": True,
+            "hits": [
+                {"rank": 1, "video_path": "D:/a.mp4", "thumb_base64": "aaaa", "thumb_time_sec": 1.0},
+                {"rank": 2, "video_path": "D:/b.mp4", "thumb_base64": "bbbb", "thumb_time_sec": 2.0},
+            ],
+        }
+        result = self._call(api, "search", {"query": "雨夜", "return_thumbs": True})
+        text = result["result"]["content"][0]["text"]
+        self.assertNotIn("aaaa", text)
+        self.assertNotIn("bbbb", text)
+        self.assertEqual(text.count("[image]"), 2)
+        images = [item for item in result["result"]["content"] if item["type"] == "image"]
+        self.assertEqual([item["data"] for item in images], ["aaaa", "bbbb"])
+        self.assertEqual(images[0]["mimeType"], "image/jpeg")
 
     def test_manifest_and_timeline_use_different_routes(self):
         api = FakeApi()

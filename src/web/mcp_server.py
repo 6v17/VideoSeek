@@ -101,11 +101,14 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "search",
         "description": (
-            "在已索引视频里搜索。一次用 query 或 preset_id；多条用 queries；"
+            "在已索引视频里搜索。一次用 query 或 preset_id。"
+            "多句文案放进 queries：每一句各自返回 hits，不会并成一页。"
+            "外层的 top_k、return_thumbs、thumb_limit、thumb_max_edge 套到每一句。"
             "或用 image_folder 把文件夹里的图片各搜一次。"
             "search_kind 为 visual（默认画面）、dialogue（台词）或 tags。"
-            "默认是路径和时间。确认画面时加 return_thumbs=true，"
-            "每条带一张最长边 320 的 JPEG（thumb_base64），最多 16 张；"
+            "默认是路径和时间。确认画面时加 return_thumbs=true。"
+            "图以图片内容块返回，不嵌在 JSON 里。默认前 4 个不同镜头，"
+            "thumb_limit 最多 16。thumb_max_edge 用 160 粗筛或 320。"
             "标了 duplicate_of_rank 的行不带图。要更大的图再调用 extract_frames。"
             "score 是余弦相似度，不是概率。meta.score_spread.gap 是第 1 条和第 5 条"
             "（不足 5 条则最后一条）的分差，接近 0 表示这一页挤在一起。"
@@ -116,7 +119,20 @@ _TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
-                "queries": {"type": "array", "items": {"type": "object"}},
+                "queries": {
+                    "type": "array",
+                    "description": "每一句一个对象，各自返回 hits，不并成一页。",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "preset_id": {"type": "string"},
+                            "query_type": {"type": "string", "enum": ["text", "image_path"]},
+                            "image_path": {"type": "string"},
+                            "top_k": {"type": "integer"},
+                        },
+                    },
+                },
                 "preset_id": {"type": "string"},
                 "query_type": {"type": "string", "enum": ["text", "image_path"]},
                 "image_path": {"type": "string"},
@@ -143,6 +159,7 @@ _TOOLS: list[dict[str, Any]] = [
                 "locate_score_margin": {"type": "number"},
                 "return_thumbs": {"type": "boolean"},
                 "thumb_max_edge": {"type": "integer"},
+                "thumb_limit": {"type": "integer"},
                 "continue_on_error": {"type": "boolean"},
             },
             "additionalProperties": False,
@@ -283,6 +300,7 @@ _SEARCH_FIELDS = (
     "locate_score_margin",
     "return_thumbs",
     "thumb_max_edge",
+    "thumb_limit",
 )
 _BATCH_FIELDS = (
     "queries",
@@ -298,6 +316,7 @@ _BATCH_FIELDS = (
     "scope",
     "return_thumbs",
     "thumb_max_edge",
+    "thumb_limit",
 )
 
 
@@ -863,7 +882,7 @@ def _lift_images(payload: Any) -> tuple[Any, list[dict[str, str]]]:
         if isinstance(node, dict):
             copied: dict[str, Any] = {}
             for key, value in node.items():
-                if key == "image_base64" and isinstance(value, str) and value:
+                if key in {"image_base64", "thumb_base64"} and isinstance(value, str) and value:
                     images.append(
                         {
                             "type": "image",

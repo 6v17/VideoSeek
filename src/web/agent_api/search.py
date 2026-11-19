@@ -598,16 +598,17 @@ def _attach_hit_thumbs(body, hits: List[SearchHit], payloads: List[Dict[str, Any
     """JPEG for each distinct shot. Rows marked duplicate_of_rank reuse the earlier picture."""
     if not bool(getattr(body, "return_thumbs", False)):
         return {}
-    from .frames import MAX_SEARCH_THUMBS, clamp_search_thumb_edge, encode_search_thumb
+    from .frames import clamp_search_thumb_edge, clamp_search_thumb_limit, encode_search_thumb
 
     edge = clamp_search_thumb_edge(getattr(body, "thumb_max_edge", None))
+    limit = clamp_search_thumb_limit(getattr(body, "thumb_limit", None))
     attached = 0
     failed = 0
     omitted = 0
     for hit, payload in zip(hits, payloads):
         if payload.get("duplicate_of_rank"):
             continue
-        if attached >= MAX_SEARCH_THUMBS:
+        if attached >= limit:
             omitted += 1
             continue
         path = str(payload.get("video_path") or "").strip()
@@ -622,6 +623,7 @@ def _attach_hit_thumbs(body, hits: List[SearchHit], payloads: List[Dict[str, Any
         "thumbs_failed": failed,
         "thumbs_omitted": omitted,
         "thumb_max_edge": edge,
+        "thumb_limit": limit,
     }
 
 
@@ -974,9 +976,10 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
     # Request-scoped cleanup: thread-pool workers reuse threads; never leave a prior
     # search's index-step / edge lookup for the next request on the same thread.
     if bool(getattr(body, "return_thumbs", False)):
-        from .frames import clamp_search_thumb_edge
+        from .frames import clamp_search_thumb_edge, clamp_search_thumb_limit
 
         clamp_search_thumb_edge(getattr(body, "thumb_max_edge", None))
+        clamp_search_thumb_limit(getattr(body, "thumb_limit", None))
     from src.services.search_hit_utils import reset_search_index_steps
 
     reset_search_index_steps()
@@ -1316,6 +1319,11 @@ def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchReque
             item.thumb_max_edge
             if "thumb_max_edge" in item.model_fields_set
             else batch.thumb_max_edge
+        ),
+        thumb_limit=(
+            item.thumb_limit
+            if "thumb_limit" in item.model_fields_set
+            else batch.thumb_limit
         ),
     )
 
