@@ -34,7 +34,8 @@ _SYNC_ACCEPT_TIMEOUT_SEC = 60
 # add/refresh may scan folders before they accept.
 _SCAN_ACCEPT_TIMEOUT_SEC = 180
 _TIMELINE_TIMEOUT_HINT = (
-    "timeline 输出上限 60 秒，超时返回 engine_busy；重试前减少 items 或改 output=manifest。"
+    "一条草稿最多 256 段。timeline 输出上限 180 秒，超时返回 engine_busy；"
+    "重试前减少 items 或改 output=manifest。"
 )
 _HEALTH_WAIT_SEC = 20.0
 _MSG_API_OFF = (
@@ -104,6 +105,7 @@ _TOOLS: list[dict[str, Any]] = [
             "在已索引视频里搜索。一次用 query 或 preset_id。"
             "多句文案放进 queries：每一句各自返回 hits，不会并成一页。"
             "外层的 top_k、return_thumbs、thumb_limit、thumb_max_edge 套到每一句。"
+            "不传 mode 就是 chunk，起止原样可用。只要一个时间点才传 frame。"
             "或用 image_folder 把文件夹里的图片各搜一次。"
             "search_kind 为 visual（默认画面）、dialogue（台词）或 tags。"
             "默认是路径和时间。确认画面时加 return_thumbs=true。"
@@ -112,7 +114,8 @@ _TOOLS: list[dict[str, Any]] = [
             "标了 duplicate_of_rank 的行不带图。要更大的图再调用 extract_frames。"
             "score 是余弦相似度，不是概率。meta.score_spread.gap 是第 1 条和第 5 条"
             "（不足 5 条则最后一条）的分差，接近 0 表示这一页挤在一起。"
-            "duplicate_of_rank 指向同一镜头里更靠前的一条；same_shot_count 只统计这一页。"
+            "默认 dedupe=true：同一镜头只留 rank 最低的一条，并带 same_shot_count。"
+            "meta.input / kept / dropped 说明删了几条。dedupe=false 才返回整页原始结果。"
             + _PATH_RULE
         ),
         "inputSchema": {
@@ -139,7 +142,7 @@ _TOOLS: list[dict[str, Any]] = [
                 "image_folder": {"type": "string"},
                 "search_kind": {"type": "string", "enum": ["visual", "dialogue", "tags"]},
                 "top_k": {"type": "integer"},
-                "mode": {"type": "string", "enum": ["frame", "chunk"]},
+                "mode": {"type": "string", "enum": ["chunk", "frame"]},
                 "min_score": {"type": "number"},
                 "search_precision_mode": {"type": "string", "enum": ["fast", "precise"]},
                 "match_mode": {"type": "string", "enum": ["exact", "fuzzy", "auto"]},
@@ -160,6 +163,7 @@ _TOOLS: list[dict[str, Any]] = [
                 "return_thumbs": {"type": "boolean"},
                 "thumb_max_edge": {"type": "integer"},
                 "thumb_limit": {"type": "integer"},
+                "dedupe": {"type": "boolean"},
                 "continue_on_error": {"type": "boolean"},
             },
             "additionalProperties": False,
@@ -200,7 +204,8 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "export_clips",
         "description": (
-            "导出 mp4 片段。一条可以用 output_dir；多条时每条都要自己的 output_path。"
+            "把一段落成 mp4 文件。成片不要用这个，改起来麻烦，用 export_timeline 写草稿。"
+            "一条可以用 output_dir；多条时每条都要自己的 output_path。"
             "encode_mode 用 copy（快，会贴到前一个关键帧）或 original（切点更准）。"
             "duration_sec 是计划窗口，actual_duration_sec 是成片时长。"
             + _PATH_RULE
@@ -239,7 +244,11 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "export_timeline",
         "description": (
-            "output=timeline 时把多段写成剪映草稿、达芬奇 FCPXML 或 Premiere XML。"
+            "成片默认走这里。把 search 的 chunk 起止原样写成剪映草稿、达芬奇 FCPXML 或 Premiere XML。"
+            "配乐传 audio.path，start_sec 默认 0，铺到成片结尾；文件更短就播到文件结束。"
+            "volume 默认 1，fade_out_sec 是结尾淡出。"
+            "默认 dedupe=true：按 video_path + 起点（±1 秒）去重，忽略 end；"
+            "meta.input / kept / dropped 说明删了几条。dedupe=false 保留原始列表。"
             + _TIMELINE_TIMEOUT_HINT
             + "output=manifest 时只生成清单 JSON，不写剪辑工程。"
             "片段的路径和时间必须来自 search。"
@@ -251,6 +260,17 @@ _TOOLS: list[dict[str, Any]] = [
                 "output": {"type": "string", "enum": ["timeline", "manifest"]},
                 "format": {"type": "string", "enum": ["jianying", "fcpxml", "fcp7_xml"]},
                 "items": {"type": "array", "items": {"type": "object"}},
+                "audio": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "start_sec": {"type": "number"},
+                        "volume": {"type": "number"},
+                        "fade_out_sec": {"type": "number"},
+                    },
+                    "required": ["path"],
+                    "additionalProperties": False,
+                },
                 "project": {"type": "string"},
                 "write_path": {"type": "string"},
                 "output_dir": {"type": "string"},
@@ -301,6 +321,7 @@ _SEARCH_FIELDS = (
     "return_thumbs",
     "thumb_max_edge",
     "thumb_limit",
+    "dedupe",
 )
 _BATCH_FIELDS = (
     "queries",
@@ -317,6 +338,7 @@ _BATCH_FIELDS = (
     "return_thumbs",
     "thumb_max_edge",
     "thumb_limit",
+    "dedupe",
 )
 
 
@@ -804,7 +826,11 @@ def _export_timeline(arguments: Mapping[str, Any], api: AgentHttpClient) -> tupl
         "drafts_dir": arguments.get("drafts_dir"),
         "draft_name": arguments.get("draft_name"),
     }
-    status, payload = api.request_json("POST", "/api/v1/export/timeline", body=body, timeout=75)
+    if arguments.get("audio"):
+        body["audio"] = arguments["audio"]
+    if "dedupe" in arguments:
+        body["dedupe"] = arguments["dedupe"]
+    status, payload = api.request_json("POST", "/api/v1/export/timeline", body=body, timeout=200)
     if _is_engine_busy(status, payload):
         raise ValueError(_TIMELINE_TIMEOUT_HINT)
     return status, payload
@@ -844,6 +870,7 @@ def _slim_status(payload: Mapping[str, Any], api_base_url: str) -> dict[str, Any
         "limits": {
             "batch_search": payload.get("max_batch_queries"),
             "frames_per_call": payload.get("max_batch_frame_extract"),
+            "timeline_clips": payload.get("max_timeline_clips"),
             "timeout_sec": payload.get("search_timeout_sec"),
         },
         "api_base_url": base,

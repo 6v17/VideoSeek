@@ -656,10 +656,10 @@ class AgentApiService:
         try:
             payload = await asyncio.wait_for(
                 asyncio.to_thread(execute_agent_timeline_export, body),
-                timeout=60.0,
+                timeout=180.0,
             )
         except asyncio.TimeoutError:
-            raise_api_error(503, "engine_busy", "Timeline export timed out after 60 seconds.")
+            raise_api_error(503, "engine_busy", "Timeline export timed out after 180 seconds.")
         except ValueError as exc:
             raise_api_error(400, "invalid_request", str(exc))
         except FileNotFoundError as exc:

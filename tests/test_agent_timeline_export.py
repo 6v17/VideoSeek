@@ -7,7 +7,13 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from src.web.agent_api.schemas import AgentTimelineClipItem, AgentTimelineExportRequest
+from src.services.manifest_export_service import dedupe_shots_by_start
+from src.services.shot_list_service import ShotListItem
+from src.web.agent_api.schemas import (
+    AgentTimelineAudio,
+    AgentTimelineClipItem,
+    AgentTimelineExportRequest,
+)
 from src.web.agent_api.timeline_export import (
     execute_agent_timeline_export,
     normalize_timeline_items,
@@ -16,6 +22,48 @@ from src.web.agent_api.timeline_export import (
 
 
 class TimelineNormalizeTests(unittest.TestCase):
+    def test_timeline_dedupes_by_path_and_start(self):
+        shots = [
+            ShotListItem("1", "D:/a.mp4", 10.0, 16.0, None, match_kind="chunk"),
+            ShotListItem("2", "D:/a.mp4", 10.8, 18.0, None, match_kind="chunk"),
+            ShotListItem("3", "D:/a.mp4", 10.0, 12.0, None, match_kind="chunk"),
+            ShotListItem("4", "D:/b.mp4", 1.0, 2.0, None, match_kind="chunk"),
+        ]
+        kept, meta = dedupe_shots_by_start(shots, enabled=True)
+        self.assertEqual([row.id for row in kept], ["1", "4"])
+        self.assertEqual(meta, {"input": 4, "kept": 2, "dropped": 2, "dedupe": True})
+        raw, raw_meta = dedupe_shots_by_start(shots, enabled=False)
+        self.assertEqual(len(raw), 4)
+        self.assertEqual(raw_meta["dropped"], 0)
+
+    def test_timeline_accepts_a_long_cut(self):
+        from src.web.agent_api.constants import MAX_TIMELINE_CLIPS
+
+        self.assertGreaterEqual(MAX_TIMELINE_CLIPS, 200)
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
+            path = handle.name
+            handle.write(b"fake")
+        try:
+            items = [
+                AgentTimelineClipItem(video_path=path, start_sec=float(i), end_sec=float(i) + 1.0)
+                for i in range(187)
+            ]
+            shots, skipped = normalize_timeline_items(items)
+            self.assertEqual(len(shots), 187)
+            self.assertEqual(skipped, [])
+            with self.assertRaises(ValueError) as ctx:
+                normalize_timeline_items(
+                    [
+                        AgentTimelineClipItem(
+                            video_path=path, start_sec=0.0, end_sec=1.0
+                        )
+                        for _ in range(MAX_TIMELINE_CLIPS + 1)
+                    ]
+                )
+            self.assertIn(str(MAX_TIMELINE_CLIPS), str(ctx.exception))
+        finally:
+            os.unlink(path)
+
     def test_point_and_range_items(self):
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
             path = handle.name
@@ -207,7 +255,76 @@ class TimelineExecuteTests(unittest.TestCase):
         self.assertEqual(payload["draft_name"], "VideoSeek导入-1")
         self.assertEqual(payload["clip_count"], 1)
         self.assertEqual(payload["export_path"], draft_path)
+        self.assertEqual(payload["meta"]["input"], 1)
+        self.assertEqual(payload["meta"]["kept"], 1)
+        self.assertEqual(payload["meta"]["dropped"], 0)
         mock_export.assert_called_once()
+        self.assertIsNone(mock_export.call_args.kwargs.get("audio"))
+
+    @patch(
+        "src.services.jianying_draft_service.export_shot_list_to_jianying_draft",
+    )
+    @patch(
+        "src.services.jianying_draft_service.is_jianying_draft_support_available",
+        return_value=True,
+    )
+    def test_jianying_dedupes_near_starts(self, _avail, mock_export):
+        with tempfile.TemporaryDirectory() as tmp:
+            video = self._video(tmp, "a.mp4")
+            mock_export.return_value = {
+                "draft_name": "cut",
+                "drafts_dir": tmp,
+                "draft_path": tmp,
+                "exported_count": 1,
+                "skipped": [],
+            }
+            body = AgentTimelineExportRequest(
+                format="jianying",
+                drafts_dir=tmp,
+                items=[
+                    AgentTimelineClipItem(video_path=video, start_sec=10.0, end_sec=16.0),
+                    AgentTimelineClipItem(video_path=video, start_sec=10.5, end_sec=20.0),
+                ],
+            )
+            payload = execute_agent_timeline_export(body)
+        self.assertEqual(payload["meta"]["input"], 2)
+        self.assertEqual(payload["meta"]["kept"], 1)
+        self.assertEqual(payload["meta"]["dropped"], 1)
+        self.assertEqual(len(mock_export.call_args.args[0]), 1)
+        self.assertAlmostEqual(mock_export.call_args.args[0][0].end_sec, 16.0)
+
+    @patch(
+        "src.services.jianying_draft_service.export_shot_list_to_jianying_draft",
+    )
+    @patch(
+        "src.services.jianying_draft_service.is_jianying_draft_support_available",
+        return_value=True,
+    )
+    def test_jianying_forwards_audio(self, _avail, mock_export):
+        with tempfile.TemporaryDirectory() as tmp:
+            music = os.path.join(tmp, "bed.mp3")
+            with open(music, "wb") as handle:
+                handle.write(b"fake")
+            mock_export.return_value = {
+                "draft_name": "cut",
+                "drafts_dir": tmp,
+                "draft_path": tmp,
+                "exported_count": 1,
+                "skipped": [],
+                "audio": {"path": music, "duration_sec": 5.0},
+            }
+            body = AgentTimelineExportRequest(
+                format="jianying",
+                drafts_dir=tmp,
+                items=[AgentTimelineClipItem(video_path=self._video(tmp, "a.mp4"), time_sec=5.0)],
+                audio=AgentTimelineAudio(path=music, fade_out_sec=2.0),
+            )
+            payload = execute_agent_timeline_export(body)
+        forwarded = mock_export.call_args.kwargs["audio"]
+        self.assertEqual(forwarded["path"], music)
+        self.assertEqual(forwarded["start_sec"], 0.0)
+        self.assertEqual(forwarded["fade_out_sec"], 2.0)
+        self.assertEqual(payload["audio"]["duration_sec"], 5.0)
 
 
 class TimelineHealthTests(unittest.TestCase):

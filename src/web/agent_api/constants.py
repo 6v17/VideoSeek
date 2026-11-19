@@ -18,6 +18,8 @@ _BATCH_TIMEOUT_MAX_SEC = 7200.0
 MAX_CONCURRENT_SEARCHES = 10
 DEFAULT_SEARCH_QUEUE_WAIT_SEC = 12.0
 MAX_BATCH_QUERIES = 64
+# Timeline drafts are one cut, not a search batch. 256 covers a 4–5 min 2-beat cut.
+MAX_TIMELINE_CLIPS = 256
 _BATCH_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 
 DEFAULT_FRAME_PAD_BEFORE_SEC = 3.0

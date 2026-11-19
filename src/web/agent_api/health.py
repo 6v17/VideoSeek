@@ -25,6 +25,7 @@ from .constants import (
     API_VERSION,
     _BATCH_TIMEOUT_FALLBACK_SEC,
     MAX_BATCH_QUERIES,
+    MAX_TIMELINE_CLIPS,
     _SEARCH_TIMEOUT_FAST_FALLBACK_SEC,
     _SEARCH_TIMEOUT_PRECISE_FALLBACK_SEC,
     get_max_concurrent_searches,
@@ -33,11 +34,11 @@ from .constants import (
 
 
 def _normalize_mode(mode: Optional[str]) -> str:
-    config = load_config()
-    normalized = str(mode or get_search_mode(config)).strip().lower()
-    if normalized not in {"frame", "chunk"}:
-        normalized = get_search_mode(config)
-    return normalized
+    """Omitted mode is a chunk. A frame point is only used when the caller asks."""
+    normalized = str(mode or "").strip().lower()
+    if normalized in {"frame", "chunk"}:
+        return normalized
+    return "chunk"
 
 
 def _agent_timeout_settings(config=None) -> Dict[str, float]:
@@ -292,6 +293,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "max_batch_queries": MAX_BATCH_QUERIES,
         "max_batch_export_clips": MAX_BATCH_EXPORT_CLIPS,
         "max_batch_frame_extract": _max_batch_frame_extract(),
+        "max_timeline_clips": MAX_TIMELINE_CLIPS,
         "batch_timeout_sec": timeouts["batch_timeout_sec"],
         "search_telemetry_enabled": is_telemetry_enabled(config),
         "dialogue_index_ready": dialogue_ready,

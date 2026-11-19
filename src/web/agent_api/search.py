@@ -586,6 +586,67 @@ def _annotate_repeated_shots(hits: List[SearchHit], payloads: List[Dict[str, Any
                 payloads[index]["duplicate_of"] = lead_id
 
 
+def _apply_search_dedupe(
+    hits: List[SearchHit],
+    payloads: List[Dict[str, Any]],
+    *,
+    dedupe: bool,
+) -> tuple[List[SearchHit], List[Dict[str, Any]], Dict[str, Any]]:
+    """Default: drop rows marked duplicate_of_rank; keep lead + same_shot_count."""
+    from src.services.manifest_export_service import dedupe_counts
+
+    input_n = len(payloads)
+    if not dedupe:
+        return hits, payloads, dedupe_counts(input_count=input_n, kept_count=input_n, dedupe=False)
+    kept_hits: List[SearchHit] = []
+    kept_payloads: List[Dict[str, Any]] = []
+    for hit, payload in zip(hits, payloads):
+        if payload.get("duplicate_of_rank"):
+            continue
+        kept_hits.append(hit)
+        kept_payloads.append(payload)
+    return (
+        kept_hits,
+        kept_payloads,
+        dedupe_counts(input_count=input_n, kept_count=len(kept_payloads), dedupe=True),
+    )
+
+
+def _finalize_visual_hits(
+    body,
+    hits: List[SearchHit],
+    payloads: List[Dict[str, Any]],
+    vectors,
+    config,
+) -> tuple[List[SearchHit], List[Dict[str, Any]], Dict[str, Any]]:
+    """Annotate repeats, optionally collapse, then attach thumbs."""
+    _annotate_repeated_shots(hits, payloads, vectors, config)
+    hits, payloads, counts = _apply_search_dedupe(
+        hits,
+        payloads,
+        dedupe=bool(getattr(body, "dedupe", True)),
+    )
+    thumb_meta = _attach_hit_thumbs(body, hits, payloads)
+    if thumb_meta:
+        counts = {**counts, **thumb_meta}
+    return hits, payloads, counts
+
+
+def _nonvisual_hit_meta(body, hits: List[SearchHit], payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Dialogue/tag pages do not collapse; still echo input/kept/dropped."""
+    from src.services.manifest_export_service import dedupe_counts
+
+    counts = dedupe_counts(
+        input_count=len(payloads),
+        kept_count=len(payloads),
+        dedupe=bool(getattr(body, "dedupe", True)),
+    )
+    thumb_meta = _attach_hit_thumbs(body, hits, payloads)
+    if thumb_meta:
+        counts.update(thumb_meta)
+    return counts
+
+
 def _thumb_time(hit: SearchHit) -> float:
     """Frame that scored. Chunk hits keep it on peak_sec; the row start is the segment."""
     peak = getattr(hit, "peak_sec", None)
@@ -1099,10 +1160,12 @@ def _execute_agent_search_work(body: AgentSearchRequest) -> Dict[str, Any]:
         preset = resolved.get("preset") or {}
         if preset.get("name"):
             response["preset_name"] = str(preset.get("name"))
-    _annotate_repeated_shots(hits, response["hits"], frame_vectors, config)
-    thumb_meta = _attach_hit_thumbs(body, hits, response["hits"])
-    if thumb_meta:
-        response["meta"].update(thumb_meta)
+    # score_spread stays on the raw page; kept/dropped describe the collapsed page.
+    hits, response["hits"], hit_meta = _finalize_visual_hits(
+        body, hits, response["hits"], frame_vectors, config
+    )
+    response["meta"]["returned"] = len(response["hits"])
+    response["meta"].update(hit_meta)
     return response
 
 
@@ -1178,9 +1241,7 @@ def _execute_agent_dialogue_search(body: AgentSearchRequest, *, config=None) -> 
     }
     if message:
         response["message"] = message
-    thumb_meta = _attach_hit_thumbs(body, hits, response["hits"])
-    if thumb_meta:
-        response["meta"].update(thumb_meta)
+    response["meta"].update(_nonvisual_hit_meta(body, hits, response["hits"]))
     return response
 
 
@@ -1255,9 +1316,7 @@ def _execute_agent_tag_search(body: AgentSearchRequest, *, config=None) -> Dict[
     }
     if message:
         response["message"] = message
-    thumb_meta = _attach_hit_thumbs(body, hits, response["hits"])
-    if thumb_meta:
-        response["meta"].update(thumb_meta)
+    response["meta"].update(_nonvisual_hit_meta(body, hits, response["hits"]))
     return response
 
 
@@ -1325,6 +1384,7 @@ def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchReque
             if "thumb_limit" in item.model_fields_set
             else batch.thumb_limit
         ),
+        dedupe=item.dedupe if "dedupe" in item.model_fields_set else batch.dedupe,
     )
 
 

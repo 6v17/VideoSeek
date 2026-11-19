@@ -9,11 +9,10 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 from src.services.shot_list_service import ShotListItem
 
-from .constants import API_VERSION, MAX_BATCH_QUERIES
+from .constants import API_VERSION, MAX_TIMELINE_CLIPS
 from .schemas import AgentTimelineClipItem, AgentTimelineExportRequest
 
 _TIMELINE_FORMATS = frozenset({"jianying", "fcpxml", "fcp7_xml"})
-_MAX_TIMELINE_CLIPS = MAX_BATCH_QUERIES  # 64, aligned with batch export
 
 
 def _normalize_format(value: str) -> str:
@@ -64,8 +63,8 @@ def normalize_timeline_items(
     """Convert request items to ShotListItem; missing/remote paths go to skipped."""
     if not items:
         raise ValueError("items must not be empty.")
-    if len(items) > _MAX_TIMELINE_CLIPS:
-        raise ValueError(f"Timeline size exceeds limit ({_MAX_TIMELINE_CLIPS}).")
+    if len(items) > MAX_TIMELINE_CLIPS:
+        raise ValueError(f"Timeline size exceeds limit ({MAX_TIMELINE_CLIPS}).")
 
     shots: List[ShotListItem] = []
     skipped: List[Dict[str, str]] = []
@@ -187,6 +186,15 @@ def execute_agent_timeline_export(body: AgentTimelineExportRequest) -> Dict[str,
             f"(skipped={len(skipped)}; provide existing video_path + time_sec or start/end)."
         )
 
+    from src.services.manifest_export_service import dedupe_shots_by_start
+
+    shots, dedupe_meta = dedupe_shots_by_start(shots, enabled=bool(getattr(body, "dedupe", True)))
+    if not shots:
+        raise ValueError(
+            "No clips left after dedupe "
+            f"(input={dedupe_meta.get('input')}; provide distinct video_path + start_sec)."
+        )
+
     project = str(body.project or "VideoSeek").strip() or "VideoSeek"
     payload: Dict[str, Any]
 
@@ -212,6 +220,7 @@ def execute_agent_timeline_export(body: AgentTimelineExportRequest) -> Dict[str,
                 shots,
                 drafts_dir=drafts_dir or None,
                 draft_name=body.draft_name,
+                audio=_timeline_audio_payload(body),
             )
         except JianyingDraftError as exc:
             detail = str(getattr(exc, "detail", "") or "").strip()
@@ -233,9 +242,11 @@ def execute_agent_timeline_export(body: AgentTimelineExportRequest) -> Dict[str,
             "skipped": skipped,
             "skipped_missing": sum(1 for row in skipped if row.get("reason") == "missing"),
             "client_request_id": body.client_request_id,
+            "audio": result.get("audio"),
             "meta": {
                 "elapsed_ms": int((time.perf_counter() - started) * 1000),
                 "project": project,
+                **dedupe_meta,
             },
         }
         return payload
@@ -255,6 +266,7 @@ def execute_agent_timeline_export(body: AgentTimelineExportRequest) -> Dict[str,
         write_path=write_path,
         project_name=project,
         event_name="VideoSeek Agent Timeline",
+        audio=_timeline_audio_payload(body),
     )
     out_path = result.get("write_path") or write_path
     payload = {
@@ -269,10 +281,24 @@ def execute_agent_timeline_export(body: AgentTimelineExportRequest) -> Dict[str,
         + sum(1 for row in skipped if row.get("reason") == "missing"),
         "skipped_remote": int(result.get("skipped_remote") or 0),
         "client_request_id": body.client_request_id,
+        "audio": result.get("audio"),
         "meta": {
             "elapsed_ms": int((time.perf_counter() - started) * 1000),
             "project": project,
             "fcpxml_version": result.get("fcpxml_version"),
+            **dedupe_meta,
         },
     }
     return payload
+
+
+def _timeline_audio_payload(body: AgentTimelineExportRequest) -> Dict[str, Any] | None:
+    audio = body.audio
+    if audio is None:
+        return None
+    return {
+        "path": audio.path,
+        "start_sec": audio.start_sec,
+        "volume": audio.volume,
+        "fade_out_sec": audio.fade_out_sec,
+    }

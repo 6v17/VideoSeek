@@ -236,6 +236,65 @@ class JianyingDraftServiceTests(unittest.TestCase):
             self.assertEqual(starts[1], starts[0] + durations[0])
             self.assertEqual(starts[2], starts[1] + durations[1])
 
+    def test_export_lays_music_on_an_audio_track(self):
+        if not jy.is_jianying_draft_support_available():
+            self.skipTest("pyJianYingDraft not installed")
+
+        import subprocess
+
+        from src.infra.ffmpeg_paths import get_ffmpeg_path
+
+        ffmpeg = get_ffmpeg_path() or _resolve_ffmpeg()
+        if not ffmpeg:
+            self.skipTest("ffmpeg unavailable for sample media")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            media = os.path.join(tmp, "sample.mp4")
+            music = os.path.join(tmp, "bed.wav")
+            try:
+                subprocess.run(
+                    [
+                        ffmpeg, "-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:d=8",
+                        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+                        "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", media,
+                    ],
+                    check=True, capture_output=True,
+                )
+                subprocess.run(
+                    [
+                        ffmpeg, "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=12",
+                        "-c:a", "pcm_s16le", music,
+                    ],
+                    check=True, capture_output=True,
+                )
+            except (OSError, subprocess.CalledProcessError):
+                self.skipTest("ffmpeg failed to create sample media")
+
+            items = [
+                SimpleNamespace(video_path=media, start_sec=1.0, end_sec=3.0, match_kind="clip"),
+                SimpleNamespace(video_path=media, start_sec=4.0, end_sec=7.0, match_kind="clip"),
+            ]
+            payload = jy.export_shot_list_to_jianying_draft(
+                items,
+                drafts_dir=tmp,
+                draft_name="audio-test",
+                audio={"path": music, "start_sec": 0.0, "volume": 0.5, "fade_out_sec": 1.0},
+            )
+            with open(os.path.join(payload["draft_path"], "draft_content.json"), encoding="utf-8") as handle:
+                data = json.load(handle)
+            video_tracks = [track for track in data.get("tracks", []) if track.get("type") == "video"]
+            audio_tracks = [track for track in data.get("tracks", []) if track.get("type") == "audio"]
+            self.assertEqual(len(video_tracks), 1)
+            self.assertEqual(len(audio_tracks), 1)
+            segment = audio_tracks[0]["segments"][0]
+            video_end = sum(int(row["target_timerange"]["duration"]) for row in video_tracks[0]["segments"])
+            self.assertEqual(int(segment["target_timerange"]["start"]), 0)
+            self.assertEqual(int(segment["target_timerange"]["duration"]), video_end)
+            self.assertEqual(float(segment["volume"]), 0.5)
+            self.assertTrue(data.get("materials", {}).get("audios"))
+            self.assertTrue(data.get("materials", {}).get("audio_fades"))
+            self.assertAlmostEqual(float(payload["audio"]["duration_sec"]), video_end / 1_000_000, places=3)
+
     def test_export_recap_lays_clips_and_captions(self):
         if not jy.is_jianying_draft_support_available():
             self.skipTest("pyJianYingDraft not installed")

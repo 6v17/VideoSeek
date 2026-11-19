@@ -14,6 +14,7 @@ from src.services.shot_list_service import ShotListItem
 
 
 _VIDEOSEEK_TRACK_NAME = "VideoSeek"
+_VIDEOSEEK_AUDIO_TRACK_NAME = "VideoSeek配乐"
 _VIDEOSEEK_TEXT_TRACK_NAME = "VideoSeek旁白"
 _DEFAULT_COLLECT_DRAFT_PREFIX = "VideoSeek导入"
 _RECAP_DRAFT_PREFIX = "VideoSeek解说"
@@ -231,6 +232,7 @@ def _normalize_clip_span(
     end_sec: float,
     match_kind: str = "frame",
     media_path: str = "",
+    probe_cache: Dict[str, Dict[str, Any]] | None = None,
 ) -> tuple[float, float]:
     """Return (source_start, duration) with frame hits expanded like FCPXML (±3s)."""
     from src.services.fcpxml_export_service import _clip_span_seconds, _probe_media
@@ -239,7 +241,12 @@ def _normalize_clip_span(
     fps = 30.0
     path = str(media_path or "").strip()
     if path and os.path.isfile(path):
-        info = _probe_media(path)
+        if probe_cache is not None and path in probe_cache:
+            info = probe_cache[path]
+        else:
+            info = _probe_media(path)
+            if probe_cache is not None:
+                probe_cache[path] = info
         if info.get("duration") is not None:
             media_duration = float(info["duration"])
         if info.get("fps"):
@@ -252,7 +259,7 @@ def _normalize_clip_span(
     return _clip_span_seconds(item, fps, media_duration)
 
 
-def _make_video_segment(draft_mod, media: str, *, timeline_start_us: int, clip_start: float, duration: float):
+def _make_video_segment(draft_mod, media, *, timeline_start_us: int, clip_start: float, duration: float):
     """Build a 1x VideoSegment placed at ``timeline_start_us`` on the timeline."""
     return draft_mod.VideoSegment(
         media,
@@ -358,6 +365,8 @@ def _append_clip_onto_script(
     start_sec: float,
     end_sec: float,
     match_kind: str = "frame",
+    probe_cache: Dict[str, Dict[str, Any]] | None = None,
+    material_cache: Dict[str, Any] | None = None,
 ) -> None:
     media = os.path.abspath(os.path.expanduser(str(video_path or "").strip()))
     if not media or not os.path.isfile(media):
@@ -368,14 +377,22 @@ def _append_clip_onto_script(
         end_sec=end_sec,
         match_kind=match_kind,
         media_path=media,
+        probe_cache=probe_cache,
     )
     if duration <= 0:
         raise JianyingDraftError("片段时长无效", detail=media)
 
+    if material_cache is not None and media in material_cache:
+        material = material_cache[media]
+    else:
+        material = draft_mod.VideoMaterial(media)
+        if material_cache is not None:
+            material_cache[media] = material
+
     mode, track_handle, track_end_us = _resolve_videoseek_write_target(script, draft_mod)
     segment = _make_video_segment(
         draft_mod,
-        media,
+        material,
         timeline_start_us=track_end_us,
         clip_start=clip_start,
         duration=duration,
@@ -457,11 +474,43 @@ def append_clip_to_jianying_draft(
     return name
 
 
+def _append_audio_bed(script, draft_mod, audio: Mapping[str, Any]) -> Dict[str, Any]:
+    """Add one audio track from start_sec to the end of the laid video timeline."""
+    from src.services.timeline_audio import place_timeline_audio
+
+    timeline_us = int(getattr(script, "duration", 0) or 0)
+    placed = place_timeline_audio(
+        audio,
+        timeline_duration_sec=timeline_us / 1_000_000,
+    )
+    material = draft_mod.AudioMaterial(placed["path"])
+    span_us = min(int(round(float(placed["duration_sec"]) * 1_000_000)), int(material.duration))
+    if span_us <= 0:
+        raise JianyingDraftError("音频时长无效", detail=placed["path"])
+    start_us = int(round(float(placed["start_sec"]) * 1_000_000))
+    segment = draft_mod.AudioSegment(
+        material,
+        draft_mod.trange(start_us, span_us),
+        source_timerange=draft_mod.trange(0, span_us),
+        volume=float(placed["volume"]),
+    )
+    fade_us = int(round(float(placed["fade_out_sec"]) * 1_000_000))
+    if fade_us > 0:
+        segment.add_fade(0, min(fade_us, span_us))
+    ref = script.append_track(
+        draft_mod.TrackSpec(draft_mod.TrackType.audio, name=_VIDEOSEEK_AUDIO_TRACK_NAME)
+    )
+    script.add_segment(segment, ref)
+    placed["duration_sec"] = span_us / 1_000_000
+    return placed
+
+
 def export_shot_list_to_jianying_draft(
     items: Sequence[ShotListItem],
     *,
     drafts_dir: str | None = None,
     draft_name: str | None = None,
+    audio: Mapping[str, Any] | None = None,
     config=None,
 ) -> Dict[str, Any]:
     """Create a plaintext VideoSeek draft and lay all local clips on one timeline track."""
@@ -502,6 +551,8 @@ def export_shot_list_to_jianying_draft(
 
     exported = 0
     skipped: List[Dict[str, str]] = []
+    probe_cache: Dict[str, Dict[str, Any]] = {}
+    material_cache: Dict[str, Any] = {}
     for item in items:
         path = str(getattr(item, "video_path", "") or "").strip()
         lower = path.lower()
@@ -519,6 +570,8 @@ def export_shot_list_to_jianying_draft(
                 start_sec=float(item.start_sec),
                 end_sec=float(item.end_sec if item.end_sec is not None else item.start_sec),
                 match_kind=str(getattr(item, "match_kind", "frame") or "frame"),
+                probe_cache=probe_cache,
+                material_cache=material_cache,
             )
             exported += 1
         except JianyingDraftError as exc:
@@ -530,6 +583,14 @@ def export_shot_list_to_jianying_draft(
         _remove_draft_folder(root, name)
         detail = skipped[0]["reason"] if skipped else "no clips"
         raise JianyingDraftError("没有可写入剪映的本地片段", detail=detail)
+
+    audio_meta = None
+    if audio:
+        try:
+            audio_meta = _append_audio_bed(script, draft, audio)
+        except Exception:
+            _remove_draft_folder(root, name)
+            raise
 
     try:
         script.save()
@@ -543,6 +604,7 @@ def export_shot_list_to_jianying_draft(
         "exported_count": exported,
         "skipped_count": len(skipped),
         "skipped": skipped,
+        "audio": audio_meta,
     }
 
 

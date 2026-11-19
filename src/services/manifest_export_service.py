@@ -31,27 +31,38 @@ def normalize_manifest_mode(mode: Optional[str], config=None) -> str:
     return normalized
 
 
-def _interval_overlap_ratio(start_a, end_a, start_b, end_b) -> float:
-    left = max(float(start_a), float(start_b))
-    right = min(float(end_a), float(end_b))
-    overlap = max(0.0, right - left)
-    shorter = max(1e-6, min(float(end_a) - float(start_a), float(end_b) - float(start_b)))
-    return overlap / shorter
+# Same file, starts within this window: one shot. End time is ignored.
+_SHOT_START_WINDOW_SEC = 1.0
+
+
+def _norm_video_path(path: str) -> str:
+    from src.services.search_scope import normalize_scope_path
+
+    return normalize_scope_path(path)
+
+
+def same_shot_start(
+    path_a: str,
+    start_a: float,
+    path_b: str,
+    start_b: float,
+    *,
+    window_sec: float = _SHOT_START_WINDOW_SEC,
+) -> bool:
+    """Shot identity for agent export: video_path + chunk start, not the full triple."""
+    if _norm_video_path(path_a) != _norm_video_path(path_b):
+        return False
+    return abs(float(start_a) - float(start_b)) <= float(window_sec)
 
 
 def _should_deduplicate(item_a: Dict[str, Any], item_b: Dict[str, Any], *, mode: str) -> bool:
-    from src.services.search_scope import normalize_scope_path
-
-    def _norm(path: str) -> str:
-        return normalize_scope_path(path)
-
-    if _norm(item_a.get("video_path", "")) != _norm(item_b.get("video_path", "")):
-        return False
-    if _interval_overlap_ratio(item_a["start_sec"], item_a["end_sec"], item_b["start_sec"], item_b["end_sec"]) > 0.5:
-        return True
-    if mode == "frame" and abs(float(item_a["start_sec"]) - float(item_b["start_sec"])) <= 2.0:
-        return True
-    return False
+    del mode  # Start identity is the same for frame and chunk cuts.
+    return same_shot_start(
+        str(item_a.get("video_path") or ""),
+        float(item_a["start_sec"]),
+        str(item_b.get("video_path") or ""),
+        float(item_b["start_sec"]),
+    )
 
 
 def _manifest_item_rank(item: Dict[str, Any]) -> int:
@@ -59,6 +70,17 @@ def _manifest_item_rank(item: Dict[str, Any]) -> int:
         return int(item.get("rank") or 9999)
     except (TypeError, ValueError):
         return 9999
+
+
+def dedupe_counts(*, input_count: int, kept_count: int, dedupe: bool) -> Dict[str, Any]:
+    input_n = max(0, int(input_count))
+    kept_n = max(0, int(kept_count))
+    return {
+        "input": input_n,
+        "kept": kept_n,
+        "dropped": max(0, input_n - kept_n),
+        "dedupe": bool(dedupe),
+    }
 
 
 def dedupe_manifest_items(items: List[Dict[str, Any]], *, mode: str) -> List[Dict[str, Any]]:
@@ -69,6 +91,29 @@ def dedupe_manifest_items(items: List[Dict[str, Any]], *, mode: str) -> List[Dic
             continue
         kept.append(candidate)
     return kept
+
+
+def dedupe_shots_by_start(items: Sequence[Any], *, enabled: bool = True) -> tuple[List[Any], Dict[str, Any]]:
+    """Keep first clip per video_path + start (±1s). Preserves cut order."""
+    rows = list(items or [])
+    if not enabled:
+        return rows, dedupe_counts(input_count=len(rows), kept_count=len(rows), dedupe=False)
+    kept: List[Any] = []
+    for item in rows:
+        path = str(getattr(item, "video_path", None) or (item.get("video_path") if isinstance(item, dict) else "") or "")
+        start = float(getattr(item, "start_sec", None) if not isinstance(item, dict) else item["start_sec"])
+        if any(
+            same_shot_start(
+                path,
+                start,
+                str(getattr(existing, "video_path", None) or (existing.get("video_path") if isinstance(existing, dict) else "") or ""),
+                float(getattr(existing, "start_sec", None) if not isinstance(existing, dict) else existing["start_sec"]),
+            )
+            for existing in kept
+        ):
+            continue
+        kept.append(item)
+    return kept, dedupe_counts(input_count=len(rows), kept_count=len(kept), dedupe=True)
 
 
 def manifest_items_from_sources(
@@ -174,7 +219,9 @@ def execute_export_manifest(
     if not raw_items:
         raise ValueError("Manifest has no clip items.")
 
+    input_count = len(raw_items)
     deduped = dedupe_manifest_items(raw_items, mode=resolved_mode) if dedupe else list(raw_items)
+    counts = dedupe_counts(input_count=input_count, kept_count=len(deduped), dedupe=bool(dedupe))
     manifest = {"version": 1, "project": project, "items": deduped}
     written_path = None
     if write_path:
@@ -203,7 +250,7 @@ def execute_export_manifest(
         "manifest": manifest,
         "meta": {
             "item_count": len(deduped),
-            "dedupe": bool(dedupe),
             "write_path": written_path,
+            **counts,
         },
     }

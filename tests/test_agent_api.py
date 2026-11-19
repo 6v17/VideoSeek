@@ -492,17 +492,30 @@ class AgentApiSearchTests(unittest.TestCase):
             np.array([0.0, 1.0], dtype=np.float32),
         ]
         payload = execute_agent_search(AgentSearchRequest(query="ending", top_k=5, mode="frame"))
+        self.assertEqual(payload["meta"]["input"], 5)
+        self.assertEqual(payload["meta"]["kept"], 2)
+        self.assertEqual(payload["meta"]["dropped"], 3)
+        self.assertTrue(payload["meta"]["dedupe"])
+        self.assertEqual(len(payload["hits"]), 2)
+        self.assertEqual(payload["hits"][0]["same_shot_count"], 2)
+        self.assertEqual(payload["hits"][1]["same_shot_count"], 3)
+        self.assertNotIn("duplicate_of_rank", payload["hits"][0])
+        self.assertNotIn("frame_vector", payload["hits"][0])
+        # Flatness is judged on the raw page, not the collapsed one.
         spread = payload["meta"]["score_spread"]
         self.assertEqual(spread["compared_rank"], 5)
         self.assertAlmostEqual(spread["top1"], 0.50)
         self.assertAlmostEqual(spread["gap"], 0.32)
-        self.assertEqual(len(payload["hits"]), 5)
-        self.assertEqual(payload["hits"][0]["same_shot_count"], 2)
-        self.assertEqual(payload["hits"][1]["duplicate_of_rank"], 1)
-        self.assertEqual(payload["hits"][1]["duplicate_of"], "aaa")
-        self.assertNotIn("frame_vector", payload["hits"][0])
-        self.assertEqual(payload["hits"][2]["same_shot_count"], 3)
-        self.assertEqual(payload["hits"][4]["duplicate_of_rank"], 3)
+
+        raw = execute_agent_search(
+            AgentSearchRequest(query="ending", top_k=5, mode="frame", dedupe=False)
+        )
+        self.assertEqual(len(raw["hits"]), 5)
+        self.assertEqual(raw["meta"]["dropped"], 0)
+        self.assertFalse(raw["meta"]["dedupe"])
+        self.assertEqual(raw["hits"][1]["duplicate_of_rank"], 1)
+        self.assertEqual(raw["hits"][1]["duplicate_of"], "aaa")
+        self.assertEqual(raw["hits"][4]["duplicate_of_rank"], 3)
 
     def test_chunk_ranges_are_labeled_chunk(self):
         from src.services.search_chunk_pipeline import _chunk_hit_from_range
@@ -525,6 +538,13 @@ class AgentApiSearchTests(unittest.TestCase):
 
         labeled = _search_lance_chunk_results(_Index(), None, 1)
         self.assertEqual(labeled[0].match_kind, "chunk")
+
+    def test_omitted_search_mode_is_chunk(self):
+        from src.web.agent_api.health import _normalize_mode
+
+        self.assertEqual(_normalize_mode(None), "chunk")
+        self.assertEqual(_normalize_mode(""), "chunk")
+        self.assertEqual(_normalize_mode("frame"), "frame")
 
     def test_search_thumb_edge_stays_small(self):
         from src.web.agent_api.frames import clamp_search_thumb_edge, clamp_search_thumb_limit
@@ -587,12 +607,20 @@ class AgentApiSearchTests(unittest.TestCase):
         self.assertEqual(payload["meta"]["thumbs_omitted"], 0)
         self.assertEqual(payload["meta"]["thumb_max_edge"], 320)
         self.assertEqual(payload["meta"]["thumb_limit"], 4)
+        self.assertEqual(payload["meta"]["kept"], 2)
+        self.assertEqual(len(payload["hits"]), 2)
         self.assertEqual(payload["hits"][0]["thumb_time_sec"], 4.0)
-        self.assertEqual(payload["hits"][1]["duplicate_of_rank"], 1)
-        self.assertNotIn("thumb_base64", payload["hits"][1])
-        self.assertEqual(payload["hits"][2]["thumb_time_sec"], 8.0)
+        self.assertEqual(payload["hits"][1]["thumb_time_sec"], 8.0)
         self.assertEqual(mock_encode.call_args_list[0].args, ("D:/ep1.mp4", 4.0, 320))
         self.assertEqual(mock_encode.call_args_list[1].args, ("D:/other.mp4", 8.0, 320))
+
+        marked = execute_agent_search(
+            AgentSearchRequest(
+                query="ending", top_k=3, mode="frame", return_thumbs=True, dedupe=False
+            )
+        )
+        self.assertEqual(marked["hits"][1]["duplicate_of_rank"], 1)
+        self.assertNotIn("thumb_base64", marked["hits"][1])
 
     @patch("src.web.agent_api.search._get_video_duration_cached", return_value=None)
     @patch("src.services.search_result_groups.fetch_hit_frame_vectors", return_value=[None] * 17)

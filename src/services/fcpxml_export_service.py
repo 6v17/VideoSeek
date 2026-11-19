@@ -543,6 +543,7 @@ def build_fcpxml_document(
     project_name: str = "VideoSeek",
     event_name: str = "VideoSeek Shot List",
     fps: Optional[float] = None,
+    audio: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """Return (FCPXML text, meta) for Resolve / Final Cut (not Premiere)."""
     prepared = _prepare_shot_list_timeline(items, fps=fps)
@@ -561,6 +562,13 @@ def build_fcpxml_document(
     seq_frame_duration = f"{seq_frame_num}/{seq_frame_den}s"
     safe_project = _xml_escape(project_name or "VideoSeek")
     safe_event = _xml_escape(event_name or "VideoSeek Shot List")
+    timeline_frames = sum(
+        max(1, _seconds_to_frames(clip["duration"], project_fps)) for clip in spine_clips
+    )
+    placed_audio = _placed_timeline_audio(
+        audio,
+        timeline_duration_sec=max(1, timeline_frames) * seq_frame_num / seq_frame_den,
+    )
 
     lines: List[str] = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -595,6 +603,8 @@ def build_fcpxml_document(
                 f'src="{_xml_escape(asset["pathurl"])}"/>'
             )
         )
+    if placed_audio is not None:
+        lines.append(_fcpxml_audio_asset(placed_audio, fps=project_fps))
     lines.extend(
         [
             "    </resources>",
@@ -622,9 +632,13 @@ def build_fcpxml_document(
                 f'start="{fcpxml_time(clip["start"], clip_fps)}" '
                 f'duration="{_fcpxml_time_from_frames(dur_frames, seq_frame_num, seq_frame_den)}" '
                 f'format="{clip["format_id"]}" '
-                f'tcFormat="NDF"/>'
+                f'tcFormat="NDF"'
+                + ("/>" if placed_audio is None or clip is not spine_clips[0] else ">")
             )
         )
+        if placed_audio is not None and clip is spine_clips[0]:
+            lines.append(_fcpxml_audio_element(placed_audio, fps=project_fps))
+            lines.append("                        </asset-clip>")
         tl_cursor += dur_frames
     sequence_duration_frames = max(1, tl_cursor)
     # Patch sequence duration to the frame-accurate total (replaces float sum).
@@ -660,6 +674,7 @@ def build_fcpxml_document(
         "fps": project_fps,
         "asset_count": len(asset_order),
         "format": "fcpxml",
+        "audio": placed_audio,
     }
     return "\n".join(lines), meta
 
@@ -669,6 +684,7 @@ def build_fcp7_xml_document(
     *,
     project_name: str = "VideoSeek",
     fps: Optional[float] = None,
+    audio: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """Return (FCP7 XMEML text, meta) for Premiere Pro and Resolve."""
     prepared = _prepare_shot_list_timeline(items, fps=fps)
@@ -707,6 +723,10 @@ def build_fcp7_xml_document(
         )
         tl_cursor += tl_dur
     seq_frames = max(1, tl_cursor)
+    placed_audio = _placed_timeline_audio(
+        audio,
+        timeline_duration_sec=seq_frames / project_fps,
+    )
 
     lines: List[str] = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -885,6 +905,8 @@ def build_fcp7_xml_document(
                 ]
             )
         lines.append("                </track>")
+    if placed_audio is not None:
+        lines.extend(_fcp7_bgm_track_xml(placed_audio, fps=project_fps))
     lines.extend(
         [
             "            </audio>",
@@ -907,8 +929,161 @@ def build_fcp7_xml_document(
         "fps": project_fps,
         "asset_count": len(asset_order),
         "format": "fcp7_xml",
+        "audio": placed_audio,
     }
     return "\n".join(lines), meta
+
+
+def _placed_timeline_audio(
+    audio: Optional[Dict[str, Any]],
+    *,
+    timeline_duration_sec: float,
+) -> Optional[Dict[str, Any]]:
+    if not audio:
+        return None
+    from src.services.timeline_audio import place_timeline_audio
+
+    return place_timeline_audio(audio, timeline_duration_sec=timeline_duration_sec)
+
+
+def _fcpxml_audio_asset(placed: Dict[str, Any], *, fps: float) -> str:
+    name = os.path.splitext(os.path.basename(placed["path"]))[0] or "audio"
+    return (
+        f'        <asset id="r-bgm" name="{_xml_escape(name)}" '
+        f'start="0s" hasVideo="0" hasAudio="1" audioSources="1" audioChannels="2" '
+        f'audioRate="48000" '
+        f'duration="{fcpxml_time(float(placed["file_duration_sec"]), fps)}" '
+        f'src="{_xml_escape(media_path_to_premiere_pathurl(placed["path"]))}"/>'
+    )
+
+
+def _fcpxml_audio_element(placed: Dict[str, Any], *, fps: float) -> str:
+    name = os.path.splitext(os.path.basename(placed["path"]))[0] or "audio"
+    open_tag = (
+        f'                            <audio ref="r-bgm" name="{_xml_escape(name)}" lane="-1" '
+        f'offset="{fcpxml_time(float(placed["start_sec"]), fps)}" start="0s" '
+        f'duration="{fcpxml_time(float(placed["duration_sec"]), fps)}"'
+    )
+    volume = float(placed["volume"])
+    fade = float(placed["fade_out_sec"])
+    if abs(volume - 1.0) < 1e-6 and fade <= 0:
+        return open_tag + "/>"
+    lines = [open_tag + ">", "                                <adjust-volume"]
+    if abs(volume - 1.0) >= 1e-6:
+        lines[-1] += f' amount="{_volume_db(volume)}"'
+    if fade > 0:
+        lines[-1] += ">"
+        lines.append(
+            f'                                    <fadeOut type="linear" '
+            f'duration="{fcpxml_time(fade, fps)}"/>'
+        )
+        lines.append("                                </adjust-volume>")
+    else:
+        lines[-1] += "/>"
+    lines.append("                            </audio>")
+    return "\n".join(lines)
+
+
+def _fcp7_bgm_track_xml(placed: Dict[str, Any], *, fps: float) -> List[str]:
+    span = max(1, _seconds_to_frames(float(placed["duration_sec"]), fps))
+    start = max(0, _seconds_to_frames(float(placed["start_sec"]), fps))
+    file_frames = max(span, _seconds_to_frames(float(placed["file_duration_sec"]), fps))
+    name = os.path.splitext(os.path.basename(placed["path"]))[0] or "audio"
+    lines = [
+        "                <track>",
+        '                    <clipitem id="bgm-1">',
+        f"                        <name>{_xml_escape(name)}</name>",
+        f"                        <duration>{span}</duration>",
+        *_fcp7_rate_xml(fps, "                        "),
+        f"                        <start>{start}</start>",
+        f"                        <end>{start + span}</end>",
+        "                        <in>0</in>",
+        f"                        <out>{span}</out>",
+        '                        <file id="bgm-file">',
+        f"                            <name>{_xml_escape(name)}</name>",
+        f"                            <pathurl>{_xml_escape(media_path_to_premiere_pathurl(placed['path']))}</pathurl>",
+        *_fcp7_rate_xml(fps, "                            "),
+        f"                            <duration>{file_frames}</duration>",
+        "                            <media>",
+        "                                <audio>",
+        f"                                    <duration>{file_frames}</duration>",
+        "                                    <samplecharacteristics>",
+        "                                        <depth>16</depth>",
+        "                                        <samplerate>48000</samplerate>",
+        "                                    </samplecharacteristics>",
+        "                                    <channelcount>2</channelcount>",
+        "                                </audio>",
+        "                            </media>",
+        "                        </file>",
+        "                        <sourcetrack>",
+        "                            <mediatype>audio</mediatype>",
+        "                            <trackindex>1</trackindex>",
+        "                        </sourcetrack>",
+    ]
+    level = _fcp7_audio_level_xml(placed, fps=fps, span_frames=span)
+    if level:
+        lines.extend(level)
+    lines.extend(
+        [
+            "                    </clipitem>",
+            "                </track>",
+        ]
+    )
+    return lines
+
+
+def _fcp7_audio_level_xml(placed: Dict[str, Any], *, fps: float, span_frames: int) -> List[str]:
+    volume = float(placed["volume"])
+    fade_frames = _seconds_to_frames(float(placed["fade_out_sec"]), fps) if placed["fade_out_sec"] else 0
+    if abs(volume - 1.0) < 1e-6 and fade_frames <= 0:
+        return []
+    lines = [
+        "                        <filter>",
+        "                            <effect>",
+        "                                <name>Audio Levels</name>",
+        "                                <effectid>audiolevels</effectid>",
+        "                                <effectcategory>audiolevels</effectcategory>",
+        "                                <effecttype>audiolevels</effecttype>",
+        "                                <mediatype>audio</mediatype>",
+        "                                <parameter>",
+        "                                    <parameterid>level</parameterid>",
+        "                                    <name>Level</name>",
+        f"                                    <value>{volume:.4f}</value>",
+    ]
+    if fade_frames > 0:
+        hold = max(0, int(span_frames) - int(fade_frames))
+        lines.extend(
+            [
+                "                                    <keyframe>",
+                "                                        <when>0</when>",
+                f"                                        <value>{volume:.4f}</value>",
+                "                                    </keyframe>",
+                "                                    <keyframe>",
+                f"                                        <when>{hold}</when>",
+                f"                                        <value>{volume:.4f}</value>",
+                "                                    </keyframe>",
+                "                                    <keyframe>",
+                f"                                        <when>{int(span_frames)}</when>",
+                "                                        <value>0</value>",
+                "                                    </keyframe>",
+            ]
+        )
+    lines.extend(
+        [
+            "                                </parameter>",
+            "                            </effect>",
+            "                        </filter>",
+        ]
+    )
+    return lines
+
+
+def _volume_db(volume: float) -> str:
+    import math
+
+    if volume <= 1e-4:
+        return "-96dB"
+    return f"{20.0 * math.log10(volume):.3f}dB"
 
 
 def export_shot_list_nle_xml(
@@ -918,6 +1093,7 @@ def export_shot_list_nle_xml(
     project_name: str = "VideoSeek",
     event_name: str = "VideoSeek Shot List",
     fps: Optional[float] = None,
+    audio: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Write NLE XML; `.xml` → FCP7 (Premiere/Resolve), `.fcpxml` → FCPXML (Resolve)."""
     target = os.path.abspath(os.path.expanduser(str(write_path or "").strip()))
@@ -933,6 +1109,7 @@ def export_shot_list_nle_xml(
             project_name=project_name,
             event_name=event_name,
             fps=fps,
+            audio=audio,
         )
         fmt = "fcpxml"
     else:
@@ -942,6 +1119,7 @@ def export_shot_list_nle_xml(
             items,
             project_name=project_name,
             fps=fps,
+            audio=audio,
         )
         fmt = "fcp7_xml"
     with open(target, "w", encoding="utf-8", newline="\n") as handle:
@@ -955,6 +1133,7 @@ def export_shot_list_nle_xml(
         "skipped_remote": int(meta.get("skipped_remote") or 0),
         "skipped_missing": int(meta.get("skipped_missing") or 0),
         "fcpxml_version": _FCPXML_VERSION if fmt == "fcpxml" else None,
+        "audio": meta.get("audio"),
     }
 
 

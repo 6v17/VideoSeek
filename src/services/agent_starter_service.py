@@ -144,11 +144,12 @@ def _build_user_capability_bullets(
             )
         if caps.get("timeline_export"):
             bullets.append(
-                "Multi-clip timeline: POST /export/timeline "
-                "(jianying / fcpxml / fcp7_xml; XML needs output_dir or write_path; point hits ±3s)."
+                "Deliver a cut as a draft: POST /export/timeline "
+                "(jianying / fcpxml / fcp7_xml) using the chunk hit start and end; "
+                "up to 256 clips. Pass audio.path to lay music from 0 to the end of the cut."
             )
         if caps.get("export_clip") and ffmpeg.get("ffmpeg_available"):
-            bullets.append("Export mp4 rough-cut clips (default fast copy).")
+            bullets.append("Write an mp4 file only when the user asks for one.")
         if preset_total:
             bullets.append(
                 f"{preset_total} search presets — snapshot shows up to {STARTER_PRESET_SNAPSHOT_LIMIT}; "
@@ -198,11 +199,11 @@ def _build_user_capability_bullets(
         bullets.append("取帧：POST /frames/extract 或 /frames/extract/batch（≤16，base64）。")
     if caps.get("timeline_export"):
         bullets.append(
-            "多片段时间线：POST /export/timeline（jianying / fcpxml / fcp7_xml；"
-            "XML 需 output_dir 或 write_path；点命中 ±3s）。"
+            "成片：POST /export/timeline 写剪映、达芬奇或 Premiere 草稿，用 chunk 命中的起止；"
+            "一条最多 256 段。配乐传 audio.path，从 0 铺到成片结尾。"
         )
     if caps.get("export_clip") and ffmpeg.get("ffmpeg_available"):
-        bullets.append("导出 mp4 粗剪片段（默认可快速 copy）。")
+        bullets.append("用户明确要一个 mp4 文件时才导出片段。")
     if preset_total:
         bullets.append(
             f"共 {preset_total} 个搜索预设 — 快照最多 {STARTER_PRESET_SNAPSHOT_LIMIT} 个，"
@@ -268,14 +269,6 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
     """Compact binding execution preference."""
     lang = "en" if str(locale).lower().startswith("en") else "zh"
     batch_url = f"{api_base}/search/batch"
-    preset_body = (
-        '{"queries":[{"preset_id":"<id from snapshot>"}],"top_k":1,"expand_frame_hits":true,'
-        '"export":{"output_dir":"D:/Exports","encode_mode":"copy","keep_per_source":1}}'
-    )
-    folder_body = (
-        '{"image_folder":"D:/Screenshots","top_k":1,"expand_frame_hits":true,'
-        '"export":{"output_dir":"D:/Exports","encode_mode":"copy","keep_per_source":1}}'
-    )
     if lang == "en":
         return (
             "## Policy kernel (ONLY binding)\n"
@@ -283,11 +276,12 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
             "registers the whole folder; indexes only those files). "
             f"Folder changes: POST {api_base}/libraries/refresh then GET /videos?ready_only=false. "
             f"Whole library: POST {api_base}/index/sync. Never invent a path.\n"
-            f"2. DEFAULT: one POST {batch_url} + export.output_dir for mp4. "
-            "copy adds ~2s each side; a point hit is already ±3s, so a 6s intent is about 10s. "
-            "Use encode_mode=original for an exact length. "
-            "Batch export keep_per_source defaults to 1; manifest sources mode defaults to 2. "
-            f"Preset: {preset_body} | Folder: {folder_body}\n"
+            f"2. DEFAULT: POST {batch_url} with mode omitted, which is chunk. "
+            "Search and timeline dedupe default true (meta.input/kept/dropped); "
+            "pass dedupe=false for the raw list. "
+            "Deliver the cut with POST /export/timeline (jianying, fcpxml, or fcp7_xml) "
+            "using each hit start_sec and end_sec as-is. Do not export mp4 files for the cut. "
+            "Pass mode=frame only for a single time point. image_folder searches a folder of stills.\n"
             "3. preset_id from snapshot or GET /search/presets; video_path only from API — never guess paths.\n"
             "4. Visual text search: YOU may set text_enhance true/false "
             "(phrase/synonym routes + CLIP pick + RRF; original query outweighs extras; "
@@ -305,11 +299,10 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
         f"1. 用户给出视频文件：POST {api_base}/libraries/include（服务端定父目录，整夹登记，只索引这些文件）。"
         f"文件夹有变动：POST {api_base}/libraries/refresh，再 GET /videos?ready_only=false。"
         f"整库：POST {api_base}/index/sync。轮询 index_sync_in_progress。禁止猜路径。\n"
-        f"2. 默认：一次 POST {batch_url}，要 mp4 同 body 加 export.output_dir。"
-        "copy 在区间两侧各加约 2 秒；点命中已含 ±3 秒，想要 6 秒成片大约会到 10 秒。"
-        "要准时长用 encode_mode=original。"
-        "batch 导出的 keep_per_source 默认 1，manifest 的 sources 模式默认 2。"
-        f"Preset：{preset_body} | 截图文件夹：{folder_body}\n"
+        f"2. 默认：POST {batch_url} 不传 mode，就是 chunk。"
+        "搜索和成片默认 dedupe=true（meta.input/kept/dropped）；对照原始结果时传 false。"
+        "成片用 POST /export/timeline，把命中的 start_sec 和 end_sec 原样写成剪映、达芬奇或 Premiere 草稿。"
+        "不要为了成片导出 mp4。只要一个时间点才传 mode=frame。截图文件夹用 image_folder。\n"
         "3. preset_id 来自快照或 GET /search/presets；video_path 只来自 API — 禁止猜路径。\n"
         "4. 画面文搜：由你传 text_enhance true/false"
         "（短语/同义多路 + CLIP 挑选 + RRF；原句优先，2 秒内并成一镜，score 仍是相似度；"

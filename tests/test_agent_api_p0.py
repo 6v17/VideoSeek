@@ -95,10 +95,13 @@ class AgentApiP0Tests(unittest.TestCase):
         items = [
             {"rank": 1, "video_path": "D:/a.mp4", "start_sec": 10.0, "end_sec": 15.0},
             {"rank": 2, "video_path": "D:/a.mp4", "start_sec": 11.0, "end_sec": 16.0},
-            {"rank": 3, "video_path": "D:/b.mp4", "start_sec": 1.0, "end_sec": 2.0},
+            {"rank": 3, "video_path": "D:/a.mp4", "start_sec": 10.0, "end_sec": 20.0},
+            {"rank": 4, "video_path": "D:/b.mp4", "start_sec": 1.0, "end_sec": 2.0},
         ]
         deduped = dedupe_manifest_items(items, mode="chunk")
         self.assertEqual(len(deduped), 2)
+        self.assertEqual(deduped[0]["start_sec"], 10.0)
+        self.assertEqual(deduped[0]["end_sec"], 15.0)
 
     def test_export_manifest_from_sources(self):
         payload = execute_export_manifest(
@@ -127,6 +130,10 @@ class AgentApiP0Tests(unittest.TestCase):
         )
         self.assertTrue(payload["ok"])
         self.assertEqual(len(payload["manifest"]["items"]), 1)
+        self.assertEqual(payload["meta"]["input"], 1)
+        self.assertEqual(payload["meta"]["kept"], 1)
+        self.assertEqual(payload["meta"]["dropped"], 0)
+        self.assertFalse(payload["meta"]["dedupe"])
         self.assertEqual(payload["manifest"]["items"][0]["start_timecode"], "00:00:01")
 
 

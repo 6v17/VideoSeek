@@ -81,6 +81,9 @@ class AgentSearchRequest(BaseModel):
     return_thumbs: Optional[bool] = None
     thumb_max_edge: Optional[int] = None
     thumb_limit: Optional[int] = None
+    # Default true: keep the lead of each repeated shot and drop the rest.
+    # false returns every row so the agent can compare.
+    dedupe: bool = True
 
 
 class AgentBatchSearchExportOptions(BaseModel):
@@ -114,6 +117,7 @@ class AgentBatchSearchRequest(BaseModel):
     return_thumbs: Optional[bool] = None
     thumb_max_edge: Optional[int] = None
     thumb_limit: Optional[int] = None
+    dedupe: bool = True
     export: Optional[AgentBatchSearchExportOptions] = None
 
 
@@ -170,11 +174,23 @@ class AgentTimelineClipItem(BaseModel):
     client_request_id: Optional[str] = None
 
 
+class AgentTimelineAudio(BaseModel):
+    """One music file laid under the cut. Starts at start_sec and runs to the end."""
+
+    path: str
+    start_sec: float = 0.0
+    volume: float = 1.0
+    fade_out_sec: float = 0.0
+
+
 class AgentTimelineExportRequest(BaseModel):
     """Multi-clip NLE/Jianying timeline: jianying | fcpxml | fcp7_xml."""
 
     format: str
     items: List[AgentTimelineClipItem] = Field(default_factory=list)
+    audio: Optional[AgentTimelineAudio] = None
+    # Default true: one clip per video_path + start (±1s). false keeps the raw list.
+    dedupe: bool = True
     project: Optional[str] = None
     # XML: full file path, or output_dir (+ auto filename). Jianying ignores these.
     write_path: Optional[str] = None

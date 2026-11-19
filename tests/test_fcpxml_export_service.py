@@ -314,6 +314,41 @@ class FcpxmlExportServiceTests(unittest.TestCase):
             self.assertEqual(_frames(o1), _frames(d0))
             self.assertEqual(_frames(o1) + _frames(d1), _frames(d0) + _frames(d1))
 
+    def test_music_bed_is_an_audio_track(self):
+        from src.services.fcpxml_export_service import build_fcp7_xml_document
+
+        with tempfile.TemporaryDirectory() as tmp:
+            video = os.path.join(tmp, "ep.mp4")
+            music = os.path.join(tmp, "bed.wav")
+            with open(video, "wb") as handle:
+                handle.write(b"fake")
+            with open(music, "wb") as handle:
+                handle.write(b"fake")
+            items = [ShotListItem("a", video, 10.0, 15.0, 0.9, match_kind="clip")]
+            audio = {
+                "path": music,
+                "start_sec": 0.0,
+                "volume": 0.5,
+                "fade_out_sec": 1.0,
+                "duration_sec": 30.0,
+            }
+            with patch(
+                "src.services.fcpxml_export_service._probe_media",
+                return_value=_probe(fps=25.0),
+            ):
+                fcpxml, fcpxml_meta = build_fcpxml_document(items, audio=audio)
+                fcp7, fcp7_meta = build_fcp7_xml_document(items, audio=audio)
+            self.assertIn('ref="r-bgm"', fcpxml)
+            self.assertIn('lane="-1"', fcpxml)
+            self.assertIn("fadeOut", fcpxml)
+            self.assertIn("bed.wav", fcpxml)
+            self.assertEqual(fcpxml_meta["audio"]["duration_sec"], 5.0)
+            self.assertIn('id="bgm-1"', fcp7)
+            self.assertIn("<start>0</start>", fcp7)
+            self.assertIn("<end>125</end>", fcp7)
+            self.assertIn("bed.wav", fcp7)
+            self.assertEqual(fcp7_meta["audio"]["fade_out_sec"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()
