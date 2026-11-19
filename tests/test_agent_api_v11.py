@@ -222,8 +222,35 @@ class AgentClipServiceTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["output_path"], output)
             self.assertEqual(payload["encode_mode"], "copy")
+            self.assertNotIn("actual_duration_sec", payload)
             mock_export.assert_called_once()
             self.assertEqual(mock_export.call_args.kwargs.get("encode_mode"), "copy")
+
+    @patch("src.media.probe.get_video_duration_seconds", return_value=16.28)
+    @patch("src.services.clip_export_service.output_path_allowed", return_value=True)
+    @patch("src.utils.has_ffmpeg", return_value=True)
+    @patch("src.services.clip_export_service.export_original_clip")
+    @patch("src.utils.get_video_duration_seconds", return_value=100.0)
+    def test_copy_export_reports_the_file_duration(self, _duration, mock_export, _ffmpeg, _allowed, _probe):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "src.mp4")
+            output = os.path.join(tmp, "out.mp4")
+            with open(source, "wb") as handle:
+                handle.write(b"0")
+            with open(output, "wb") as handle:
+                handle.write(b"x" * 64)
+            mock_export.return_value = type("R", (), {"returncode": 0, "stderr": b""})()
+            payload = execute_export_clip(
+                video_path=source,
+                start_sec=1300.0,
+                end_sec=1306.0,
+                output_path=output,
+                encode_mode="copy",
+                config={"export_copy_margin_sec": 2.0, "export_copy_extra_sec": 4},
+            )
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["duration_sec"], 10.0)
+        self.assertEqual(payload["actual_duration_sec"], 16.28)
 
     @patch("src.services.clip_export_service.output_path_allowed", return_value=True)
     @patch("src.utils.has_ffmpeg", return_value=True)

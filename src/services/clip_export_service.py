@@ -78,6 +78,29 @@ _original_export_semaphore = threading.Semaphore(MAX_CONCURRENT_ORIGINAL_EXPORTS
 _copy_export_semaphore = threading.Semaphore(MAX_CONCURRENT_COPY_EXPORTS)
 
 
+def _output_duration_sec(path: str) -> Optional[float]:
+    """Container duration of a written clip. Copy mode can run long past the planned window."""
+    try:
+        if os.path.getsize(path) < 32:
+            return None
+    except OSError:
+        return None
+    try:
+        from src.media.probe import get_video_duration_seconds
+
+        value = float(get_video_duration_seconds(path))
+    except (TypeError, ValueError, OSError):
+        return None
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/clip_export_service.py:output_duration")
+        return None
+    if value <= 0:
+        return None
+    return round(value, 3)
+
+
 def resolve_clip_window(
     video_path: str,
     start_sec: float,
@@ -329,6 +352,9 @@ def execute_export_clip(
             "silent": use_silent,
         },
     }
+    actual_duration = _output_duration_sec(destination)
+    if actual_duration is not None:
+        payload["actual_duration_sec"] = actual_duration
     if client_request_id:
         payload["client_request_id"] = str(client_request_id)
     return payload

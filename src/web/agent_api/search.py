@@ -531,6 +531,61 @@ def _hits_to_payload(
     return payloads
 
 
+def _score_spread(hits: List[SearchHit]) -> Dict[str, Any]:
+    """Top score against the fifth hit, or the last hit when the page is shorter.
+
+    The number is a cosine, not a probability. A gap near zero means this page
+    is flat, so rank alone does not say the first row is a real match.
+    """
+    scores = [float(hit.score) for hit in hits]
+    if not scores:
+        return {"top1": None, "compared_rank": 0, "compared_score": None, "gap": None}
+    index = min(4, len(scores) - 1)
+    top1 = scores[0]
+    compared = scores[index]
+    return {
+        "top1": top1,
+        "compared_rank": index + 1,
+        "compared_score": compared,
+        "gap": top1 - compared,
+    }
+
+
+def _annotate_repeated_shots(hits: List[SearchHit], payloads: List[Dict[str, Any]], vectors, config) -> None:
+    """Mark later rows that are the same shot as an earlier row. Rows stay in place.
+
+    ``same_shot_count`` counts this page only, not every episode in the library.
+    """
+    if len(hits) < 2 or len(payloads) != len(hits):
+        return
+    sensitivity = str((config or {}).get("search_result_grouping_sensitivity") or "standard").strip().lower()
+    if sensitivity not in {"loose", "standard", "strict"}:
+        sensitivity = "standard"
+    try:
+        from src.services.search_result_groups import group_search_hits
+
+        groups = group_search_hits(hits, vectors, enabled=True, sensitivity=sensitivity)
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/web/agent_api/search.py:annotate_repeated_shots")
+        return
+    index_by_id = {id(hit): index for index, hit in enumerate(hits)}
+    for group in groups:
+        indexes = [index_by_id[id(hit)] for hit in group.members if id(hit) in index_by_id]
+        if len(indexes) < 2:
+            continue
+        lead = min(indexes)
+        payloads[lead]["same_shot_count"] = len(indexes)
+        lead_id = str(payloads[lead].get("video_id") or "").strip()
+        for index in indexes:
+            if index == lead:
+                continue
+            payloads[index]["duplicate_of_rank"] = payloads[lead]["rank"]
+            if lead_id:
+                payloads[index]["duplicate_of"] = lead_id
+
+
 def _filter_hits(hits: List[SearchHit], min_score: Optional[float]) -> List[SearchHit]:
     from src.services.search_query import filter_hits_by_min_score
 
@@ -949,8 +1004,9 @@ def _execute_agent_search_work(body: AgentSearchRequest) -> Dict[str, Any]:
         )
 
     hits = _filter_hits(hits, resolved["min_score"])
+    want_frame_vectors = bool(getattr(body, "include_frame_vectors", False))
     frame_vectors = None
-    if bool(getattr(body, "include_frame_vectors", False)):
+    if want_frame_vectors or len(hits) >= 2:
         from src.services.search_result_groups import fetch_hit_frame_vectors
 
         frame_vectors = fetch_hit_frame_vectors(hits, config)
@@ -971,11 +1027,12 @@ def _execute_agent_search_work(body: AgentSearchRequest) -> Dict[str, Any]:
             pad_before_sec=_bounded_pad_sec(body.pad_before_sec, field_name="pad_before_sec"),
             pad_after_sec=_bounded_pad_sec(body.pad_after_sec, field_name="pad_after_sec"),
             team_play_urls=bool(getattr(body, "team_play_urls", False) or resolved.get("team_play_urls")),
-            frame_vectors=frame_vectors,
+            frame_vectors=frame_vectors if want_frame_vectors else None,
         ),
         "meta": {
             "returned": len(hits),
             "top_k": top_k,
+            "score_spread": _score_spread(hits),
             "fetch_top_k": fetch_k,
             "search_precision_mode": resolved["search_precision_mode"],
             "video_discovery_enabled": resolved.get("video_discovery_enabled"),
@@ -996,6 +1053,7 @@ def _execute_agent_search_work(body: AgentSearchRequest) -> Dict[str, Any]:
         preset = resolved.get("preset") or {}
         if preset.get("name"):
             response["preset_name"] = str(preset.get("name"))
+    _annotate_repeated_shots(hits, response["hits"], frame_vectors, config)
     return response
 
 
@@ -1061,6 +1119,7 @@ def _execute_agent_dialogue_search(body: AgentSearchRequest, *, config=None) -> 
             "returned": len(hits),
             "top_k": top_k,
             "fetch_top_k": fetch_k,
+            "score_spread": _score_spread(hits),
             "dialogue_index_ready": bool(dialogue_stats.get("dialogue_index_ready")),
             "dialogue_indexed_videos": int(dialogue_stats.get("dialogue_indexed_videos") or 0),
             "dialogue_rows": int(dialogue_stats.get("dialogue_rows") or 0),
@@ -1134,6 +1193,7 @@ def _execute_agent_tag_search(body: AgentSearchRequest, *, config=None) -> Dict[
             "returned": len(hits),
             "top_k": top_k,
             "fetch_top_k": fetch_k,
+            "score_spread": _score_spread(hits),
             "tag_index_ready": bool(tag_stats.get("tag_index_ready")),
             "tag_indexed_videos": int(tag_stats.get("tag_indexed_videos") or 0),
             "tag_rows": int(tag_stats.get("tag_rows") or 0),

@@ -46,6 +46,7 @@ def _search_lance_chunk_results(index: LanceTableSearchIndex, query_vector, top_
                 end_time,
                 float(row.score),
                 str(row.video_path or ""),
+                match_kind="chunk",
                 video_id=str(row.video_id or ""),
             )
         )
@@ -108,7 +109,13 @@ def _search_chunk_results(query_vector, index, ranges, video_paths, top_k) -> Li
         start_time = float(time_range[0])
         end_time = float(time_range[1])
         matched_results.append(
-            SearchHit(start_time, end_time, float(distances[0][rank]), video_paths[index_value])
+            SearchHit(
+                start_time,
+                end_time,
+                float(distances[0][rank]),
+                video_paths[index_value],
+                match_kind="chunk",
+            )
         )
     return matched_results
 

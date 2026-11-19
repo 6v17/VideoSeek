@@ -105,6 +105,9 @@ _TOOLS: list[dict[str, Any]] = [
             "或用 image_folder 把文件夹里的图片各搜一次。"
             "search_kind 为 visual（默认画面）、dialogue（台词）或 tags。"
             "结果是路径和时间，不是画面。要看画面再调用 extract_frames。"
+            "score 是余弦相似度，不是概率。meta.score_spread.gap 是第 1 条和第 5 条"
+            "（不足 5 条则最后一条）的分差，接近 0 表示这一页挤在一起。"
+            "duplicate_of_rank 指向同一镜头里更靠前的一条；same_shot_count 只统计这一页。"
             + _PATH_RULE
         ),
         "inputSchema": {
@@ -146,6 +149,7 @@ _TOOLS: list[dict[str, Any]] = [
         "description": (
             "按 video_path 和 time_sec 抽 JPEG，一次 1 到 16 帧。"
             "video_path 必须来自 search 或 list_libraries。"
+            "粗筛确认时传 max_edge: 480，默认 1280。"
         ),
         "inputSchema": {
             "type": "object",
@@ -176,7 +180,8 @@ _TOOLS: list[dict[str, Any]] = [
         "name": "export_clips",
         "description": (
             "导出 mp4 片段。一条可以用 output_dir；多条时每条都要自己的 output_path。"
-            "encode_mode 用 copy（快）或 original（切点更准）。"
+            "encode_mode 用 copy（快，会贴到前一个关键帧）或 original（切点更准）。"
+            "duration_sec 是计划窗口，actual_duration_sec 是成片时长。"
             + _PATH_RULE
         ),
         "inputSchema": {

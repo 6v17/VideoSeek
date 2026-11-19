@@ -206,6 +206,7 @@ def _chunk_hit_from_range(frame_hit: SearchHit, chunk_start: float, chunk_end: f
         end,
         float(frame_hit.score),
         str(frame_hit.video_path),
+        match_kind="chunk",
         video_id=str(frame_hit.video_id or ""),
         peak_sec=peak,
     )

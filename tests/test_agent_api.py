@@ -443,7 +443,73 @@ class AgentApiSearchTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "frame")
         self.assertEqual(payload["client_request_id"], "beat-01")
         self.assertEqual(len(payload["hits"]), 1)
+        self.assertEqual(payload["meta"]["score_spread"]["compared_rank"], 1)
+        self.assertAlmostEqual(payload["meta"]["score_spread"]["gap"], 0.0)
+        self.assertNotIn("duplicate_of_rank", payload["hits"][0])
+        self.assertNotIn("frame_vector", payload["hits"][0])
         mock_run_search.assert_called_once()
+
+    @patch("src.web.agent_api.search._get_video_duration_cached", return_value=None)
+    @patch("src.services.search_result_groups.fetch_hit_frame_vectors")
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
+    def test_search_reports_score_gap_and_repeated_shots(
+        self, mock_run_search, mock_snapshot, mock_vectors, _duration
+    ):
+        import numpy as np
+
+        mock_snapshot.return_value = {
+            "index_ready": True,
+            "global_index_state": "fresh",
+        }
+        mock_run_search.return_value = [
+            SearchHit(1.0, 1.0, 0.50, "D:/ep1.mp4", video_id="aaa"),
+            SearchHit(2.0, 2.0, 0.49, "D:/ep2.mp4", video_id="bbb"),
+            SearchHit(3.0, 3.0, 0.20, "D:/other.mp4", video_id="ccc"),
+            SearchHit(4.0, 4.0, 0.19, "D:/d.mp4", video_id="ddd"),
+            SearchHit(5.0, 5.0, 0.18, "D:/e.mp4", video_id="eee"),
+        ]
+        mock_vectors.return_value = [
+            np.array([1.0, 0.0], dtype=np.float32),
+            np.array([1.0, 0.0], dtype=np.float32),
+            np.array([0.0, 1.0], dtype=np.float32),
+            np.array([0.0, 1.0], dtype=np.float32),
+            np.array([0.0, 1.0], dtype=np.float32),
+        ]
+        payload = execute_agent_search(AgentSearchRequest(query="ending", top_k=5, mode="frame"))
+        spread = payload["meta"]["score_spread"]
+        self.assertEqual(spread["compared_rank"], 5)
+        self.assertAlmostEqual(spread["top1"], 0.50)
+        self.assertAlmostEqual(spread["gap"], 0.32)
+        self.assertEqual(len(payload["hits"]), 5)
+        self.assertEqual(payload["hits"][0]["same_shot_count"], 2)
+        self.assertEqual(payload["hits"][1]["duplicate_of_rank"], 1)
+        self.assertEqual(payload["hits"][1]["duplicate_of"], "aaa")
+        self.assertNotIn("frame_vector", payload["hits"][0])
+        self.assertEqual(payload["hits"][2]["same_shot_count"], 3)
+        self.assertEqual(payload["hits"][4]["duplicate_of_rank"], 3)
+
+    def test_chunk_ranges_are_labeled_chunk(self):
+        from src.services.search_chunk_pipeline import _chunk_hit_from_range
+        from src.services.search_frame_query import _search_lance_chunk_results
+
+        aggregated = _chunk_hit_from_range(SearchHit(1.2, 1.2, 0.4, "D:/a.mp4"), 1.0, 2.0)
+        self.assertEqual(aggregated.match_kind, "chunk")
+        self.assertAlmostEqual(aggregated.end_sec - aggregated.start_sec, 1.0)
+
+        class _Row:
+            start = 1.0
+            end = 2.0
+            score = 0.3
+            video_path = "D:/a.mp4"
+            video_id = "abc"
+
+        class _Index:
+            def search_rows(self, _vector, _top_k):
+                return [_Row()]
+
+        labeled = _search_lance_chunk_results(_Index(), None, 1)
+        self.assertEqual(labeled[0].match_kind, "chunk")
 
     @patch("src.web.agent_api.search._index_snapshot")
     @patch("src.web.agent_api.search.run_search")
