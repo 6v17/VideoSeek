@@ -32,6 +32,8 @@ logger = get_logger("gui_preview")
 
 _FLOATING_PREVIEW_SIZE = (1000, 660)
 _FLOATING_PREVIEW_MIN = (720, 480)
+# Windowed large preview fills the screen minus a thin margin; 全屏 uses showFullScreen.
+_FLOATING_PREVIEW_SCREEN_MARGIN = 8
 
 
 def floating_preview_top_left(
@@ -46,6 +48,24 @@ def floating_preview_top_left(
     x = int(frame_x + max(0, (int(frame_width) - int(dialog_width)) // 2))
     y = int(frame_y + max(0, (int(frame_height) - int(dialog_height)) // 2))
     return x, y
+
+
+def floating_preview_size_for(window=None) -> tuple[int, int]:
+    """Nearly the full screen the main window sits on — not a fixed 1000×660 box."""
+    screen = None
+    try:
+        if window is not None:
+            screen = window.screen()
+    except Exception:
+        screen = None
+    if screen is None:
+        screen = QGuiApplication.primaryScreen()
+    if screen is None:
+        return _FLOATING_PREVIEW_SIZE
+    geo = screen.availableGeometry()
+    width = max(_FLOATING_PREVIEW_MIN[0], int(geo.width()) - _FLOATING_PREVIEW_SCREEN_MARGIN)
+    height = max(_FLOATING_PREVIEW_MIN[1], int(geo.height()) - _FLOATING_PREVIEW_SCREEN_MARGIN)
+    return width, height
 
 
 class _NearbyCandidateButton(QPushButton):
@@ -556,11 +576,16 @@ class PreviewGuiMixin:
             layout.removeWidget(dialog)
         if not getattr(self, "_search_preview_embedded", False):
             return
-        self._search_preview_embedded = False
-        stack = getattr(page, "browse_stack", None)
-        if stack is not None:
-            stack.setCurrentIndex(0)
-        self._set_docked_preview_visible(True)
+        self._begin_preview_layout_transition(dialog)
+        try:
+            self._search_preview_embedded = False
+            self._apply_search_preview_app_fill(False)
+            stack = getattr(page, "browse_stack", None)
+            if stack is not None:
+                stack.setCurrentIndex(0)
+            self._set_docked_preview_visible(True)
+        finally:
+            self._end_preview_layout_transition(dialog, show_video=False)
 
     def _detach_understanding_preview_host(self, dialog) -> None:
         page = getattr(self, "understanding_page", None)
@@ -582,30 +607,84 @@ class PreviewGuiMixin:
         return_page = str(getattr(self, "_preview_return_page", "") or "")
         self._preview_return_page = ""
         self._preview_strip_kind = ""
-        self._search_preview_embedded = False
         dialog = getattr(self, "_preview_dialog", None)
-        if dialog is not None:
-            dialog._on_embedded_escape = None
-        page = getattr(self, "search_page", None)
-        stack = getattr(page, "browse_stack", None)
-        if stack is not None:
-            stack.setCurrentIndex(0)
-        self._set_docked_preview_visible(True)
-        self._reveal_current_playing_result()
-        if dialog is not None:
-            player = getattr(dialog, "player", None)
-            try:
-                if player is not None and hasattr(player, "pause"):
-                    player.pause()
-            except Exception as exc:
-                logger.debug("Pause in-page preview skipped: %s", exc)
-            dialog.hide()
-        thread = getattr(self, "_same_video_thumb_thread", None)
-        if thread is not None:
-            thread.stop()
-        self._sync_preview_layer_chrome()
+        self._begin_preview_layout_transition(dialog)
+        try:
+            self._search_preview_embedded = False
+            if dialog is not None:
+                dialog._on_embedded_escape = None
+            self._apply_search_preview_app_fill(False)
+            page = getattr(self, "search_page", None)
+            stack = getattr(page, "browse_stack", None)
+            if stack is not None:
+                stack.setCurrentIndex(0)
+            self._set_docked_preview_visible(True)
+            self._reveal_current_playing_result()
+            if dialog is not None:
+                player = getattr(dialog, "player", None)
+                try:
+                    if player is not None and hasattr(player, "pause"):
+                        player.pause()
+                except Exception as exc:
+                    logger.debug("Pause in-page preview skipped: %s", exc)
+                dialog.hide()
+            thread = getattr(self, "_same_video_thumb_thread", None)
+            if thread is not None:
+                thread.stop()
+            self._sync_preview_layer_chrome()
+        finally:
+            self._end_preview_layout_transition(dialog, show_video=False)
         if return_page and return_page != "search" and hasattr(self, "switch_page"):
             self.switch_page(return_page)
+
+    def _apply_search_preview_app_fill(self, active: bool) -> None:
+        """Hide shell chrome so the in-page player can fill the software UI."""
+        page = getattr(self, "search_page", None)
+        active = bool(active)
+        if active:
+            if getattr(self, "_search_preview_app_fill", False):
+                return
+            self._search_preview_app_fill = True
+            self._preview_fill_sidebar_was_hidden = bool(getattr(self, "_sidebar_hidden", False))
+            if not self._preview_fill_sidebar_was_hidden and hasattr(self, "_set_sidebar_hidden"):
+                self._set_sidebar_hidden(True)
+            panel = getattr(page, "search_panel", None)
+            if panel is not None:
+                panel.setVisible(False)
+            header = getattr(page, "header", None)
+            if header is not None:
+                header.setVisible(False)
+            restore = getattr(self, "btn_sidebar_restore", None)
+            if restore is not None:
+                restore.hide()
+            banner = getattr(self, "runtime_banner", None)
+            if banner is not None:
+                self._preview_fill_banner_was_visible = banner.isVisible()
+                banner.hide()
+            return
+        if not getattr(self, "_search_preview_app_fill", False):
+            return
+        self._search_preview_app_fill = False
+        panel = getattr(page, "search_panel", None)
+        if panel is not None:
+            panel.setVisible(True)
+        header = getattr(page, "header", None)
+        if header is not None:
+            header.setVisible(True)
+        banner = getattr(self, "runtime_banner", None)
+        if banner is not None and getattr(self, "_preview_fill_banner_was_visible", False):
+            banner.show()
+        if not getattr(self, "_preview_fill_sidebar_was_hidden", False) and hasattr(
+            self, "_set_sidebar_hidden"
+        ):
+            self._set_sidebar_hidden(False)
+        elif getattr(self, "_preview_fill_sidebar_was_hidden", False):
+            restore = getattr(self, "btn_sidebar_restore", None)
+            if restore is not None:
+                restore.show()
+                place = getattr(self, "_place_sidebar_restore", None)
+                if callable(place):
+                    place()
 
     def _sync_preview_layer_chrome(self) -> None:
         page = self._preview_chrome()
@@ -634,6 +713,84 @@ class PreviewGuiMixin:
             label.setText(self.texts.get("search_preview_strip", "同视频就近候选"))
             label.setToolTip(self.texts.get("search_preview_strip_tip", "双击播放"))
 
+    def _begin_preview_layout_transition(self, dialog=None) -> None:
+        """Hide the native picture while chrome changes, so VLC does not stretch mid-layout."""
+        self._preview_layout_frozen = True
+        video = getattr(dialog, "video_host", None) if dialog is not None else None
+        if video is not None:
+            video.hide()
+        freeze = getattr(self, "setUpdatesEnabled", None)
+        if callable(freeze):
+            freeze(False)
+
+    def _end_preview_layout_transition(self, dialog=None, *, show_video: bool = True) -> None:
+        page = getattr(self, "search_page", None)
+        update = getattr(page, "updateGeometry", None)
+        if callable(update):
+            update()
+        root = getattr(self, "centralWidget", lambda: None)()
+        layout = root.layout() if root is not None else None
+        if layout is not None:
+            layout.activate()
+        thaw = getattr(self, "setUpdatesEnabled", None)
+        self._preview_layout_frozen = False
+        if callable(thaw):
+            thaw(True)
+        video = getattr(dialog, "video_host", None) if dialog is not None else None
+        if show_video and video is not None and dialog is not None and dialog.isVisible():
+            video.show()
+        if show_video and dialog is not None:
+            self._rebind_preview_output(dialog)
+            return
+        player = getattr(getattr(self, "preview_controller", None), "vlc_player", None)
+        if player is not None and hasattr(player, "rebind_output_window"):
+            QTimer.singleShot(0, player.rebind_output_window)
+            QTimer.singleShot(80, player.rebind_output_window)
+
+    def _park_docked_preview_surface(self) -> None:
+        """Take the docked VLC hwnd off-screen before the column yields."""
+        stack = getattr(self, "preview_surface_stack", None)
+        placeholder = getattr(getattr(self, "search_page", None), "preview_placeholder", None)
+        if stack is not None and placeholder is not None:
+            stack.setCurrentWidget(placeholder)
+        sync = getattr(self, "_sync_docked_native_surfaces", None)
+        if callable(sync):
+            sync()
+
+    def _mount_embedded_preview_dialog(self, dialog, host, layout) -> None:
+        already = (
+            dialog.parentWidget() is host
+            and layout.indexOf(dialog) >= 0
+            and not dialog.isWindow()
+        )
+        if not already:
+            dialog.hide()
+            dialog.setWindowFlags(Qt.WindowType.Widget)
+            dialog.setParent(host)
+            dialog.setMinimumSize(0, 0)
+            dialog.setMaximumSize(16777215, 16777215)
+            dialog.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            if hasattr(dialog, "video_host"):
+                dialog.video_host.setMinimumHeight(0)
+                dialog.video_host.setMaximumHeight(16777215)
+                dialog.video_host.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+                )
+            if layout.indexOf(dialog) < 0:
+                layout.addWidget(dialog, 1)
+            dialog.show()
+        elif not dialog.isVisible():
+            dialog.show()
+        dialog.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        if hasattr(dialog, "video_host"):
+            dialog.video_host.setMinimumHeight(0)
+            dialog.video_host.setMaximumHeight(16777215)
+            dialog.video_host.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
+            if getattr(self, "_preview_layout_frozen", False):
+                dialog.video_host.hide()
+
     def _present_embedded_preview(self, dialog) -> None:
         self._detach_understanding_preview_host(dialog)
         surface = self._preview_chrome()
@@ -648,36 +805,10 @@ class PreviewGuiMixin:
             return
         host = surface.preview_layer_host
         layout = surface.preview_layer_host_layout
-        already = (
-            dialog.parentWidget() is host
-            and layout.indexOf(dialog) >= 0
-            and not dialog.isWindow()
-        )
-        if not already:
-            dialog.hide()
-            dialog.setWindowFlags(Qt.WindowType.Widget)
-            dialog.setParent(host)
-            dialog.setMinimumSize(0, 0)
-            dialog.setMaximumSize(16777215, 16777215)
-            dialog.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
-            if hasattr(dialog, "video_host"):
-                dialog.video_host.setMinimumHeight(0)
-                dialog.video_host.setMaximumHeight(16777215)
-                dialog.video_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
-            if layout.indexOf(dialog) < 0:
-                layout.addWidget(dialog, 1)
-            dialog.show()
-            self._rebind_preview_output(dialog)
-        elif not dialog.isVisible():
-            dialog.show()
-            self._rebind_preview_output(dialog)
-        dialog.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
-        if hasattr(dialog, "video_host"):
-            dialog.video_host.setMinimumHeight(0)
-            dialog.video_host.setMaximumHeight(16777215)
-            dialog.video_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self._set_preview_fullscreen_button(dialog, visible=False)
         if on_understanding:
+            self._mount_embedded_preview_dialog(dialog, host, layout)
+            self._rebind_preview_output(dialog)
             dialog._on_embedded_escape = self._leave_understanding_embedded_preview
             self._understanding_preview_embedded = True
             self._search_preview_embedded = False
@@ -687,12 +818,19 @@ class PreviewGuiMixin:
             stack = getattr(search, "browse_stack", None)
             if stack is not None:
                 stack.setCurrentIndex(0)
-        else:
+            return
+        self._begin_preview_layout_transition(dialog)
+        try:
+            self._park_docked_preview_surface()
+            self._apply_search_preview_app_fill(True)
+            self._set_docked_preview_visible(False)
+            search.browse_stack.setCurrentWidget(search.preview_layer)
+            self._mount_embedded_preview_dialog(dialog, host, layout)
             dialog._on_embedded_escape = self._leave_search_preview_layer
             self._search_preview_embedded = True
             self._understanding_preview_embedded = False
-            search.browse_stack.setCurrentWidget(search.preview_layer)
-            self._set_docked_preview_visible(False)
+        finally:
+            self._end_preview_layout_transition(dialog)
 
     def _present_understanding_preview(self, dialog) -> None:
         page = getattr(self, "understanding_page", None)
@@ -801,8 +939,8 @@ class PreviewGuiMixin:
         dialog.setMaximumSize(16777215, 16777215)
         dialog.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         dialog.setMinimumSize(*_FLOATING_PREVIEW_MIN)
-        if dialog.width() < _FLOATING_PREVIEW_MIN[0] or dialog.height() < _FLOATING_PREVIEW_MIN[1]:
-            dialog.resize(*_FLOATING_PREVIEW_SIZE)
+        if not dialog.isFullScreen():
+            dialog.resize(*floating_preview_size_for(self))
         if hasattr(dialog, "video_host"):
             dialog.video_host.setMinimumHeight(480)
             dialog.video_host.setMaximumHeight(16777215)
@@ -826,8 +964,14 @@ class PreviewGuiMixin:
         dialog.move(x, y)
 
     def _rebind_preview_output(self, dialog) -> None:
+        if getattr(self, "_preview_layout_frozen", False):
+            return
         player = getattr(dialog, "player", None)
         if player is None or not hasattr(player, "rebind_output_window"):
+            return
+        schedule = getattr(player, "_schedule_rebind", None)
+        if callable(schedule):
+            schedule(delay_ms=80)
             return
         QTimer.singleShot(0, player.rebind_output_window)
         QTimer.singleShot(80, player.rebind_output_window)
@@ -849,13 +993,7 @@ class PreviewGuiMixin:
             return
         if not getattr(self, "_search_preview_embedded", False):
             return
-        self._search_preview_embedded = False
-        page = getattr(self, "search_page", None)
-        stack = getattr(page, "browse_stack", None)
-        if stack is not None:
-            stack.setCurrentIndex(0)
-        self._set_docked_preview_visible(True)
-        self._reveal_current_playing_result()
+        self._leave_search_preview_layer()
 
     def _preview_strip_signature_matches(self, page, signature) -> bool:
         if getattr(page, "_strip_signature", None) != signature:
@@ -1816,7 +1954,7 @@ class PreviewGuiMixin:
         self._clear_preview_detail()
 
     def _on_preview_maximize_toggled(self, maximized: bool):
-        """Docked player: this button opens the full-page layer instead of covering the list."""
+        """Docked 全屏 stays inside the app and fills the software UI."""
         panel = getattr(self.search_page, "preview_panel", None)
         if panel is not None and getattr(panel, "_docked", False):
             chrome = self.search_page.expanded_chrome

@@ -1501,7 +1501,7 @@ class PreviewDialogTests(unittest.TestCase):
         dialog.showFullScreen = lambda: state.update(full=True) or setattr(dialog, "_geometry", fullscreen)
         dialog.showNormal = lambda: state.update(full=False)
 
-        dialog._toggle_fullscreen()
+        dialog.enter_fullscreen()
         self.assertTrue(dialog.isFullScreen())
         self.assertEqual(dialog._geometry.height(), 1080)
 

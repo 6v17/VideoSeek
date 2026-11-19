@@ -19,6 +19,20 @@ class PreviewKeyboardHelperTests(unittest.TestCase):
         self.assertEqual(floating_preview_top_left(1000, 660, 100, 80, 1600, 900), (400, 200))
         self.assertEqual(floating_preview_top_left(2000, 1200, 0, 0, 800, 600), (0, 0))
 
+    def test_floating_preview_size_fills_the_screen(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from PySide6.QtCore import QRect
+
+        from ui.windows.gui_preview import floating_preview_size_for
+
+        screen = SimpleNamespace(availableGeometry=lambda: QRect(0, 0, 1920, 1080))
+        with patch("ui.windows.gui_preview.QGuiApplication.primaryScreen", return_value=screen):
+            width, height = floating_preview_size_for(None)
+        self.assertEqual(width, 1912)
+        self.assertEqual(height, 1072)
+
     def test_clamp_seek_ms(self):
         from ui.playback.preview_keyboard import clamp_seek_ms
 

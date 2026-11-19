@@ -1140,6 +1140,8 @@ class SearchPage(QWidget):
         """After the page grows, bring a squeezed preview back up to the docked width."""
         if getattr(self, "_preview_collapsed", False):
             return
+        if getattr(self, "_preview_column_yielded", False):
+            return
         splitter = getattr(self, "compare_splitter", None)
         if splitter is None or splitter.width() <= 200:
             return

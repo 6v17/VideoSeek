@@ -769,6 +769,10 @@ class MainWindow(
         only moves the card does not resize that window, so the picture stays
         where it was on screen.
         """
+        if getattr(self, "_preview_layout_frozen", False):
+            return
+        if getattr(self, "_search_preview_embedded", False):
+            return
         host = getattr(self, "preview_video_host", None)
         stack = getattr(self, "preview_surface_stack", None)
         page = getattr(self, "search_page", None)

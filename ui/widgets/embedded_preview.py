@@ -87,7 +87,7 @@ class EmbeddedPreviewLayer(QWidget):
         if self.show_detail:
             self.preview_detail = VSCard(variant="sub", margins=(12, 12, 12, 12), spacing=6)
             self.preview_detail.setFixedWidth(280)
-            self.preview_detail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+            self.preview_detail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Maximum)
             detail_layout = self.preview_detail.content_layout
             self.preview_detail_title = QLabel("当前视频")
             self.preview_detail_title.setObjectName("SectionTitle")
@@ -105,8 +105,8 @@ class EmbeddedPreviewLayer(QWidget):
             )
             detail_layout.addWidget(self.preview_detail_title)
             detail_layout.addWidget(self.preview_detail_name)
-            detail_layout.addWidget(self.preview_detail_body, 1)
-            stage_row.addWidget(self.preview_detail, 0)
+            detail_layout.addWidget(self.preview_detail_body, 0)
+            stage_row.addWidget(self.preview_detail, 0, Qt.AlignmentFlag.AlignTop)
         layout.addWidget(stage, 1)
 
         self.preview_strip_wrap = QWidget()

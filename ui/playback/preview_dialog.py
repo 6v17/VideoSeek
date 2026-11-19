@@ -78,14 +78,32 @@ class _PreviewVideoHost(QWidget):
 
     def _follow_embed(self, *, rebind: bool) -> None:
         window = self.window()
+        if getattr(window, "_preview_layout_frozen", False):
+            return
         schedule = getattr(window, "_schedule_preview_video_frame", None)
         if callable(schedule):
             schedule()
         if not rebind:
             return
         player = self._player
+        if player is None or not getattr(player, "is_available", lambda: False)():
+            return
+        timer = getattr(self, "_resize_rebind_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(80)
+            timer.timeout.connect(self._rebind_after_resize)
+            self._resize_rebind_timer = timer
+        timer.start()
+
+    def _rebind_after_resize(self) -> None:
+        window = self.window()
+        if getattr(window, "_preview_layout_frozen", False):
+            return
+        player = self._player
         if player is not None and getattr(player, "is_available", lambda: False)():
-            QTimer.singleShot(0, player.rebind_output_window)
+            player.rebind_output_window()
 
 
 class ExportCancelledError(Exception):
@@ -674,6 +692,27 @@ class PreviewDialog(QDialog):
         QTimer.singleShot(0, lambda g=geo: self._apply_restored_geometry(g))
         self._schedule_rebind()
 
+    def enter_fullscreen(self):
+        """Fill the monitor. Used by search 全屏 so the picture matches the screen."""
+        if self._closing or self.isFullScreen():
+            return
+        self._capture_window_geometry()
+        # Dialog flag can keep a windowed box on some Windows setups; promote first.
+        flags = self.windowFlags()
+        if flags & Qt.WindowType.Dialog:
+            self.setWindowFlags(
+                (flags & ~Qt.WindowType.Dialog)
+                | Qt.WindowType.Window
+                | Qt.WindowType.WindowTitleHint
+                | Qt.WindowType.WindowSystemMenuHint
+                | Qt.WindowType.WindowCloseButtonHint
+                | Qt.WindowType.WindowMinMaxButtonsHint
+            )
+            self.show()
+        self.showFullScreen()
+        self.chrome.set_maximized_state(True)
+        self._schedule_rebind()
+
     def _toggle_fullscreen(self):
         if self._closing:
             return
@@ -681,10 +720,7 @@ class PreviewDialog(QDialog):
             self._exit_fullscreen()
             self.chrome.set_maximized_state(False)
             return
-        self._capture_window_geometry()
-        self.showFullScreen()
-        self.chrome.set_maximized_state(True)
-        self._schedule_rebind()
+        self.enter_fullscreen()
 
     def _set_caption_text(self, caption_text=None):
         text = str(caption_text or "").strip()
