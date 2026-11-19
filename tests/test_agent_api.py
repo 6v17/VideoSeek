@@ -447,6 +447,8 @@ class AgentApiSearchTests(unittest.TestCase):
         self.assertAlmostEqual(payload["meta"]["score_spread"]["gap"], 0.0)
         self.assertNotIn("duplicate_of_rank", payload["hits"][0])
         self.assertNotIn("frame_vector", payload["hits"][0])
+        self.assertNotIn("thumb_base64", payload["hits"][0])
+        self.assertNotIn("thumbs_attached", payload["meta"])
         mock_run_search.assert_called_once()
 
     @patch("src.web.agent_api.search._get_video_duration_cached", return_value=None)
@@ -510,6 +512,95 @@ class AgentApiSearchTests(unittest.TestCase):
 
         labeled = _search_lance_chunk_results(_Index(), None, 1)
         self.assertEqual(labeled[0].match_kind, "chunk")
+
+    def test_search_thumb_edge_stays_small(self):
+        from src.web.agent_api.frames import clamp_search_thumb_edge
+
+        self.assertEqual(clamp_search_thumb_edge(None), 320)
+        self.assertEqual(clamp_search_thumb_edge(900), 640)
+        self.assertEqual(clamp_search_thumb_edge(10), 64)
+        with self.assertRaises(ValueError):
+            clamp_search_thumb_edge("no")
+
+    @patch("src.media.thumbnail.get_single_thumbnail")
+    def test_encode_search_thumb_shrinks_the_frame(self, mock_grab):
+        import numpy as np
+
+        from src.web.agent_api.frames import encode_search_thumb
+
+        mock_grab.return_value = np.zeros((720, 1280, 3), dtype=np.uint8)
+        encoded = encode_search_thumb("D:/a.mp4", 4.25, 320)
+        mock_grab.assert_called_once_with("D:/a.mp4", 4.25)
+        self.assertEqual(encoded["thumb_width"], 320)
+        self.assertEqual(encoded["thumb_height"], 180)
+        self.assertEqual(encoded["thumb_time_sec"], 4.25)
+        self.assertTrue(encoded["thumb_base64"])
+
+    @patch("src.web.agent_api.search._get_video_duration_cached", return_value=None)
+    @patch("src.services.search_result_groups.fetch_hit_frame_vectors")
+    @patch("src.web.agent_api.frames.encode_search_thumb")
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
+    def test_return_thumbs_uses_the_scoring_frame_and_skips_repeats(
+        self, mock_run_search, mock_snapshot, mock_encode, mock_vectors, _duration
+    ):
+        import numpy as np
+
+        mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
+        mock_run_search.return_value = [
+            SearchHit(1.0, 6.0, 0.50, "D:/ep1.mp4", match_kind="chunk", video_id="aaa", peak_sec=4.0),
+            SearchHit(2.0, 7.0, 0.49, "D:/ep2.mp4", match_kind="chunk", video_id="bbb", peak_sec=5.0),
+            SearchHit(8.0, 8.0, 0.20, "D:/other.mp4", video_id="ccc"),
+        ]
+        mock_vectors.return_value = [
+            np.array([1.0, 0.0], dtype=np.float32),
+            np.array([1.0, 0.0], dtype=np.float32),
+            np.array([0.0, 1.0], dtype=np.float32),
+        ]
+        mock_encode.side_effect = lambda path, time_sec, edge: {
+            "thumb_base64": "aa",
+            "thumb_width": edge,
+            "thumb_height": 180,
+            "thumb_time_sec": time_sec,
+        }
+        payload = execute_agent_search(
+            AgentSearchRequest(query="ending", top_k=3, mode="frame", return_thumbs=True)
+        )
+        self.assertEqual(payload["meta"]["thumbs_attached"], 2)
+        self.assertEqual(payload["meta"]["thumbs_omitted"], 0)
+        self.assertEqual(payload["meta"]["thumb_max_edge"], 320)
+        self.assertEqual(payload["hits"][0]["thumb_time_sec"], 4.0)
+        self.assertEqual(payload["hits"][1]["duplicate_of_rank"], 1)
+        self.assertNotIn("thumb_base64", payload["hits"][1])
+        self.assertEqual(payload["hits"][2]["thumb_time_sec"], 8.0)
+        self.assertEqual(mock_encode.call_args_list[0].args, ("D:/ep1.mp4", 4.0, 320))
+        self.assertEqual(mock_encode.call_args_list[1].args, ("D:/other.mp4", 8.0, 320))
+
+    @patch("src.web.agent_api.search._get_video_duration_cached", return_value=None)
+    @patch("src.services.search_result_groups.fetch_hit_frame_vectors", return_value=[None] * 17)
+    @patch("src.web.agent_api.frames.encode_search_thumb")
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
+    def test_return_thumbs_stops_after_sixteen(
+        self, mock_run_search, mock_snapshot, mock_encode, _vectors, _duration
+    ):
+        mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
+        mock_run_search.return_value = [
+            SearchHit(float(index), float(index), 0.5, f"D:/v{index}.mp4") for index in range(17)
+        ]
+        mock_encode.return_value = {
+            "thumb_base64": "aa",
+            "thumb_width": 320,
+            "thumb_height": 180,
+            "thumb_time_sec": 0.0,
+        }
+        payload = execute_agent_search(
+            AgentSearchRequest(query="crowd", top_k=17, mode="frame", return_thumbs=True)
+        )
+        self.assertEqual(payload["meta"]["thumbs_attached"], 16)
+        self.assertEqual(payload["meta"]["thumbs_omitted"], 1)
+        self.assertNotIn("thumb_base64", payload["hits"][16])
+        self.assertEqual(mock_encode.call_count, 16)
 
     @patch("src.web.agent_api.search._index_snapshot")
     @patch("src.web.agent_api.search.run_search")

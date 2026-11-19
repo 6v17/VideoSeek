@@ -77,6 +77,9 @@ class AgentSearchRequest(BaseModel):
     # Desktop user machines have no frame index. The server attaches each hit's
     # frame vector so grouping matches a search run on the server itself.
     include_frame_vectors: bool = False
+    # Opt-in JPEG on each distinct shot. Off by default so a normal search stays small.
+    return_thumbs: Optional[bool] = None
+    thumb_max_edge: Optional[int] = None
 
 
 class AgentBatchSearchExportOptions(BaseModel):
@@ -107,6 +110,8 @@ class AgentBatchSearchRequest(BaseModel):
     expand_frame_hits: bool = True
     pad_before_sec: float = _pad_field(DEFAULT_FRAME_PAD_BEFORE_SEC)
     pad_after_sec: float = _pad_field(DEFAULT_FRAME_PAD_AFTER_SEC)
+    return_thumbs: Optional[bool] = None
+    thumb_max_edge: Optional[int] = None
     export: Optional[AgentBatchSearchExportOptions] = None
 
 

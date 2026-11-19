@@ -15,6 +15,10 @@ _MIN_FRAME_MAX_EDGE = 64
 _MAX_FRAME_MAX_EDGE = 1920
 _JPEG_QUALITY = 85
 MAX_BATCH_FRAME_EXTRACT = 16
+DEFAULT_SEARCH_THUMB_EDGE = 320
+_MAX_SEARCH_THUMB_EDGE = 640
+_SEARCH_THUMB_JPEG_QUALITY = 80
+MAX_SEARCH_THUMBS = 16
 
 
 def _require_indexed_video_path(video_path: str) -> str:
@@ -49,6 +53,43 @@ def _clamp_max_edge(max_edge: Optional[int]) -> int:
     except (TypeError, ValueError) as exc:
         raise ValueError("max_edge must be an integer") from exc
     return max(_MIN_FRAME_MAX_EDGE, min(_MAX_FRAME_MAX_EDGE, value))
+
+
+def clamp_search_thumb_edge(max_edge: Optional[int]) -> int:
+    """Longest edge for a search thumbnail. Smaller than a full extract frame."""
+    if max_edge is None:
+        return DEFAULT_SEARCH_THUMB_EDGE
+    try:
+        value = int(max_edge)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("thumb_max_edge must be an integer") from exc
+    return max(_MIN_FRAME_MAX_EDGE, min(_MAX_SEARCH_THUMB_EDGE, value))
+
+
+def encode_search_thumb(video_path: str, time_sec: float, max_edge: int) -> Optional[Dict[str, Any]]:
+    """One confirmation JPEG. A miss returns None so the search result still stands."""
+    from src.media.thumbnail import get_single_thumbnail
+
+    frame = get_single_thumbnail(str(video_path or ""), max(0.0, float(time_sec)))
+    if frame is None or getattr(frame, "size", 0) == 0:
+        return None
+    frame = _resize_bgr(frame, int(max_edge))
+    import cv2
+
+    ok, buffer = cv2.imencode(
+        ".jpg",
+        frame,
+        [int(cv2.IMWRITE_JPEG_QUALITY), _SEARCH_THUMB_JPEG_QUALITY],
+    )
+    if not ok or buffer is None:
+        return None
+    height, width = int(frame.shape[0]), int(frame.shape[1])
+    return {
+        "thumb_base64": base64.b64encode(buffer.tobytes()).decode("ascii"),
+        "thumb_width": width,
+        "thumb_height": height,
+        "thumb_time_sec": max(0.0, float(time_sec)),
+    }
 
 
 def _resize_bgr(frame, max_edge: int):

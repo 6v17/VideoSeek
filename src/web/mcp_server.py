@@ -104,7 +104,9 @@ _TOOLS: list[dict[str, Any]] = [
             "在已索引视频里搜索。一次用 query 或 preset_id；多条用 queries；"
             "或用 image_folder 把文件夹里的图片各搜一次。"
             "search_kind 为 visual（默认画面）、dialogue（台词）或 tags。"
-            "结果是路径和时间，不是画面。要看画面再调用 extract_frames。"
+            "默认是路径和时间。确认画面时加 return_thumbs=true，"
+            "每条带一张最长边 320 的 JPEG（thumb_base64），最多 16 张；"
+            "标了 duplicate_of_rank 的行不带图。要更大的图再调用 extract_frames。"
             "score 是余弦相似度，不是概率。meta.score_spread.gap 是第 1 条和第 5 条"
             "（不足 5 条则最后一条）的分差，接近 0 表示这一页挤在一起。"
             "duplicate_of_rank 指向同一镜头里更靠前的一条；same_shot_count 只统计这一页。"
@@ -139,6 +141,8 @@ _TOOLS: list[dict[str, Any]] = [
                 "preview_anchor_sec": {"type": "number"},
                 "locate_anchor_score": {"type": "number"},
                 "locate_score_margin": {"type": "number"},
+                "return_thumbs": {"type": "boolean"},
+                "thumb_max_edge": {"type": "integer"},
                 "continue_on_error": {"type": "boolean"},
             },
             "additionalProperties": False,
@@ -277,6 +281,8 @@ _SEARCH_FIELDS = (
     "preview_anchor_sec",
     "locate_anchor_score",
     "locate_score_margin",
+    "return_thumbs",
+    "thumb_max_edge",
 )
 _BATCH_FIELDS = (
     "queries",
@@ -290,6 +296,8 @@ _BATCH_FIELDS = (
     "text_enhance",
     "continue_on_error",
     "scope",
+    "return_thumbs",
+    "thumb_max_edge",
 )
 
 

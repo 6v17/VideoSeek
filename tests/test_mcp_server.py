@@ -154,6 +154,16 @@ class McpToolRoutingTests(unittest.TestCase):
         self.assertEqual(call["method"], "POST")
         self.assertEqual(call["path"], "/api/v1/search")
         self.assertEqual(call["body"]["query"], "雨夜")
+        self.assertIsNone(call["body"]["return_thumbs"])
+
+    def test_search_forwards_thumbnail_request(self):
+        api = FakeApi()
+        api.next_payload = {"ok": True, "hits": []}
+        self._call(api, "search", {"query": "雨夜", "return_thumbs": True, "thumb_max_edge": 320})
+        body = api.calls[0]["body"]
+        self.assertIs(body["return_thumbs"], True)
+        self.assertEqual(body["thumb_max_edge"], 320)
+        self.assertEqual(api.calls[0]["path"], "/api/v1/search")
 
     def test_search_queries_posts_batch_endpoint(self):
         api = FakeApi()

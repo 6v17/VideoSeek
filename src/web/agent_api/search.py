@@ -586,6 +586,45 @@ def _annotate_repeated_shots(hits: List[SearchHit], payloads: List[Dict[str, Any
                 payloads[index]["duplicate_of"] = lead_id
 
 
+def _thumb_time(hit: SearchHit) -> float:
+    """Frame that scored. Chunk hits keep it on peak_sec; the row start is the segment."""
+    peak = getattr(hit, "peak_sec", None)
+    if peak is not None:
+        return max(0.0, float(peak))
+    return max(0.0, float(hit.start_sec))
+
+
+def _attach_hit_thumbs(body, hits: List[SearchHit], payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """JPEG for each distinct shot. Rows marked duplicate_of_rank reuse the earlier picture."""
+    if not bool(getattr(body, "return_thumbs", False)):
+        return {}
+    from .frames import MAX_SEARCH_THUMBS, clamp_search_thumb_edge, encode_search_thumb
+
+    edge = clamp_search_thumb_edge(getattr(body, "thumb_max_edge", None))
+    attached = 0
+    failed = 0
+    omitted = 0
+    for hit, payload in zip(hits, payloads):
+        if payload.get("duplicate_of_rank"):
+            continue
+        if attached >= MAX_SEARCH_THUMBS:
+            omitted += 1
+            continue
+        path = str(payload.get("video_path") or "").strip()
+        encoded = encode_search_thumb(path, _thumb_time(hit), edge) if path else None
+        if not encoded:
+            failed += 1
+            continue
+        payload.update(encoded)
+        attached += 1
+    return {
+        "thumbs_attached": attached,
+        "thumbs_failed": failed,
+        "thumbs_omitted": omitted,
+        "thumb_max_edge": edge,
+    }
+
+
 def _filter_hits(hits: List[SearchHit], min_score: Optional[float]) -> List[SearchHit]:
     from src.services.search_query import filter_hits_by_min_score
 
@@ -934,6 +973,10 @@ def _skip_edges_meta(config) -> Dict[str, Any]:
 def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
     # Request-scoped cleanup: thread-pool workers reuse threads; never leave a prior
     # search's index-step / edge lookup for the next request on the same thread.
+    if bool(getattr(body, "return_thumbs", False)):
+        from .frames import clamp_search_thumb_edge
+
+        clamp_search_thumb_edge(getattr(body, "thumb_max_edge", None))
     from src.services.search_hit_utils import reset_search_index_steps
 
     reset_search_index_steps()
@@ -1054,6 +1097,9 @@ def _execute_agent_search_work(body: AgentSearchRequest) -> Dict[str, Any]:
         if preset.get("name"):
             response["preset_name"] = str(preset.get("name"))
     _annotate_repeated_shots(hits, response["hits"], frame_vectors, config)
+    thumb_meta = _attach_hit_thumbs(body, hits, response["hits"])
+    if thumb_meta:
+        response["meta"].update(thumb_meta)
     return response
 
 
@@ -1129,6 +1175,9 @@ def _execute_agent_dialogue_search(body: AgentSearchRequest, *, config=None) -> 
     }
     if message:
         response["message"] = message
+    thumb_meta = _attach_hit_thumbs(body, hits, response["hits"])
+    if thumb_meta:
+        response["meta"].update(thumb_meta)
     return response
 
 
@@ -1203,6 +1252,9 @@ def _execute_agent_tag_search(body: AgentSearchRequest, *, config=None) -> Dict[
     }
     if message:
         response["message"] = message
+    thumb_meta = _attach_hit_thumbs(body, hits, response["hits"])
+    if thumb_meta:
+        response["meta"].update(thumb_meta)
     return response
 
 
@@ -1255,6 +1307,16 @@ def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchReque
         locate_anchor_score=item.locate_anchor_score,
         locate_score_margin=item.locate_score_margin,
         team_play_urls=bool(getattr(item, "team_play_urls", False)),
+        return_thumbs=(
+            item.return_thumbs
+            if "return_thumbs" in item.model_fields_set
+            else batch.return_thumbs
+        ),
+        thumb_max_edge=(
+            item.thumb_max_edge
+            if "thumb_max_edge" in item.model_fields_set
+            else batch.thumb_max_edge
+        ),
     )
 
 
