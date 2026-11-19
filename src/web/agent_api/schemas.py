@@ -174,6 +174,25 @@ class AgentTimelineClipItem(BaseModel):
     client_request_id: Optional[str] = None
 
 
+class AgentTimelinePlanShot(BaseModel):
+    """One pool shot. end_sec lets fit_chunk stop at the indexed chunk."""
+
+    video_path: str
+    start_sec: float
+    end_sec: Optional[float] = None
+
+
+class AgentTimelinePlan(BaseModel):
+    """Expand a short shot pool onto a beat grid instead of listing every cut."""
+
+    bpm: float
+    total_sec: float
+    shots: List[AgentTimelinePlanShot] = Field(default_factory=list)
+    beats_per_cut: float = 2.0
+    # When true, a cut is min(chunk_len, beat_len) so a 1s chunk stays 1s.
+    fit_chunk: bool = False
+
+
 class AgentTimelineAudio(BaseModel):
     """One music file laid under the cut. Starts at start_sec and runs to the end."""
 
@@ -188,6 +207,8 @@ class AgentTimelineExportRequest(BaseModel):
 
     format: str
     items: List[AgentTimelineClipItem] = Field(default_factory=list)
+    # Prefer this over hand-written items when the cut follows a beat grid.
+    plan: Optional[AgentTimelinePlan] = None
     audio: Optional[AgentTimelineAudio] = None
     # Default true: one clip per video_path + start (±1s). false keeps the raw list.
     dedupe: bool = True

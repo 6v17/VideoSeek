@@ -199,8 +199,8 @@ def _build_user_capability_bullets(
         bullets.append("取帧：POST /frames/extract 或 /frames/extract/batch（≤16，base64）。")
     if caps.get("timeline_export"):
         bullets.append(
-            "成片：POST /export/timeline 写剪映、达芬奇或 Premiere 草稿，用 chunk 命中的起止；"
-            "一条最多 256 段。配乐传 audio.path，从 0 铺到成片结尾。"
+            "成片：POST /export/timeline 写剪映、达芬奇或 Premiere 草稿；长片用 plan"
+            "（bpm/beats_per_cut/total_sec/shots）展开，一条最多 256 段。配乐传 audio.path。"
         )
     if caps.get("export_clip") and ffmpeg.get("ffmpeg_available"):
         bullets.append("用户明确要一个 mp4 文件时才导出片段。")

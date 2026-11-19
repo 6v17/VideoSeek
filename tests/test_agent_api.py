@@ -669,6 +669,7 @@ class AgentApiSearchTests(unittest.TestCase):
         payload = execute_agent_search(body)
         self.assertEqual(payload["mode"], "chunk")
         self.assertEqual(payload["hits"][0]["end_sec"], 4.0)
+        self.assertAlmostEqual(payload["hits"][0]["chunk_len"], 3.0)
         mock_run_search.assert_called_once()
         kwargs = mock_run_search.call_args.kwargs
         self.assertEqual(kwargs.get("search_mode"), "chunk")
@@ -843,6 +844,57 @@ class AgentApiBatchTests(unittest.TestCase):
         self.assertEqual(len(payload["results"][1]["hits"]), 2)
         self.assertEqual(mock_search.call_args_list[0].args[0].top_k, 2)
         self.assertIs(mock_search.call_args_list[0].args[0].return_thumbs, True)
+
+    @patch("src.web.agent_api.search.execute_agent_search")
+    @patch("src.web.agent_api.search._index_snapshot")
+    def test_batch_dedupes_across_queries(self, mock_snapshot, mock_search):
+        mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
+        shared = {
+            "rank": 1,
+            "video_path": "D:/gate.mp4",
+            "start_sec": 12.0,
+            "clip_window": {"raw_start_sec": 12.0, "raw_end_sec": 18.0},
+        }
+        mock_search.side_effect = [
+            {
+                "ok": True,
+                "query": "雨中城门",
+                "hits": [shared],
+                "meta": {"input": 1, "kept": 1, "dropped": 0, "dedupe": True},
+            },
+            {
+                "ok": True,
+                "query": "柱廊",
+                "hits": [
+                    dict(shared),
+                    {
+                        "rank": 2,
+                        "video_path": "D:/hall.mp4",
+                        "start_sec": 4.0,
+                        "clip_window": {"raw_start_sec": 4.0, "raw_end_sec": 9.0},
+                    },
+                ],
+                "meta": {"input": 2, "kept": 2, "dropped": 0, "dedupe": True},
+            },
+        ]
+        payload = execute_agent_batch_search(
+            AgentBatchSearchRequest(
+                queries=[
+                    AgentSearchRequest(query="雨中城门"),
+                    AgentSearchRequest(query="柱廊"),
+                ]
+            )
+        )
+        self.assertEqual(len(payload["results"][0]["hits"]), 1)
+        self.assertEqual(len(payload["results"][1]["hits"]), 1)
+        self.assertEqual(payload["results"][1]["hits"][0]["video_path"], "D:/hall.mp4")
+        self.assertEqual(payload["results"][1]["meta"]["input"], 2)
+        self.assertEqual(payload["results"][1]["meta"]["kept"], 1)
+        self.assertEqual(payload["results"][1]["meta"]["dropped"], 1)
+        self.assertEqual(payload["meta"]["input"], 3)
+        self.assertEqual(payload["meta"]["kept"], 2)
+        self.assertEqual(payload["meta"]["dropped"], 1)
+        self.assertEqual(payload["meta"]["dedupe_scope"], "batch")
 
     @patch("src.web.agent_api.search.execute_agent_search")
     @patch("src.web.agent_api.search._index_snapshot")

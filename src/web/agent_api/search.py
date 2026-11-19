@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
@@ -464,6 +464,8 @@ def _enrich_hit_payload(
             "raw_start_sec": float(window["raw_start_sec"]),
             "raw_end_sec": float(window["raw_end_sec"]),
         },
+        # Indexed span before frame pad. Use this with a beat length; do not guess from padded duration_sec.
+        "chunk_len": max(0.0, float(window["raw_end_sec"]) - float(window["raw_start_sec"])),
     }
     matched_text = str(getattr(hit, "matched_text", "") or "").strip()
     if matched_text:
@@ -1441,6 +1443,57 @@ def _batch_item_error(
     }
 
 
+def _hit_shot_start(hit: Mapping[str, Any]) -> tuple[str, float]:
+    window = hit.get("clip_window") if isinstance(hit.get("clip_window"), dict) else {}
+    path = str(hit.get("video_path") or "").strip()
+    if window.get("raw_start_sec") is not None:
+        start = float(window["raw_start_sec"])
+    else:
+        start = float(hit.get("start_sec") or 0.0)
+    return path, start
+
+
+def _apply_batch_cross_dedupe(results: List[Dict[str, Any]], *, enabled: bool) -> Dict[str, Any]:
+    """Drop a hit that already appeared as a kept shot on an earlier query in this batch."""
+    from src.services.manifest_export_service import dedupe_counts, same_shot_start
+
+    if not enabled:
+        input_n = sum(int((row.get("meta") or {}).get("input") or len(row.get("hits") or [])) for row in results if row.get("ok"))
+        kept_n = sum(len(row.get("hits") or []) for row in results if row.get("ok"))
+        return dedupe_counts(input_count=input_n, kept_count=kept_n, dedupe=False)
+
+    seen: List[tuple[str, float]] = []
+    input_n = 0
+    kept_n = 0
+    for row in results:
+        if not row.get("ok"):
+            continue
+        hits = list(row.get("hits") or [])
+        meta = row.setdefault("meta", {})
+        page_input = int(meta.get("input") if meta.get("input") is not None else len(hits))
+        input_n += page_input
+        kept_hits: List[Dict[str, Any]] = []
+        for hit in hits:
+            path, start = _hit_shot_start(hit)
+            if path and any(
+                same_shot_start(path, start, seen_path, seen_start) for seen_path, seen_start in seen
+            ):
+                continue
+            kept_hits.append(hit)
+            if path:
+                seen.append((path, start))
+        row["hits"] = kept_hits
+        meta["input"] = page_input
+        meta["kept"] = len(kept_hits)
+        meta["dropped"] = max(0, page_input - len(kept_hits))
+        meta["dedupe"] = True
+        meta["returned"] = len(kept_hits)
+        kept_n += len(kept_hits)
+    counts = dedupe_counts(input_count=input_n, kept_count=kept_n, dedupe=True)
+    counts["dedupe_scope"] = "batch"
+    return counts
+
+
 def execute_agent_batch_search(body: AgentBatchSearchRequest) -> Dict[str, Any]:
     from .errors import SearchEngineBusyError
 
@@ -1480,6 +1533,9 @@ def execute_agent_batch_search(body: AgentBatchSearchRequest) -> Dict[str, Any]:
             failed += 1
             results.append(_batch_item_error(item, "query_failed", str(exc)))
 
+    batch_dedupe = bool(getattr(body, "dedupe", True))
+    dedupe_meta = _apply_batch_cross_dedupe(results, enabled=batch_dedupe)
+
     payload = {
         "api_version": API_VERSION,
         "ok": failed == 0,
@@ -1492,6 +1548,7 @@ def execute_agent_batch_search(body: AgentBatchSearchRequest) -> Dict[str, Any]:
             "index_ready": True,
             "global_index_state": snapshot["global_index_state"],
             "continue_on_error": bool(body.continue_on_error),
+            **dedupe_meta,
         },
     }
     if body.export is not None:

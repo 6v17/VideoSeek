@@ -13,6 +13,8 @@ from src.web.agent_api.schemas import (
     AgentTimelineAudio,
     AgentTimelineClipItem,
     AgentTimelineExportRequest,
+    AgentTimelinePlan,
+    AgentTimelinePlanShot,
 )
 from src.web.agent_api.timeline_export import (
     execute_agent_timeline_export,
@@ -260,6 +262,44 @@ class TimelineExecuteTests(unittest.TestCase):
         self.assertEqual(payload["meta"]["dropped"], 0)
         mock_export.assert_called_once()
         self.assertIsNone(mock_export.call_args.kwargs.get("audio"))
+
+    @patch(
+        "src.services.jianying_draft_service.export_shot_list_to_jianying_draft",
+    )
+    @patch(
+        "src.services.jianying_draft_service.is_jianying_draft_support_available",
+        return_value=True,
+    )
+    def test_jianying_expands_a_plan(self, _avail, mock_export):
+        with tempfile.TemporaryDirectory() as tmp:
+            video = self._video(tmp, "a.mp4")
+            mock_export.return_value = {
+                "draft_name": "cut",
+                "drafts_dir": tmp,
+                "draft_path": tmp,
+                "exported_count": 3,
+                "skipped": [],
+            }
+            body = AgentTimelineExportRequest(
+                format="jianying",
+                drafts_dir=tmp,
+                plan=AgentTimelinePlan(
+                    bpm=120.0,
+                    beats_per_cut=2,
+                    total_sec=3.0,
+                    fit_chunk=True,
+                    shots=[
+                        AgentTimelinePlanShot(video_path=video, start_sec=1.0, end_sec=2.0),
+                    ],
+                ),
+            )
+            payload = execute_agent_timeline_export(body)
+        shots = mock_export.call_args.args[0]
+        self.assertEqual(len(shots), 3)
+        self.assertAlmostEqual(shots[0].end_sec - shots[0].start_sec, 1.0)
+        self.assertEqual(payload["meta"]["plan"]["expanded_count"], 3)
+        self.assertEqual(payload["meta"]["kept"], 3)
+        self.assertFalse(payload["meta"]["dedupe"])
 
     @patch(
         "src.services.jianying_draft_service.export_shot_list_to_jianying_draft",

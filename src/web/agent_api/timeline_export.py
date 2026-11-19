@@ -10,9 +10,61 @@ from typing import Any, Dict, List, Sequence, Tuple
 from src.services.shot_list_service import ShotListItem
 
 from .constants import API_VERSION, MAX_TIMELINE_CLIPS
-from .schemas import AgentTimelineClipItem, AgentTimelineExportRequest
+from .schemas import AgentTimelineClipItem, AgentTimelineExportRequest, AgentTimelinePlan
 
 _TIMELINE_FORMATS = frozenset({"jianying", "fcpxml", "fcp7_xml"})
+
+
+def _plan_to_items(
+    plan: AgentTimelinePlan,
+    *,
+    dedupe_pool: bool,
+) -> tuple[List[AgentTimelineClipItem], Dict[str, Any]]:
+    from src.services.manifest_export_service import dedupe_counts, dedupe_shots_by_start
+    from src.services.timeline_plan import expand_timeline_plan
+
+    pool = [
+        {
+            "video_path": shot.video_path,
+            "start_sec": float(shot.start_sec),
+            "end_sec": shot.end_sec,
+        }
+        for shot in (plan.shots or [])
+    ]
+    pool, pool_meta = dedupe_shots_by_start(pool, enabled=bool(dedupe_pool))
+    raw = {
+        "bpm": plan.bpm,
+        "beats_per_cut": plan.beats_per_cut,
+        "total_sec": plan.total_sec,
+        "fit_chunk": plan.fit_chunk,
+        "shots": pool,
+    }
+    expanded, meta = expand_timeline_plan(raw, max_clips=MAX_TIMELINE_CLIPS)
+    items = [
+        AgentTimelineClipItem(
+            video_path=row["video_path"],
+            start_sec=float(row["start_sec"]),
+            end_sec=float(row["end_sec"]),
+        )
+        for row in expanded
+    ]
+    meta["pool"] = pool_meta
+    # Reusing a pool shot on many beats is intentional; do not collapse the cut list.
+    meta["cuts"] = dedupe_counts(
+        input_count=len(items),
+        kept_count=len(items),
+        dedupe=False,
+    )
+    return items, meta
+
+
+def _resolve_export_items(body: AgentTimelineExportRequest) -> tuple[List[AgentTimelineClipItem], Dict[str, Any]]:
+    if body.plan is not None:
+        return _plan_to_items(body.plan, dedupe_pool=bool(getattr(body, "dedupe", True)))
+    items = list(body.items or [])
+    if not items:
+        raise ValueError("Provide items or plan.")
+    return items, {}
 
 
 def _normalize_format(value: str) -> str:
@@ -179,16 +231,25 @@ def _ensure_write_path(write_path: str, *, format_key: str) -> str:
 def execute_agent_timeline_export(body: AgentTimelineExportRequest) -> Dict[str, Any]:
     started = time.perf_counter()
     format_key = _normalize_format(body.format)
-    shots, skipped = normalize_timeline_items(body.items or [])
+    request_items, plan_meta = _resolve_export_items(body)
+    shots, skipped = normalize_timeline_items(request_items)
     if not shots:
         raise ValueError(
             "No local clips to export "
             f"(skipped={len(skipped)}; provide existing video_path + time_sec or start/end)."
         )
 
-    from src.services.manifest_export_service import dedupe_shots_by_start
+    from src.services.manifest_export_service import dedupe_counts, dedupe_shots_by_start
 
-    shots, dedupe_meta = dedupe_shots_by_start(shots, enabled=bool(getattr(body, "dedupe", True)))
+    if plan_meta:
+        # Pool was already deduped; keep the expanded beat cuts as-is.
+        dedupe_meta = dict(plan_meta.get("cuts") or dedupe_counts(
+            input_count=len(shots), kept_count=len(shots), dedupe=False
+        ))
+    else:
+        shots, dedupe_meta = dedupe_shots_by_start(
+            shots, enabled=bool(getattr(body, "dedupe", True))
+        )
     if not shots:
         raise ValueError(
             "No clips left after dedupe "
@@ -247,6 +308,7 @@ def execute_agent_timeline_export(body: AgentTimelineExportRequest) -> Dict[str,
                 "elapsed_ms": int((time.perf_counter() - started) * 1000),
                 "project": project,
                 **dedupe_meta,
+                **({"plan": plan_meta} if plan_meta else {}),
             },
         }
         return payload
@@ -287,6 +349,7 @@ def execute_agent_timeline_export(body: AgentTimelineExportRequest) -> Dict[str,
             "project": project,
             "fcpxml_version": result.get("fcpxml_version"),
             **dedupe_meta,
+            **({"plan": plan_meta} if plan_meta else {}),
         },
     }
     return payload

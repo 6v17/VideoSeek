@@ -115,7 +115,9 @@ _TOOLS: list[dict[str, Any]] = [
             "score 是余弦相似度，不是概率。meta.score_spread.gap 是第 1 条和第 5 条"
             "（不足 5 条则最后一条）的分差，接近 0 表示这一页挤在一起。"
             "默认 dedupe=true：同一镜头只留 rank 最低的一条，并带 same_shot_count。"
+            "batch 里多句共用已出现镜头集合，跨查询也会去重。"
             "meta.input / kept / dropped 说明删了几条。dedupe=false 才返回整页原始结果。"
+            "每条 hit 带 chunk_len（索引段时长，不含 frame 垫秒）。"
             + _PATH_RULE
         ),
         "inputSchema": {
@@ -245,6 +247,8 @@ _TOOLS: list[dict[str, Any]] = [
         "name": "export_timeline",
         "description": (
             "成片默认走这里。把 search 的 chunk 起止原样写成剪映草稿、达芬奇 FCPXML 或 Premiere XML。"
+            "长成片优先传 plan：bpm、beats_per_cut、total_sec 和一小池 shots，服务端按拍展开，"
+            "不必手写上百条 items。fit_chunk=true 时每刀取 min(chunk_len, 拍长)。"
             "配乐传 audio.path，start_sec 默认 0，铺到成片结尾；文件更短就播到文件结束。"
             "volume 默认 1，fade_out_sec 是结尾淡出。"
             "默认 dedupe=true：按 video_path + 起点（±1 秒）去重，忽略 end；"
@@ -260,6 +264,30 @@ _TOOLS: list[dict[str, Any]] = [
                 "output": {"type": "string", "enum": ["timeline", "manifest"]},
                 "format": {"type": "string", "enum": ["jianying", "fcpxml", "fcp7_xml"]},
                 "items": {"type": "array", "items": {"type": "object"}},
+                "plan": {
+                    "type": "object",
+                    "properties": {
+                        "bpm": {"type": "number"},
+                        "beats_per_cut": {"type": "number"},
+                        "total_sec": {"type": "number"},
+                        "fit_chunk": {"type": "boolean"},
+                        "shots": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "video_path": {"type": "string"},
+                                    "start_sec": {"type": "number"},
+                                    "end_sec": {"type": "number"},
+                                },
+                                "required": ["video_path", "start_sec"],
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "required": ["bpm", "total_sec", "shots"],
+                    "additionalProperties": False,
+                },
                 "audio": {
                     "type": "object",
                     "properties": {
@@ -280,7 +308,6 @@ _TOOLS: list[dict[str, Any]] = [
                 "keep_per_source": {"type": "integer"},
                 "dedupe": {"type": "boolean"},
             },
-            "required": ["items"],
             "additionalProperties": False,
         },
     },
@@ -800,9 +827,14 @@ def _export_clips(arguments: Mapping[str, Any], api: AgentHttpClient) -> tuple[i
 def _export_timeline(arguments: Mapping[str, Any], api: AgentHttpClient) -> tuple[int, Any]:
     output = str(arguments.get("output") or "timeline")
     items = arguments.get("items")
-    if not isinstance(items, list) or not items:
-        raise ValueError("items must contain at least one clip.")
+    plan = arguments.get("plan")
+    has_items = isinstance(items, list) and bool(items)
+    has_plan = isinstance(plan, dict) and bool(plan)
+    if not has_items and not has_plan:
+        raise ValueError("timeline needs items or plan.")
     if output == "manifest":
+        if not has_items:
+            raise ValueError("manifest output needs items.")
         body = {
             "project": arguments.get("project") or "rough-cut",
             "items": items,
@@ -817,15 +849,18 @@ def _export_timeline(arguments: Mapping[str, Any], api: AgentHttpClient) -> tupl
     fmt = str(arguments.get("format") or "").strip()
     if fmt not in {"jianying", "fcpxml", "fcp7_xml"}:
         raise ValueError("timeline export needs format: jianying, fcpxml, or fcp7_xml.")
-    body = {
+    body: dict[str, Any] = {
         "format": fmt,
-        "items": items,
         "project": arguments.get("project"),
         "write_path": arguments.get("write_path"),
         "output_dir": arguments.get("output_dir"),
         "drafts_dir": arguments.get("drafts_dir"),
         "draft_name": arguments.get("draft_name"),
     }
+    if has_plan:
+        body["plan"] = plan
+    if has_items:
+        body["items"] = items
     if arguments.get("audio"):
         body["audio"] = arguments["audio"]
     if "dedupe" in arguments:
