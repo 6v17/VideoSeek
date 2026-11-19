@@ -1619,6 +1619,38 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     background: __ACCENT_SOFT__;
     border: 1px solid __ACCENT__;
 }
+#GhostButton[chrome="previewIcon"] {
+    background: __BUTTON_SOFT__;
+    border: 1px solid __LINE_STRONG__;
+    border-radius: __RADIUS_MD__;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0;
+}
+#GhostButton[chrome="previewIcon"]:hover {
+    background: __BUTTON_SOFT_HOVER__;
+    border-color: __LINE_STRONG__;
+}
+#GhostButton[chrome="previewIcon"]:pressed {
+    background: __BUTTON_SOFT_PRESSED__;
+    border-color: __ACCENT__;
+    padding: 0;
+}
+#GhostButton[chrome="previewIcon"][active="true"] {
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+}
+#GhostButton[chrome="previewIcon"][active="true"]:hover {
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+}
+#GhostButton[chrome="previewIcon"]:disabled,
+#GhostButton[chrome="previewIcon"]:hover:disabled {
+    background: __FIELD__;
+    border-color: __LINE__;
+}
 #LibraryGroupedVideoTree, #LibraryGroupedScroll {
     background: transparent;
     border: none;
@@ -2011,8 +2043,23 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
 #PreviewTransport QPushButton,
 #PreviewDialog QPushButton {
     padding: 2px 8px;
-    min-height: 22px;
-    max-height: 26px;
+    min-height: 28px;
+}
+#PreviewTransport QPushButton:pressed,
+#PreviewDialog QPushButton:pressed {
+    padding: 2px 8px;
+}
+#PreviewTransport #GhostButton[chrome="previewIcon"],
+#PreviewDialog #GhostButton[chrome="previewIcon"] {
+    padding: 0;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+}
+#PreviewTransport #GhostButton[chrome="previewIcon"]:pressed,
+#PreviewDialog #GhostButton[chrome="previewIcon"]:pressed {
+    padding: 0;
 }
 #PreviewSegmentQueueHint {
     color: #38bdf8;

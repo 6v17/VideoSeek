@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from src.app.logging_utils import get_logger
 from src.app.path_display import video_display_name
 from src.utils import format_timecode_seconds
+from ui.playback.preview_glyphs import PreviewGlyphButton
 from ui.playback.preview_keyboard import (
     PreviewTransportKeyFilter,
     clamp_seek_ms,
@@ -65,10 +66,10 @@ class ExpandedPreviewChrome(QWidget):
 
         transport = QHBoxLayout()
         transport.setSpacing(6)
-        self.play_button = QPushButton()
-        self.play_button.setObjectName("GhostButton")
-        self.maximize_button = QPushButton()
-        self.maximize_button.setObjectName("GhostButton")
+        transport.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self.play_button = PreviewGlyphButton("play")
+        self.replay_button = PreviewGlyphButton("replay")
+        self.maximize_button = PreviewGlyphButton("fullscreen")
         self.collapse_button = QPushButton()
         self.collapse_button.setObjectName("GhostButton")
 
@@ -105,13 +106,14 @@ class ExpandedPreviewChrome(QWidget):
         self.time_label = QLabel("00:00/00:00")
         self.time_label.setObjectName("PreviewTimeLabel")
         self.time_label.setAlignment(Qt.AlignCenter)
-        transport.addWidget(self.play_button, 0)
-        transport.addWidget(self.maximize_button, 0)
-        transport.addWidget(self.collapse_button, 0)
+        transport.addWidget(self.play_button, 0, Qt.AlignVCenter)
+        transport.addWidget(self.replay_button, 0, Qt.AlignVCenter)
+        transport.addWidget(self.collapse_button, 0, Qt.AlignVCenter)
         transport.addStretch(1)
         transport.addWidget(segment_fields, 0, Qt.AlignVCenter)
         transport.addStretch(1)
-        transport.addWidget(self.time_label, 0)
+        transport.addWidget(self.time_label, 0, Qt.AlignVCenter)
+        transport.addWidget(self.maximize_button, 0, Qt.AlignVCenter)
         root.addLayout(transport)
 
         self.slider = QSlider(Qt.Horizontal)
@@ -124,12 +126,12 @@ class ExpandedPreviewChrome(QWidget):
         segment_row = QHBoxLayout()
         segment_row.setSpacing(6)
         segment_row.setContentsMargins(0, 0, 0, 0)
+        segment_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.set_start_button = QPushButton()
         self.set_start_button.setObjectName("GhostButton")
         self.set_end_button = QPushButton()
         self.set_end_button.setObjectName("GhostButton")
-        self.clear_segment_button = QPushButton()
-        self.clear_segment_button.setObjectName("GhostButton")
+        self.clear_segment_button = PreviewGlyphButton("clear")
         self.add_to_shot_list_button = QPushButton()
         self.add_to_shot_list_button.setObjectName("AccentGhostButton")
         self.add_to_shot_list_button.setEnabled(False)
@@ -140,13 +142,19 @@ class ExpandedPreviewChrome(QWidget):
         self.frame_export_button.setObjectName("GhostButton")
         self.frame_export_button.setEnabled(False)
         self._frame_export_thread = None
-        segment_row.addWidget(self.set_start_button)
-        segment_row.addWidget(self.set_end_button)
+        for widget in (
+            self.set_start_button,
+            self.set_end_button,
+            self.clear_segment_button,
+        ):
+            segment_row.addWidget(widget, 0, Qt.AlignVCenter)
         segment_row.addStretch(1)
-        segment_row.addWidget(self.clear_segment_button)
-        segment_row.addWidget(self.add_to_shot_list_button)
-        segment_row.addWidget(self.frame_export_button)
-        segment_row.addWidget(self.export_button)
+        for widget in (
+            self.add_to_shot_list_button,
+            self.frame_export_button,
+            self.export_button,
+        ):
+            segment_row.addWidget(widget, 0, Qt.AlignVCenter)
         root.addLayout(segment_row)
 
         self.update_timer = QTimer(self)
@@ -154,6 +162,7 @@ class ExpandedPreviewChrome(QWidget):
         self.update_timer.timeout.connect(self._sync_ui)
 
         self.play_button.clicked.connect(self._toggle_play)
+        self.replay_button.clicked.connect(self._replay_clip)
         self.maximize_button.clicked.connect(self._toggle_maximize)
         self.collapse_button.clicked.connect(self.collapse_requested.emit)
         self.set_start_button.clicked.connect(self._mark_start)
@@ -171,6 +180,31 @@ class ExpandedPreviewChrome(QWidget):
 
         self.reset()
         self.setVisible(False)
+        self._sync_transport_metrics()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._sync_transport_metrics()
+
+    def _sync_transport_metrics(self) -> None:
+        """Icon pills stay 28px; text actions share that height."""
+        height = 28
+        for button in (
+            self.play_button,
+            self.replay_button,
+            self.maximize_button,
+            self.clear_segment_button,
+        ):
+            button.setFixedSize(height, height)
+        for button in (
+            self.collapse_button,
+            self.set_start_button,
+            self.set_end_button,
+            self.add_to_shot_list_button,
+            self.frame_export_button,
+            self.export_button,
+        ):
+            button.setFixedHeight(height)
 
     def _install_transport_keyboard(self) -> None:
         if self._transport_key_filter is not None:
@@ -183,6 +217,7 @@ class ExpandedPreviewChrome(QWidget):
             is_active=self._keyboard_transport_active,
             on_toggle=self._toggle_play,
             on_seek=self._nudge_seek,
+            on_replay=self._replay_clip,
             parent=self,
         )
         app.installEventFilter(self._transport_key_filter)
@@ -204,32 +239,15 @@ class ExpandedPreviewChrome(QWidget):
 
     def apply_texts(self, texts: dict):
         self.texts = texts or {}
-        self._pin_toggle_width(
-            self.play_button,
-            self.texts.get("preview_dialog_play", "播放"),
-            self.texts.get("preview_dialog_pause", "暂停"),
-        )
+        self.replay_button.setToolTip(self.texts.get("preview_dialog_replay_tip", "从命中片段重播（R）"))
         self._apply_maximize_button()
-        playing = False
-        player = self.player
-        if player is not None:
-            try:
-                playing = bool(player.is_playing())
-            except Exception:
-                playing = False
-        self.play_button.setText(
-            self.texts.get(
-                "preview_dialog_pause" if playing else "preview_dialog_play",
-                "暂停" if playing else "播放",
-            )
-        )
+        self._refresh_play_button()
         self.collapse_button.setText(self.texts.get("preview_collapse", "收起"))
         self.collapse_button.setToolTip(self.texts.get("preview_card_collapse", "收起预览"))
         self.set_start_button.setText(self.texts.get("preview_dialog_set_start", "起点"))
         self.set_start_button.setToolTip(self.texts.get("preview_dialog_set_start_tip", "设为起点"))
         self.set_end_button.setText(self.texts.get("preview_dialog_set_end", "终点"))
         self.set_end_button.setToolTip(self.texts.get("preview_dialog_set_end_tip", "设为终点"))
-        self.clear_segment_button.setText(self.texts.get("preview_dialog_clear_segment", "清除"))
         self.clear_segment_button.setToolTip(self.texts.get("preview_dialog_clear_segment_tip", "清除选区"))
         self.add_to_shot_list_button.setText(
             self.texts.get(
@@ -265,6 +283,7 @@ class ExpandedPreviewChrome(QWidget):
         self._playback_ready = self.player is not None and self.player.is_available()
         self.slider.setValue(0)
         self.play_button.setEnabled(True)
+        self.replay_button.setEnabled(True)
         self.slider.setEnabled(True)
         self.set_start_button.setEnabled(True)
         self.set_end_button.setEnabled(True)
@@ -298,25 +317,14 @@ class ExpandedPreviewChrome(QWidget):
         self._apply_maximize_button()
 
     def _apply_maximize_button(self) -> None:
-        self._pin_toggle_width(
-            self.maximize_button,
-            self.texts.get("preview_dialog_fullscreen", "全屏"),
-            self.texts.get("preview_dialog_exit_fullscreen", "退出"),
-        )
         if self._maximized:
-            self.maximize_button.setText(self.texts.get("preview_dialog_exit_fullscreen", "退出"))
+            self.maximize_button.set_glyph("exit_fullscreen")
             self.maximize_button.setToolTip(
                 self.texts.get("preview_dialog_exit_fullscreen_tip", "退出全屏")
             )
             return
-        self.maximize_button.setText(self.texts.get("preview_dialog_fullscreen", "全屏"))
+        self.maximize_button.set_glyph("fullscreen")
         self.maximize_button.setToolTip(self.texts.get("preview_dialog_fullscreen_tip", "全屏"))
-
-    def _pin_toggle_width(self, button, *labels: str) -> None:
-        """Keep a two-state button from jumping width when the label changes."""
-        metrics = button.fontMetrics()
-        text_width = max(metrics.horizontalAdvance(str(label)) for label in labels)
-        button.setMinimumWidth(text_width + 20)
 
     def _toggle_maximize(self):
         self._maximized = not self._maximized
@@ -324,37 +332,71 @@ class ExpandedPreviewChrome(QWidget):
         self.maximize_toggled.emit(self._maximized)
 
     def _toggle_play(self):
+        """Space / 播放: pause, resume, or continue past the clip. Never replay."""
         player = self.player
         if player is None or not player.is_available():
             return
         if player.is_playing():
             player.pause()
-            self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
+            self._refresh_play_button()
             return
-        if self._replay_finished_clip(player):
-            self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
-            return
-        if player.has_locked_window():
+        if self._at_locked_clip_end(player):
             self._unlock_full_playback()
+            self._refresh_play_button()
+            return
         if player.resume():
-            self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
+            self._refresh_play_button()
 
-    def _replay_finished_clip(self, player) -> bool:
-        """After the fixed player stops at the clip end, Play starts that clip again."""
-        if not player.has_locked_window():
+    def _replay_clip(self):
+        """R / 重播: play the hit window again, then stop at the clip end."""
+        player = self.player
+        if player is None or not player.is_available():
+            return
+        path = self._loaded_clip_path(player)
+        if not path:
+            return
+        end_ms = int(max(0.0, float(self.end_sec or 0.0)) * 1000)
+        if not player.play(path, self.start_sec, stop_sec=self.end_sec if end_ms else None):
+            return
+        self._refresh_play_button()
+
+    def _at_locked_clip_end(self, player) -> bool:
+        if player is None or not player.has_locked_window():
             return False
         end_ms = int(max(0.0, float(self.end_sec or 0.0)) * 1000)
         current = player.get_time()
         if current >= 0 and end_ms > 0 and current < end_ms - 400:
             return False
-        path = str(
+        return True
+
+    def _loaded_clip_path(self, player) -> str:
+        return str(
             getattr(player, "_loaded_video_path", "")
             or getattr(player, "_current_video_path", "")
+            or self.video_path
             or ""
         )
-        if not path:
-            return False
-        return bool(player.play(path, self.start_sec, stop_sec=self.end_sec if end_ms else None))
+
+    def _refresh_play_button(self) -> None:
+        player = self.player
+        playing = False
+        if player is not None:
+            try:
+                playing = bool(player.is_playing())
+            except Exception:
+                playing = False
+        if playing:
+            self.play_button.set_glyph("pause")
+            self.play_button.setToolTip(self.texts.get("preview_dialog_pause_tip", "暂停（空格）"))
+            return
+        if self._at_locked_clip_end(player):
+            self.play_button.set_glyph("continue")
+            self.play_button.setToolTip(
+                self.texts.get("preview_dialog_continue_tip", "从当前位置继续播放（空格）")
+            )
+            return
+        self.play_button.set_glyph("play")
+        self.play_button.setToolTip(self.texts.get("preview_dialog_play_tip", "播放（空格）"))
 
     def _nudge_seek(self, delta_ms: int) -> None:
         player = self.player
@@ -387,7 +429,7 @@ class ExpandedPreviewChrome(QWidget):
             return
         player.unlock_full_playback()
         player.resume()
-        self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
+        self._refresh_play_button()
 
     def _on_slider_pressed(self):
         self._slider_dragging = True
@@ -412,7 +454,7 @@ class ExpandedPreviewChrome(QWidget):
             landed = player.set_time(new_time, unlock=True)
             self._pending_ui_seek_ms = new_time if not isinstance(landed, int) else landed
             player.resume()
-            self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
+            self._refresh_play_button()
         self._slider_dragging = False
         # Keep Space bound to transport after scrubbing (do not leave focus on the slider).
         self.claim_keyboard_focus()
@@ -431,10 +473,7 @@ class ExpandedPreviewChrome(QWidget):
             self.slider.blockSignals(False)
 
         self.time_label.setText(f"{_format_ms(current_ms)}/{_format_ms(total_ms)}")
-        if player.is_playing():
-            self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
-        else:
-            self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
+        self._refresh_play_button()
         self.update()
 
     def _effective_total_ms(self, player):
@@ -468,8 +507,10 @@ class ExpandedPreviewChrome(QWidget):
         self._known_total_ms = 0
         self.slider.setValue(0)
         self.time_label.setText("00:00/00:00")
-        self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
+        self.play_button.set_glyph("play")
+        self.play_button.setToolTip(self.texts.get("preview_dialog_play_tip", "播放（空格）"))
         self.play_button.setEnabled(False)
+        self.replay_button.setEnabled(False)
         self.slider.setEnabled(False)
         self.set_start_button.setEnabled(False)
         self.set_end_button.setEnabled(False)
@@ -666,7 +707,7 @@ class ExpandedPreviewChrome(QWidget):
         player = self.player
         if player is not None and player.is_available() and player.is_playing():
             player.pause()
-            self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
+            self._refresh_play_button()
         current_ms = 0
         if player is not None:
             current_ms = max(0, int(player.get_time()))

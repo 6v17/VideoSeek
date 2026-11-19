@@ -480,7 +480,10 @@ class PreviewGuiMixin:
             if player.is_playing():
                 player.pause()
                 button = getattr(dialog, "play_button", None)
-                if button is not None:
+                if button is not None and hasattr(button, "set_glyph"):
+                    button.set_glyph("play")
+                    button.setToolTip(self.texts.get("preview_dialog_play_tip", "播放（空格）"))
+                elif button is not None:
                     button.setText(self.texts.get("preview_dialog_play", "Play"))
         except Exception as exc:
             logger.debug("Pause embedded preview on page leave skipped: %s", exc)

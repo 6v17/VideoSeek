@@ -1372,6 +1372,7 @@ class PreviewDialogTests(unittest.TestCase):
         chrome = ExpandedPreviewChrome()
         idle = (
             chrome.play_button,
+            chrome.replay_button,
             chrome.maximize_button,
             chrome.slider,
             chrome.set_start_button,
@@ -1388,6 +1389,7 @@ class PreviewDialogTests(unittest.TestCase):
         chrome.bind_player(player)
         chrome.attach_clip("D:/videos/clip.mp4", 0.0, 1.0)
         self.assertTrue(chrome.play_button.isEnabled())
+        self.assertTrue(chrome.replay_button.isEnabled())
         self.assertTrue(chrome.slider.isEnabled())
         self.assertTrue(chrome.add_to_shot_list_button.isEnabled())
         self.assertFalse(chrome.export_button.isEnabled())

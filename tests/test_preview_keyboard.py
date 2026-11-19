@@ -125,6 +125,14 @@ class PreviewKeyboardHelperTests(unittest.TestCase):
         self.assertTrue(filt.eventFilter(host, space))
         self.assertEqual(toggles, [1])
 
+        r_key = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_R, Qt.KeyboardModifier.NoModifier)
+        self.assertFalse(filt.eventFilter(host, r_key))
+
+        replays = []
+        filt._on_replay = lambda: replays.append(1)
+        self.assertTrue(filt.eventFilter(host, r_key))
+        self.assertEqual(replays, [1])
+
         left = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Left, Qt.KeyboardModifier.NoModifier)
         right = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier)
         self.assertTrue(filt.eventFilter(host, left))
@@ -287,6 +295,99 @@ class ExpandedPreviewNudgeTests(unittest.TestCase):
         player.resume.assert_not_called()
         self.assertEqual(player.set_time.call_args_list[0].args[0], 15000)
         self.assertEqual(player.set_time.call_args_list[1].args[0], 18000)
+
+    def test_space_at_clip_end_continues_instead_of_replaying(self):
+        from ui.playback.expanded_preview_chrome import ExpandedPreviewChrome
+
+        chrome = ExpandedPreviewChrome()
+        self.addCleanup(chrome.deleteLater)
+        chrome.apply_texts(
+            {
+                "preview_dialog_play": "Play",
+                "preview_dialog_pause": "Pause",
+                "preview_dialog_continue": "Continue",
+                "preview_dialog_replay": "Replay",
+            }
+        )
+        chrome.video_path = "D:/clip.mp4"
+        chrome.start_sec = 10.0
+        chrome.end_sec = 16.0
+        player = MagicMock()
+        player.is_available.return_value = True
+        player.is_playing.return_value = False
+        player.has_locked_window.return_value = True
+        player.get_time.return_value = 16000
+        player._loaded_video_path = "D:/clip.mp4"
+
+        def _unlock():
+            player.has_locked_window.return_value = False
+            player.is_playing.return_value = True
+
+        player.unlock_full_playback.side_effect = _unlock
+        chrome.player = player
+
+        chrome._toggle_play()
+
+        player.play.assert_not_called()
+        player.unlock_full_playback.assert_called_once()
+        player.resume.assert_called()
+        self.assertEqual(chrome.play_button.glyph(), "pause")
+
+    def test_replay_restarts_the_hit_window(self):
+        from ui.playback.expanded_preview_chrome import ExpandedPreviewChrome
+
+        chrome = ExpandedPreviewChrome()
+        self.addCleanup(chrome.deleteLater)
+        chrome.video_path = "D:/clip.mp4"
+        chrome.start_sec = 10.0
+        chrome.end_sec = 16.0
+        player = MagicMock()
+        player.is_available.return_value = True
+        player.is_playing.return_value = True
+        player.has_locked_window.return_value = True
+        player.get_time.return_value = 16000
+        player._loaded_video_path = "D:/clip.mp4"
+        player.play.return_value = True
+        chrome.player = player
+
+        chrome._replay_clip()
+
+        player.play.assert_called_once_with("D:/clip.mp4", 10.0, stop_sec=16.0)
+
+
+class PreviewGlyphTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication
+
+        if QApplication.instance() is None:
+            cls._app = QApplication([])
+
+    def test_clear_glyph_is_a_broom_not_an_x(self):
+        from ui.playback.preview_glyphs import PreviewGlyphButton
+
+        button = PreviewGlyphButton("clear")
+        self.addCleanup(button.deleteLater)
+        pix = button.grab()
+        self.assertGreater(pix.width(), 8)
+        self.assertEqual(button.glyph(), "clear")
+
+    def test_preview_icons_use_pill_chrome_and_active_tone(self):
+        from ui.playback.preview_glyphs import PreviewGlyphButton
+
+        play = PreviewGlyphButton("play")
+        replay = PreviewGlyphButton("replay")
+        fullscreen = PreviewGlyphButton("fullscreen")
+        for button in (play, replay, fullscreen):
+            self.addCleanup(button.deleteLater)
+            self.assertEqual(button.property("chrome"), "previewIcon")
+            self.assertEqual(button.property("active"), "false")
+        play.set_glyph("pause")
+        self.assertEqual(play.property("active"), "true")
+        fullscreen.set_glyph("exit_fullscreen")
+        self.assertEqual(fullscreen.property("active"), "true")
+        play.set_glyph("play")
+        self.assertEqual(play.property("active"), "false")
 
 
 class TimecodeDisplayTests(unittest.TestCase):

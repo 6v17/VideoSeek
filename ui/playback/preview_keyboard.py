@@ -87,6 +87,7 @@ class PreviewTransportKeyFilter(QObject):
         is_active: Callable[[], bool],
         on_toggle: Callable[[], None],
         on_seek: Callable[[int], None],
+        on_replay: Callable[[], None] | None = None,
         seek_step_ms: int = DEFAULT_SEEK_STEP_MS,
         hold_seek_step_ms: int = DEFAULT_HOLD_SEEK_STEP_MS,
         hold_tick_ms: int = DEFAULT_HOLD_TICK_MS,
@@ -97,6 +98,7 @@ class PreviewTransportKeyFilter(QObject):
         self._is_active = is_active
         self._on_toggle = on_toggle
         self._on_seek = on_seek
+        self._on_replay = on_replay
         self._seek_step_ms = int(seek_step_ms)
         self._hold_seek_step_ms = int(hold_seek_step_ms)
         self._held_dir = 0
@@ -161,7 +163,7 @@ class PreviewTransportKeyFilter(QObject):
         key = event.key()
         if key == Qt.Key.Key_Escape:
             return self._handle_embedded_escape(event)
-        if key not in (Qt.Key.Key_Space, Qt.Key.Key_Left, Qt.Key.Key_Right):
+        if key not in (Qt.Key.Key_Space, Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_R):
             return False
 
         if etype == QEvent.Type.KeyRelease:
@@ -178,6 +180,19 @@ class PreviewTransportKeyFilter(QObject):
             if event.isAutoRepeat():
                 return True
             self._on_toggle()
+            return True
+
+        if key == Qt.Key.Key_R:
+            if event.modifiers() not in (
+                Qt.KeyboardModifier.NoModifier,
+                Qt.KeyboardModifier.KeypadModifier,
+            ):
+                return False
+            if event.isAutoRepeat():
+                return True
+            if self._on_replay is None:
+                return False
+            self._on_replay()
             return True
 
         # Ignore OS auto-repeat; continuous scrub is owned by _hold_timer.

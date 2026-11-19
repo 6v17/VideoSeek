@@ -177,6 +177,42 @@ class SearchBrowseLayoutTests(unittest.TestCase):
         self.assertGreater(content.width(), before + 200)
         root.hide()
 
+    def test_preview_transport_puts_clear_and_fullscreen_next_to_neighbors(self):
+        from ui.widgets.styles import LIGHT_STYLE
+
+        previous = self._app.styleSheet()
+        self._app.setStyleSheet(LIGHT_STYLE)
+        page = SearchPage()
+        try:
+            page.resize(1400, 700)
+            page.show()
+            self._app.processEvents()
+            chrome = page.expanded_chrome
+            chrome.show_chrome()
+            chrome._sync_transport_metrics()
+            self._app.processEvents()
+            start = chrome.set_start_button
+            end = chrome.set_end_button
+            clear = chrome.clear_segment_button
+            time_label = chrome.time_label
+            fullscreen = chrome.maximize_button
+            self.assertLess(start.x(), end.x())
+            self.assertLess(end.x(), clear.x())
+            self.assertLess(clear.x(), chrome.add_to_shot_list_button.x())
+            self.assertLess(time_label.x(), fullscreen.x())
+            self.assertEqual(chrome.play_button.glyph(), "play")
+            self.assertEqual(chrome.replay_button.glyph(), "replay")
+            self.assertEqual(clear.glyph(), "clear")
+            self.assertEqual(fullscreen.glyph(), "fullscreen")
+            self.assertEqual(chrome.play_button.width(), chrome.play_button.height())
+            self.assertEqual(chrome.play_button.height(), chrome.set_start_button.height())
+            self.assertEqual(chrome.replay_button.height(), chrome.play_button.height())
+            self.assertEqual(clear.height(), chrome.set_end_button.height())
+            self.assertEqual(fullscreen.height(), chrome.play_button.height())
+        finally:
+            page.hide()
+            self._app.setStyleSheet(previous)
+
     def test_yielded_preview_column_stays_collapsed(self):
         page = SearchPage()
         page.resize(1500, 800)

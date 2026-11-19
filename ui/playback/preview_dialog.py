@@ -311,6 +311,7 @@ class PreviewDialog(QDialog):
         layout.addWidget(self.chrome)
 
         self.play_button = self.chrome.play_button
+        self.replay_button = self.chrome.replay_button
         self.fullscreen_button = self.chrome.maximize_button
         self.slider = self.chrome.slider
         self.set_start_button = self.chrome.set_start_button
@@ -419,7 +420,7 @@ class PreviewDialog(QDialog):
         self.fullscreen_button.setEnabled(True)
         self.frame_export_button.setEnabled(bool(self.video_path))
         self._sync_add_to_shot_list_button()
-        self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
+        self.chrome._refresh_play_button()
         self._update_segment_ui()
         try:
             from src.services.search_telemetry import begin_playback_session
