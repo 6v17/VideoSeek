@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Dict, List, Mapping
 
 
 def beat_duration_sec(*, bpm: float, beats_per_cut: float) -> float:
