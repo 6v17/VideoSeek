@@ -18,13 +18,17 @@ _ACTIVE_GLYPHS = frozenset({"pause", "exit_fullscreen"})
 def _theme_colors():
     from PySide6.QtWidgets import QApplication
 
-    from ui.widgets.styles import THEME_COLORS_DARK, THEME_COLORS_LIGHT
+    from ui.widgets.styles import theme_color_map
 
     app = QApplication.instance()
-    dark = False
+    is_dark = False
     if app is not None:
-        dark = app.palette().color(app.palette().ColorRole.Window).lightness() < 128
-    return THEME_COLORS_DARK if dark else THEME_COLORS_LIGHT
+        prop = app.property("videoseek_is_dark")
+        if prop is None:
+            is_dark = app.palette().color(app.palette().ColorRole.Window).lightness() < 128
+        else:
+            is_dark = bool(prop)
+    return theme_color_map(is_dark)
 
 
 def _glyph_ink(button: QPushButton) -> QColor:
@@ -114,13 +118,13 @@ def _paint_glyph(painter: QPainter, rect: QRect, color: QColor, kind: str) -> No
         painter.setPen(
             QPen(
                 color,
-                1.7 * s,
+                1.55 * s,
                 Qt.PenStyle.SolidLine,
                 Qt.PenCapStyle.SquareCap,
                 Qt.PenJoinStyle.MiterJoin,
             )
         )
-        inset, arm = 4.2 * s, 2.6 * s
+        inset, arm = 3.3 * s, 2.2 * s
         corners = ((-inset, -inset), (inset, -inset), (-inset, inset), (inset, inset))
         for sx, sy in corners:
             ox, oy = cx + sx, cy + sy

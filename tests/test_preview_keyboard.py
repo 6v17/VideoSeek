@@ -389,6 +389,28 @@ class PreviewGlyphTests(unittest.TestCase):
         play.set_glyph("play")
         self.assertEqual(play.property("active"), "false")
 
+    def test_preview_glyph_ink_follows_night_theme(self):
+        from PySide6.QtWidgets import QApplication
+
+        from ui.playback.preview_glyphs import PreviewGlyphButton, _glyph_ink
+        from ui.widgets.styles import DARK_STYLE, LIGHT_STYLE
+
+        app = QApplication.instance()
+        previous_style = app.styleSheet()
+        previous_dark = app.property("videoseek_is_dark")
+        button = PreviewGlyphButton("play")
+        self.addCleanup(button.deleteLater)
+        try:
+            app.setProperty("videoseek_is_dark", True)
+            app.setStyleSheet(DARK_STYLE)
+            self.assertGreaterEqual(_glyph_ink(button).lightness(), 180)
+            app.setProperty("videoseek_is_dark", False)
+            app.setStyleSheet(LIGHT_STYLE)
+            self.assertLess(_glyph_ink(button).lightness(), 80)
+        finally:
+            app.setProperty("videoseek_is_dark", previous_dark)
+            app.setStyleSheet(previous_style)
+
 
 class TimecodeDisplayTests(unittest.TestCase):
     def test_preview_and_result_clocks_roll_into_hours(self):

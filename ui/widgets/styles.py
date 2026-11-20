@@ -1623,6 +1623,7 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     background: __BUTTON_SOFT__;
     border: 1px solid __LINE_STRONG__;
     border-radius: __RADIUS_MD__;
+    color: __HEADLINE__;
     min-width: 28px;
     max-width: 28px;
     min-height: 28px;
@@ -1650,6 +1651,7 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #GhostButton[chrome="previewIcon"]:hover:disabled {
     background: __FIELD__;
     border-color: __LINE__;
+    color: __MUTED__;
 }
 #LibraryGroupedVideoTree, #LibraryGroupedScroll {
     background: transparent;
