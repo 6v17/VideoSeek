@@ -6,7 +6,10 @@ import hashlib
 import os
 import subprocess
 import sys
+import tempfile
+import time
 import uuid
+from contextvars import ContextVar
 
 from src.infra.ffmpeg_paths import get_ffmpeg_path
 from src.infra.paths import ensure_folder_exists, get_app_data_dir
@@ -17,6 +20,15 @@ EXPORT_ENCODE_MODE_COPY = "copy"
 _EXPORT_ENCODE_MODES = {EXPORT_ENCODE_MODE_ORIGINAL, EXPORT_ENCODE_MODE_COPY}
 # Reject empty or truncated encodes. A real fallback clip is tens of kilobytes.
 _PREVIEW_CLIP_MIN_BYTES = 1024
+EXPORT_DEADLINE = ContextVar("export_deadline", default=None)
+
+
+def remaining_export_seconds(limit=120.0):
+    deadline = EXPORT_DEADLINE.get()
+    remaining = limit if deadline is None else min(limit, deadline - time.monotonic())
+    if remaining <= 0:
+        raise RuntimeError("Clip export timed out before FFmpeg could start.")
+    return remaining
 
 
 def create_preview_clip(input_path, start_sec, output_path, duration_sec=None):
@@ -226,16 +238,73 @@ def export_original_clip(
     *,
     silent=False,
     encode_mode=None,
+    timeout_sec=120.0,
+    overwrite=True,
 ):
-    cmd = build_export_original_clip_command(
-        input_path,
-        start_sec,
-        duration_sec,
-        output_path,
-        silent=silent,
-        encode_mode=encode_mode,
+    deadline = time.monotonic() + remaining_export_seconds(timeout_sec)
+    _validate_export_destination(input_path, output_path)
+    tmp_path = _temporary_export_path(output_path)
+    try:
+        cmd = build_export_original_clip_command(
+            input_path, start_sec, duration_sec, tmp_path,
+            silent=silent, encode_mode=encode_mode,
+            timeout_sec=max(0.001, deadline - time.monotonic()),
+        )
+        result = subprocess.run(
+            cmd, startupinfo=_build_hidden_startupinfo(), capture_output=True,
+            timeout=max(0.001, deadline - time.monotonic()),
+        )
+        if result.returncode == 0:
+            _publish_export(tmp_path, output_path, overwrite=overwrite)
+        return result
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("Clip export timed out; FFmpeg was stopped.") from exc
+    finally:
+        _remove_quiet(tmp_path)
+
+
+def _validate_export_destination(input_path, output_path):
+    source = os.path.normcase(os.path.realpath(os.fspath(input_path)))
+    destination = os.path.normcase(os.path.realpath(os.fspath(output_path)))
+    same_file = source == destination
+    if not same_file and os.path.exists(input_path) and os.path.exists(output_path):
+        same_file = os.path.samefile(input_path, output_path)
+    if same_file:
+        raise ValueError("Export destination must differ from the source video.")
+
+
+def _temporary_export_path(output_path):
+    destination = os.path.abspath(os.fspath(output_path))
+    ensure_folder_exists(destination)
+    fd, path = tempfile.mkstemp(
+        prefix=".videoseek-", suffix=os.path.splitext(destination)[1],
+        dir=os.path.dirname(destination),
     )
-    return subprocess.run(cmd, startupinfo=_build_hidden_startupinfo(), capture_output=True)
+    os.close(fd)
+    return path
+
+
+def _publish_export(tmp_path, output_path, *, overwrite=True):
+    if not os.path.isfile(tmp_path) or os.path.getsize(tmp_path) == 0:
+        raise RuntimeError("FFmpeg produced no video output.")
+    if overwrite:
+        os.replace(tmp_path, output_path)
+    elif os.name == "nt":
+        # Windows rename refuses existing targets, including on FAT/network volumes.
+        os.rename(tmp_path, output_path)
+    else:
+        # Same-directory hard link publishes atomically and refuses an existing target.
+        os.link(tmp_path, output_path)
+
+
+def finish_export_process(process, *, commit=True):
+    """Publish a completed desktop export, or discard its temporary output."""
+    tmp_path = process.export_temp_path
+    try:
+        if commit and process.returncode == 0:
+            _publish_export(tmp_path, process.export_output_path)
+    finally:
+        _remove_quiet(tmp_path)
 
 
 def start_export_original_clip_process(
@@ -247,20 +316,23 @@ def start_export_original_clip_process(
     silent=False,
     encode_mode=None,
 ):
-    cmd = build_export_original_clip_command(
-        input_path,
-        start_sec,
-        duration_sec,
-        output_path,
-        silent=silent,
-        encode_mode=encode_mode,
-    )
-    return subprocess.Popen(
-        cmd,
-        startupinfo=_build_hidden_startupinfo(),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    _validate_export_destination(input_path, output_path)
+    tmp_path = _temporary_export_path(output_path)
+    try:
+        cmd = build_export_original_clip_command(
+            input_path, start_sec, duration_sec, tmp_path,
+            silent=silent, encode_mode=encode_mode,
+        )
+        process = subprocess.Popen(
+            cmd, startupinfo=_build_hidden_startupinfo(),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+    except BaseException:
+        _remove_quiet(tmp_path)
+        raise
+    process.export_temp_path = tmp_path
+    process.export_output_path = os.fspath(output_path)
+    return process
 
 
 def build_export_original_clip_command(
@@ -272,6 +344,7 @@ def build_export_original_clip_command(
     silent=False,
     encode_mode=None,
     config=None,
+    timeout_sec=120.0,
 ):
     from src.app.config import load_config
 
@@ -279,7 +352,8 @@ def build_export_original_clip_command(
     cfg = config or load_config()
     encode = _export_encode_settings(cfg)
     # MPEG-PS input -ss is coarse; reuse the seekable MP4 proxy when needed.
-    input_path = ensure_seekable_preview_proxy(os.fspath(input_path))
+    _validate_export_destination(input_path, output_path)
+    input_path = ensure_seekable_preview_proxy(os.fspath(input_path), timeout_sec=timeout_sec)
     output_path = os.fspath(output_path)
     start_sec = max(0.0, float(start_sec))
     duration_sec = max(0.1, float(duration_sec))
@@ -287,11 +361,6 @@ def build_export_original_clip_command(
     encode_mode = normalize_export_encode_mode(encode_mode)
 
     ensure_folder_exists(output_path)
-    if os.path.exists(output_path):
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
 
     cmd = [
         ffmpeg,
@@ -496,7 +565,7 @@ def get_seekable_preview_proxy_if_ready(video_path: str) -> str | None:
     return None
 
 
-def ensure_seekable_preview_proxy(video_path: str) -> str:
+def ensure_seekable_preview_proxy(video_path: str, *, timeout_sec=120.0) -> str:
     """Return a seek-friendly local path for preview players.
 
     ``.mpg`` / ``.mpeg`` often seek tens of seconds early under VLC ``:start-time``.
@@ -533,7 +602,10 @@ def ensure_seekable_preview_proxy(video_path: str) -> str:
         proxy_path,
     ]
     try:
-        result = subprocess.run(cmd, startupinfo=_build_hidden_startupinfo(), capture_output=True)
+        result = subprocess.run(
+            cmd, startupinfo=_build_hidden_startupinfo(), capture_output=True,
+            timeout=timeout_sec,
+        )
     except Exception:
         return path
     if result.returncode != 0 or not os.path.isfile(proxy_path):

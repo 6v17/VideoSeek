@@ -3357,19 +3357,19 @@ class RecapPackTests(unittest.TestCase):
 
     def test_polish_skips_llm_when_draft_already_covers(self):
         clips = [
-            {"tl_in": 0.0, "tl_out": 8.0, "vo": "开场已经写满。", "beat_id": 1},
-            {"tl_in": 8.0, "tl_out": 10.0, "vo": "收束一句。", "beat_id": 2},
+            {"tl_in": 0.0, "tl_out": 8.0, "vo": "少年走进店里递出支票，店长当场拒收，双方因此发生争执。", "beat_id": 1},
+            {"tl_in": 8.0, "tl_out": 10.0, "vo": "女人转身离开，争执暂时结束。", "beat_id": 2},
         ]
         with patch("src.services.recap_service.call_remote_llm") as mock_llm:
             out = polish_recap_vo(clips)
         mock_llm.assert_not_called()
-        self.assertEqual(out[0]["vo"], "开场已经写满。")
-        self.assertEqual(out[1]["vo"], "收束一句。")
+        self.assertEqual(out[0]["vo"], clips[0]["vo"])
+        self.assertEqual(out[1]["vo"], clips[1]["vo"])
 
     def test_fit_skips_llm_when_draft_already_covers(self):
         clips = [
-            {"tl_in": 0.0, "tl_out": 8.0, "vo": "开场已经写满。", "vo_draft": "开场已经写满。", "beat_id": 1},
-            {"tl_in": 8.0, "tl_out": 10.0, "vo": "收束一句。", "vo_draft": "收束一句。", "beat_id": 2},
+            {"tl_in": 0.0, "tl_out": 8.0, "vo": "少年走进店里递出支票，店长当场拒收，双方因此发生争执。", "beat_id": 1},
+            {"tl_in": 8.0, "tl_out": 10.0, "vo": "女人转身离开，争执暂时结束。", "beat_id": 2},
         ]
         with patch("src.services.recap_service.call_remote_llm") as mock_llm:
             out = fit_recap_captions_to_tts(clips)
@@ -4428,15 +4428,15 @@ class RecapBudgetMathTests(unittest.TestCase):
         self.assertGreater(float(stretched[0]["src_out"]), 12.0)
 
     def test_fit_skips_llm_when_draft_already_covers(self):
-        # Two short voiced shots → coverage high enough to skip polish rewrite.
+        # Substantial narration for both shots can still skip the rewrite.
         clips = [
             {
                 "tl_in": 0.0,
                 "tl_out": 8.0,
                 "src_in": 0.0,
                 "src_out": 8.0,
-                "vo": "店长当场拒收支票。",
-                "vo_draft": "店长当场拒收支票。",
+                "vo": "少年走进店里递出支票，店长当场拒收，双方因此发生争执。",
+                "vo_draft": "少年走进店里递出支票，店长当场拒收，双方因此发生争执。",
                 "beat_id": 1,
             },
             {
@@ -4444,16 +4444,16 @@ class RecapBudgetMathTests(unittest.TestCase):
                 "tl_out": 16.0,
                 "src_in": 8.0,
                 "src_out": 16.0,
-                "vo": "女人转身报警评理。",
-                "vo_draft": "女人转身报警评理。",
+                "vo": "女人转身报警评理，店长留在柜台后面，争执暂时告一段落。",
+                "vo_draft": "女人转身报警评理，店长留在柜台后面，争执暂时告一段落。",
                 "beat_id": 2,
             },
         ]
         with patch("src.services.recap_service.call_remote_llm") as mock_llm:
             out = fit_recap_captions_to_tts(clips)
         mock_llm.assert_not_called()
-        self.assertEqual(out[0]["vo"], "店长当场拒收支票。")
-        self.assertEqual(out[1]["vo"], "女人转身报警评理。")
+        self.assertEqual(out[0]["vo"], clips[0]["vo"])
+        self.assertEqual(out[1]["vo"], clips[1]["vo"])
 
 
 if __name__ == "__main__":

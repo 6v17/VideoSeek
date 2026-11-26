@@ -125,6 +125,8 @@ class ExportClipWorker(QThread):
         self._cancel_requested = False
 
     def run(self):
+        from src.media.export_clip import finish_export_process
+
         try:
             self._process = self.preview_controller.start_export_process(
                 self.video_path,
@@ -134,16 +136,23 @@ class ExportClipWorker(QThread):
                 encode_mode=self.encode_mode,
             )
             stdout, stderr = self._process.communicate()
+            finish_export_process(self._process, commit=not self._cancel_requested)
         except Exception as exc:
             from src.app.logging_utils import note_swallowed
             note_swallowed(exc, 'ui/playback/preview_dialog.py:119')
+            if self._process is not None:
+                try:
+                    if self._process.poll() is None:
+                        self._process.kill()
+                    self._process.communicate()
+                finally:
+                    finish_export_process(self._process, commit=False)
             self._process = None
             self.finished_export.emit(exc, self.save_path)
             return
         process = self._process
         self._process = None
         if self._cancel_requested:
-            self._remove_partial_output()
             self.finished_export.emit(ExportCancelledError(), self.save_path)
             return
         result = SimpleNamespace(
@@ -167,16 +176,6 @@ class ExportClipWorker(QThread):
                 process.kill()
             except Exception as kill_exc:
                 logger.debug("Export process kill failed: %s", kill_exc)
-
-    def _remove_partial_output(self):
-        if not self.save_path:
-            return
-        if not os.path.exists(self.save_path):
-            return
-        try:
-            os.remove(self.save_path)
-        except OSError:
-            pass
 
 
 def _chrome_field(name, default):

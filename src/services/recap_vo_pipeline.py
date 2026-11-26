@@ -164,7 +164,7 @@ def polish_recap_vo(
         try:
             text = _rs().call_remote_llm(
                 system=polish_system,
-                user=recap_vo_polish_user_prompt(wave, people=people, prev_caption=prev),
+                user=recap_vo_polish_user_prompt(wave, people=people, prev_caption=prev, pack=pack),
                 config=config,
                 temperature=0.2,
                 max_tokens=2048,

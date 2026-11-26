@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+import uuid
 from typing import Any, Dict, List, Optional
 
 from src.app.config import load_config
@@ -75,11 +77,13 @@ def resolve_export_clip_output_path(
         or "clip"
     )
     try:
-        start_tag = int(max(0.0, float(start_sec)))
-        end_tag = int(max(0.0, float(end_sec)))
+        start_tag = round(max(0.0, float(start_sec)) * 1000)
+        end_tag = round(max(0.0, float(end_sec)) * 1000)
     except (TypeError, ValueError):
         start_tag, end_tag = 0, 0
-    filename = f"{stem}_{start_tag}s_{end_tag}s.mp4"
+    source = os.path.normcase(os.path.realpath(os.path.expanduser(video_path)))
+    source_tag = hashlib.sha256(source.encode("utf-8")).hexdigest()[:12]
+    filename = f"{stem}_{source_tag}_{start_tag}ms_{end_tag}ms_{uuid.uuid4().hex}.mp4"
     destination = os.path.join(out_dir, filename)
     if not output_path_allowed(destination, config=load_config()):
         raise ValueError(f"export output path is not allowed: {destination}")
@@ -114,7 +118,6 @@ def build_batch_export_items_from_search_results(
         raise ValueError(f"Export item count exceeds limit ({MAX_BATCH_EXPORT_CLIPS}).")
 
     items: List[AgentBatchExportClipItem] = []
-    used_names: set[str] = set()
     for row in raw_items:
         stem = _sanitize_export_filename_stem(
             row.get("client_request_id") or row.get("query") or row.get("id") or "clip"
@@ -123,13 +126,13 @@ def build_batch_export_items_from_search_results(
             rank = int(row.get("rank") or 1)
         except (TypeError, ValueError):
             rank = 1
-        filename = f"{stem}_rank{rank:02d}.mp4"
-        suffix = 1
-        while filename.lower() in used_names:
-            suffix += 1
-            filename = f"{stem}_rank{rank:02d}_{suffix}.mp4"
-        used_names.add(filename.lower())
-        output_path = os.path.join(output_dir, filename)
+        output_path = resolve_export_clip_output_path(
+            output_dir=output_dir,
+            video_path=str(row["video_path"]),
+            start_sec=float(row["start_sec"]),
+            end_sec=float(row["end_sec"]),
+            client_request_id=f"{stem}_rank{rank:02d}",
+        )
         if not output_path_allowed(output_path):
             raise ValueError(f"export output path is not allowed: {output_path}")
         items.append(

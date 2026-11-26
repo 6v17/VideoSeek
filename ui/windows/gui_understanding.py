@@ -399,12 +399,15 @@ class UnderstandingGuiMixin:
         if page is None:
             return
         combo = page.input_caption_language
-        active = str(active_language or "zh").strip().lower()
+        from src.services.understanding_resource_service import normalize_caption_language
+
+        active = normalize_caption_language(active_language)
         combo.blockSignals(True)
         combo.clear()
         combo.addItem(self.texts.get("understanding_caption_language_zh", "中文"), "zh")
         combo.addItem(self.texts.get("understanding_caption_language_en", "English"), "en")
-        index = combo.findData(active if active in {"zh", "en"} else "zh")
+        combo.addItem(self.texts.get("understanding_caption_language_vi", "Tiếng Việt"), "vi")
+        index = combo.findData(active)
         combo.setCurrentIndex(0 if index < 0 else index)
         combo.blockSignals(False)
 
@@ -1010,7 +1013,7 @@ class UnderstandingGuiMixin:
         current = str(text or "").strip()
         if not current:
             return False
-        for lang in ("zh", "en"):
+        for lang in ("zh", "en", "vi"):
             if current == str(getter(lang) or "").strip():
                 return False
         return True

@@ -52,6 +52,19 @@ from .search import (
 
 logger = get_logger("agent_api")
 
+
+async def _run_export_with_deadline(callback, *args, timeout, **kwargs):
+    from src.media.export_clip import EXPORT_DEADLINE
+
+    token = EXPORT_DEADLINE.set(time.monotonic() + timeout)
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(callback, *args, **kwargs), timeout=timeout,
+        )
+    finally:
+        EXPORT_DEADLINE.reset(token)
+
+
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
@@ -548,8 +561,8 @@ class AgentApiService:
         started = time.perf_counter()
         timeout_sec = _resolve_batch_search_export_timeout_sec(body)
         try:
-            payload = await asyncio.wait_for(
-                asyncio.to_thread(execute_agent_batch_search, body),
+            payload = await _run_export_with_deadline(
+                execute_agent_batch_search, body,
                 timeout=timeout_sec,
             )
         except asyncio.TimeoutError:
@@ -691,17 +704,15 @@ class AgentApiService:
                 end_sec=body.end_sec,
                 client_request_id=body.client_request_id,
             )
-            payload = await asyncio.wait_for(
-                asyncio.to_thread(
-                    execute_export_clip,
-                    video_path=body.video_path,
-                    start_sec=body.start_sec,
-                    end_sec=body.end_sec,
-                    output_path=output_path,
-                    client_request_id=body.client_request_id,
-                    silent=body.silent,
-                    encode_mode=body.encode_mode,
-                ),
+            payload = await _run_export_with_deadline(
+                execute_export_clip,
+                video_path=body.video_path,
+                start_sec=body.start_sec,
+                end_sec=body.end_sec,
+                output_path=output_path,
+                client_request_id=body.client_request_id,
+                silent=body.silent,
+                encode_mode=body.encode_mode,
                 timeout=120.0,
             )
         except asyncio.TimeoutError:
@@ -732,8 +743,8 @@ class AgentApiService:
         default_mode = normalize_export_encode_mode(body.encode_mode or "copy")
         timeout_sec = resolve_batch_export_timeout_sec(len(body.items or []), default_mode)
         try:
-            payload = await asyncio.wait_for(
-                asyncio.to_thread(execute_batch_export_clips, body),
+            payload = await _run_export_with_deadline(
+                execute_batch_export_clips, body,
                 timeout=timeout_sec,
             )
         except asyncio.TimeoutError:

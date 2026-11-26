@@ -302,7 +302,7 @@ class UtilsTests(unittest.TestCase):
             6.0,
             "D:/out/clip.mp4",
         )
-        mock_proxy.assert_called_once_with("D:/videos/show.mpg")
+        mock_proxy.assert_called_once_with("D:/videos/show.mpg", timeout_sec=120.0)
         self.assertEqual(cmd[cmd.index("-i") + 1], "D:/cache/seek_proxy/proxy_abc.mp4")
         self.assertEqual(cmd[cmd.index("-ss") + 1], "1022.000")
 
@@ -319,9 +319,7 @@ class UtilsTests(unittest.TestCase):
     ):
         mock_run.return_value = unittest.mock.Mock(returncode=0)
 
-        utils.export_original_clip("D:/videos/clip.mp4", 8.0, 3.5, "D:/out/clip.mp4")
-
-        cmd = mock_run.call_args.args[0]
+        cmd = utils.build_export_original_clip_command("D:/videos/clip.mp4", 8.0, 3.5, "D:/out/clip.mp4")
         self.assertEqual(cmd[cmd.index("-c:v") + 1], "libx264")
         self.assertEqual(cmd[cmd.index("-crf") + 1], "18")
         self.assertEqual(cmd[cmd.index("-c:a") + 1], "aac")
@@ -340,7 +338,7 @@ class UtilsTests(unittest.TestCase):
     ):
         mock_run.return_value = unittest.mock.Mock(returncode=0)
 
-        utils.export_original_clip(
+        cmd = utils.build_export_original_clip_command(
             "D:/videos/clip.mp4",
             8.0,
             3.5,
@@ -348,7 +346,6 @@ class UtilsTests(unittest.TestCase):
             encode_mode="copy",
         )
 
-        cmd = mock_run.call_args.args[0]
         self.assertEqual(cmd[cmd.index("-c") + 1], "copy")
         self.assertNotIn("-c:v", cmd)
 
@@ -365,9 +362,8 @@ class UtilsTests(unittest.TestCase):
     ):
         mock_run.return_value = unittest.mock.Mock(returncode=0)
 
-        utils.export_original_clip("D:/videos/clip.mp4", 8.0, 3.5, "D:/out/clip.mp4", silent=True)
+        cmd = utils.build_export_original_clip_command("D:/videos/clip.mp4", 8.0, 3.5, "D:/out/clip.mp4", silent=True)
 
-        cmd = mock_run.call_args.args[0]
         self.assertIn("-an", cmd)
         self.assertNotIn("-c:a", cmd)
         self.assertEqual(cmd.count("-map"), 1)

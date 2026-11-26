@@ -7,6 +7,8 @@ names for existing callers.
 
 from __future__ import annotations
 
+import math
+import re
 from typing import Any, Mapping, Sequence
 
 from src.services.recap_constants import (
@@ -452,11 +454,11 @@ def _vo_restates_prior(prior: str, text: str) -> bool:
     return overlap >= 0.45
 
 def recap_vo_coverage_ratio(clips: Sequence[Mapping[str, Any]]) -> float:
-    """Share of story picture that already has narration draft/final text.
+    """Share of beat units with substantial narration for their picture duration.
 
     Same-beat follow shots often keep empty ``vo`` while the head line spans them
-    for TTS — count by beat (any voiced master) so cross-shot packing doesn't
-    look "uncovered" and burn another caption/polish bill.
+    for TTS — count by beat, checking its combined duration, so a spanning head
+    is neither counted twice nor treated as sufficient just because it exists.
     """
     items = list(clips or [])
     if not items:
@@ -478,13 +480,24 @@ def recap_vo_coverage_ratio(clips: Sequence[Mapping[str, Any]]) -> float:
             by_beat.setdefault(beat_id, []).append(clip)
         else:
             orphan.append(clip)
-    units: list[bool] = []
-    for group in by_beat.values():
-        units.append(
-            any(str(clip.get("vo") or clip.get("vo_draft") or "").strip() for clip in group)
-        )
-    for clip in orphan:
-        units.append(bool(str(clip.get("vo") or clip.get("vo_draft") or "").strip()))
+    units = [_has_substantial_narration(group) for group in by_beat.values()]
+    units.extend(_has_substantial_narration([clip]) for clip in orphan)
     if not units:
         return 1.0
     return sum(1 for hit in units if hit) / float(len(units))
+
+
+def _has_substantial_narration(clips: Sequence[Mapping[str, Any]]) -> bool:
+    # Count a spanning head once; draft and final are alternatives, not extra words.
+    texts = dict.fromkeys(
+        str(clip.get("vo") or clip.get("vo_draft") or "").strip() for clip in clips
+    )
+    text = " ".join(texts)
+    cjk = re.findall(r"[\u3400-\u9fff]", text)
+    words = re.findall(r"[^\W\d_\u3400-\u9fff]+", text, flags=re.UNICODE)
+    duration = sum(_caption_clip_sec(clip) for clip in clips)
+    # Conservative lower bounds: ~3 CJK characters or 1.5 Latin words per second.
+    # This measures substance, not factual accuracy or literary quality.
+    if len(cjk) > len(words):
+        return len(cjk) + len(words) >= max(8, math.ceil(duration * 3.0))
+    return len(words) >= max(4, math.ceil(duration * 1.5))

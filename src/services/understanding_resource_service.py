@@ -120,7 +120,8 @@ REMOTE_VLM_API_KEY_PRESET_IDS = frozenset(CLOUD_VLM_PRESET_IDS)
 
 CAPTION_LANGUAGE_ZH = "zh"
 CAPTION_LANGUAGE_EN = "en"
-SUPPORTED_CAPTION_LANGUAGES = {CAPTION_LANGUAGE_ZH, CAPTION_LANGUAGE_EN}
+CAPTION_LANGUAGE_VI = "vi"
+SUPPORTED_CAPTION_LANGUAGES = {CAPTION_LANGUAGE_ZH, CAPTION_LANGUAGE_EN, CAPTION_LANGUAGE_VI}
 
 UNDERSTANDING_MODE_TAGS = "tags"
 UNDERSTANDING_MODE_SUMMARY = "summary"  # legacy on-disk store only
@@ -173,6 +174,9 @@ TAG_LANGUAGE_PROMPTS = {
         "Fewer beats filler; up to about 16 short tags (1–3 words) when rich."
     ),
 }
+TAG_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_VI] = TAG_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_EN] + (
+    "\nViết toàn bộ giá trị thẻ bằng tiếng Việt tự nhiên. Giữ nguyên khóa JSON tags."
+)
 # Keep old name as alias so existing imports/tests keep working.
 CAPTION_LANGUAGE_PROMPTS = TAG_LANGUAGE_PROMPTS
 
@@ -237,11 +241,21 @@ MOTION_LANGUAGE_PROMPTS = {
 }
 
 
+MOTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_VI] = MOTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_EN] + (
+    "\nViết visible, change và inferred bằng tiếng Việt tự nhiên; giữ nguyên tên khóa JSON."
+)
+
+
 def normalize_caption_language(value, *, default: str = CAPTION_LANGUAGE_ZH) -> str:
-    text = str(value or "").strip().lower()
+    aliases = {"vietnamese": "vi", "tiếng việt": "vi", "english": "en", "chinese": "zh"}
+    def canonical(raw):
+        text = str(raw or "").strip().lower().replace("_", "-")
+        return aliases.get(text, text.split("-", 1)[0])
+
+    text = canonical(value)
     if text in SUPPORTED_CAPTION_LANGUAGES:
         return text
-    fallback = str(default or CAPTION_LANGUAGE_ZH).strip().lower()
+    fallback = canonical(default or CAPTION_LANGUAGE_ZH)
     return fallback if fallback in SUPPORTED_CAPTION_LANGUAGES else CAPTION_LANGUAGE_ZH
 
 
@@ -478,6 +492,10 @@ def resolve_remote_vlm_caption_language(raw_remote_vlm: Mapping[str, Any]) -> st
     if explicit:
         return normalize_caption_language(explicit)
     prompt = str(raw_remote_vlm.get("prompt", "") or "").strip()
+    if prompt in {TAG_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_VI], MOTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_VI]} or any(
+        marker in prompt.casefold() for marker in ("tiếng việt", "vietnamese")
+    ):
+        return CAPTION_LANGUAGE_VI
     if prompt == CAPTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_EN] or prompt.startswith("Describe this video frame") or (
         "Extract concise English tags" in prompt
         or prompt.startswith("Look at the frame")

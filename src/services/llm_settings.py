@@ -28,6 +28,7 @@ DEFAULT_REMOTE_LLM_CONFIG = {
     "api_keys": {},
     "timeout_sec": 180,
     "max_tokens": 4096,
+    "reasoning_effort": "none",
 }
 
 REMOTE_LLM_PRESETS: dict[str, dict[str, str]] = {
@@ -260,6 +261,8 @@ def finalize_remote_llm_settings(raw_remote_llm: Mapping[str, Any] | None) -> di
             remote_llm["model"] = defaults["model"]
     remote_llm["model"] = migrate_remote_llm_model(str(remote_llm.get("model") or ""))
     remote_llm["api_keys"] = normalize_remote_llm_api_keys(raw_remote_llm.get("api_keys"))
+    effort = str(raw_remote_llm.get("reasoning_effort") or "none").strip().lower()
+    remote_llm["reasoning_effort"] = effort if effort in {"none", "low", "medium", "high", "xhigh"} else "none"
     return remote_llm
 
 
@@ -437,11 +440,15 @@ def _call_remote_llm_once(
     if str(system or "").strip():
         messages.append({"role": "system", "content": str(system).strip()})
     messages.append({"role": "user", "content": str(user or "").strip()})
+    from src.services.openai_compat_probe import text_chat_generation_options
+
     payload = {
         "model": model,
         "messages": messages,
-        "max_tokens": max(256, min(8192, token_limit)),
-        "temperature": float(temperature),
+        **text_chat_generation_options(
+            model, token_limit=max(256, min(8192, token_limit)), temperature=temperature,
+            reasoning_effort=settings.get("reasoning_effort", "none"),
+        ),
     }
     if _uses_deepseek_chat_api(settings, base_url=base_url, model=model):
         # V4 enables thinking by default; recap needs a clean JSON body.
@@ -476,6 +483,8 @@ def _call_remote_llm_once(
     choices = body.get("choices") or []
     if not choices:
         raise RuntimeError("remote LLM returned no choices")
+    if choices[0].get("finish_reason") == "length":
+        raise RuntimeError("remote LLM response was truncated; increase the token budget or reduce the batch size.")
     message = choices[0].get("message") or {}
     text = str(message.get("content", "") or "").strip()
     if not text and message.get("reasoning_content"):
