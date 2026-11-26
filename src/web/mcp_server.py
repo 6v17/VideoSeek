@@ -3,10 +3,16 @@
 The desktop app keeps serving HTTP on 127.0.0.1. This process only forwards
 six tools and two resources. It does not search, index, or export by itself.
 
-Cursor config (cwd is the VideoSeek repo)::
+Installed build (recommended)::
+
+    VideoSeek.exe --mcp-stdio
+    # alias: VideoSeek.exe --mcp-server
+
+Source checkout::
 
     python -m src.web.mcp_server
 
+Use Settings → Copy MCP so the fragment matches the running build.
 Windows pipes default to the ANSI code page. Protocol bytes are always UTF-8.
 """
 

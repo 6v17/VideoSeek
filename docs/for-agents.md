@@ -45,7 +45,7 @@
 | POST | `/export/clip` | 导出单个片段 |
 | POST | `/export/clips/batch` | 批量导出片段 |
 
-**MCP（同一套能力，另一种入口）：** 设置里「复制 MCP」得到 Cursor 的 stdio 配置。进程是 `python -m src.web.mcp_server`，它只转发到上面的 HTTP，自己不搜片。工具：`list_libraries`、`sync_library`、`search`、`extract_frames`、`export_clips`、`export_timeline`。资源：`videoseek://status`、`videoseek://presets`。`agent-starter`、`agent-doc`、`/search/telemetry` 仍只在 HTTP。路径规则与本文相同。
+**MCP（同一套能力，另一种入口）：** 设置里「复制 MCP」得到 Cursor 的 stdio 配置。安装版用 `VideoSeek.exe --mcp-stdio`（也认 `--mcp-server`）；源码开发用 `python -m src.web.mcp_server`。桥只转发到上面的 HTTP，自己不搜片。工具：`list_libraries`、`sync_library`、`search`、`extract_frames`、`export_clips`、`export_timeline`。资源：`videoseek://status`、`videoseek://presets`。`agent-starter`、`agent-doc`、`/search/telemetry` 仍只在 HTTP。路径规则与本文相同。VideoSeek 需保持打开，且本机搜索接口已开。
 
 ---
 

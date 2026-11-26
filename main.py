@@ -4,7 +4,7 @@ import time
 from src.app.logging_utils import get_logger, setup_logging
 
 if __name__ == "__main__":
-    if "--mcp-stdio" in sys.argv:
+    if "--mcp-stdio" in sys.argv or "--mcp-server" in sys.argv:
         # Packaged builds have no python and no src/ tree. Stdout is the MCP protocol.
         from src.web.mcp_server import main as mcp_stdio_main
 

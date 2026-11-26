@@ -7,6 +7,7 @@ import threading
 import time
 import unittest
 import urllib.error
+from pathlib import Path
 from unittest.mock import patch
 
 from src.web.mcp_server import (
@@ -86,6 +87,12 @@ class McpProtocolTests(unittest.TestCase):
         self.assertTrue(server["command"])
         self.assertEqual(server["env"]["PYTHONIOENCODING"], "utf-8")
         self.assertNotIn("Path", server["env"])
+
+    def test_main_accepts_mcp_server_alias(self):
+        import main as app_main
+
+        source = Path(app_main.__file__).read_text(encoding="utf-8")
+        self.assertIn('"--mcp-stdio" in sys.argv or "--mcp-server" in sys.argv', source)
 
     def test_windows_client_env_keeps_system_root_without_a_short_path(self):
         with patch.dict(os.environ, {"SystemRoot": r"D:\Win"}, clear=False):
