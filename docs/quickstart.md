@@ -4,6 +4,8 @@
 
 ## 1) 依赖与启动
 
+需要 Python 3.12 或更高。用 conda 时以 `environment.yml` 为准，里面钉的是 3.12。
+
 ```bash
 pip install -r requirements.txt
 python main.py

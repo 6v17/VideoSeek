@@ -47,7 +47,7 @@
 
 ## 快速开始（源码）
 
-推荐 **Windows 10/11**。其它系统见 [`docs/quickstart.md`](docs/quickstart.md)。
+推荐 **Windows 10/11**，需要 **Python 3.12+**（conda 钉的是 3.12）。其它系统见 [`docs/quickstart.md`](docs/quickstart.md)。
 
 ```bash
 pip install -r requirements.txt

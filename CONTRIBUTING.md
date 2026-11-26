@@ -17,7 +17,7 @@
 
 ## 本地检查
 
-环境准备见 [`docs/quickstart.md`](docs/quickstart.md)。项目要求 Python 3.10 或更高，持续集成跑的是 3.10。若某个更新的版本没有 `onnxruntime` 或 `faiss-cpu` 的预编译包，请在说明里写明。
+环境准备见 [`docs/quickstart.md`](docs/quickstart.md)。项目要求 Python 3.12 或更高，持续集成跑的是 3.12。若某个更新的版本没有 `onnxruntime` 或 `faiss-cpu` 的预编译包，请在说明里写明。
 
 ```bash
 python -m ruff check src ui tests scripts main.py

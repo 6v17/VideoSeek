@@ -24,7 +24,7 @@ jobs:
           activate-environment: VideoSeek
           environment-file: environment.yml
           auto-update-conda: false
-          python-version: "3.10"
+          python-version: "3.12"
 
       - name: No BOM
         run: python scripts/check_no_bom.py

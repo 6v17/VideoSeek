@@ -47,7 +47,7 @@ By default, indexing stays on your machine (ONNX · Lance · FFmpeg) and **media
 
 ## Quick start (from source)
 
-**Windows 10/11** recommended. Other OS: see [`docs/quickstart.md`](docs/quickstart.md).
+**Windows 10/11** and **Python 3.12+** (conda pins 3.12). Other OS: see [`docs/quickstart.md`](docs/quickstart.md).
 
 ```bash
 pip install -r requirements.txt
