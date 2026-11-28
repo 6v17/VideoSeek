@@ -430,8 +430,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         mobile_bridge_layout = QHBoxLayout(self.mobile_bridge_row)
         mobile_bridge_layout.setContentsMargins(0, 0, 0, 0)
         mobile_bridge_layout.setSpacing(8)
-        self.mobile_toggle_label = QLabel()
-        self.mobile_toggle_label.setObjectName("InlineFieldLabel")
         self.btn_mobile_toggle = QPushButton()
         set_button_role(self.btn_mobile_toggle, "GhostButton", chrome="mobileToggle")
         self.btn_mobile_toggle.setCursor(Qt.PointingHandCursor)
@@ -443,11 +441,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_mobile_qr.setProperty("qrState", "visible")
         self.btn_mobile_qr.setEnabled(False)
         self.btn_mobile_qr.setFixedHeight(32)
-        mobile_bridge_layout.addWidget(self.mobile_toggle_label, 0)
         mobile_bridge_layout.addWidget(self.btn_mobile_toggle, 0)
         mobile_bridge_layout.addWidget(self.btn_mobile_qr, 0)
         mobile_bridge_layout.addStretch(1)
-        team_bundle_layout.addWidget(self.mobile_bridge_row, 0)
         # Server URL on its own row so http://host:port is never clipped by the combo.
         team_bundle_layout.addWidget(self.share_server_panel, 0)
         self.share_agent_panel.hide()
@@ -514,6 +510,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_close_window_action = ClickableLabel()
         self.label_agent_api_enabled = ClickableLabel()
         self.label_team_mode = ClickableLabel()
+        self.label_mobile_bridge = ClickableLabel()
         self.label_active_model_profile = ClickableLabel()
         self.label_cloud_vl_enabled = ClickableLabel()
         self.label_cloud_vl_api_key = ClickableLabel()
@@ -562,6 +559,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_close_window_action = QLabel()
         self.hint_agent_api_enabled = QLabel()
         self.hint_team_mode = QLabel()
+        self.hint_mobile_bridge = QLabel()
         self.hint_active_model_profile = QLabel()
         self.hint_cloud_vl_enabled = QLabel()
         self.hint_cloud_vl_api_key = QLabel()
@@ -586,66 +584,72 @@ class SettingsPage(QWidget, SettingsFormMixin):
         QApplication.instance().installEventFilter(self.detail_popup)
 
     def _init_settings_control_layout(self):
-        self._configure_setting_input(self.input_fps, width=94)
-        self._configure_setting_input(self.input_sampling_fps_mode, width=136)
-        self._configure_setting_input(self.input_lance_ann_enabled, width=COMPONENT_SIZES["settings_input_width"] + 36)
+        sm = COMPONENT_SIZES["settings_input_width"]
+        md = COMPONENT_SIZES["field_width_md"]
+        self._configure_setting_input(self.input_fps, width=sm)
+        self._configure_setting_input(self.input_sampling_fps_mode, width=sm)
+        self._configure_setting_input(self.input_lance_ann_enabled, width=md)
         self._configure_setting_input(
             self.input_frame_neighbor_rerank_enabled,
-            width=COMPONENT_SIZES["settings_input_width"] + 36,
+            width=md,
         )
         self._configure_setting_input(
             self.input_frame_neighbor_rerank_top_n,
-            width=COMPONENT_SIZES["settings_input_width"],
+            width=sm,
         )
         self._configure_setting_input(
             self.input_frame_neighbor_rerank_window,
-            width=COMPONENT_SIZES["settings_input_width"],
+            width=sm,
         )
         self._configure_setting_input(
             self.input_image_pixel_rerank_top_n,
-            width=COMPONENT_SIZES["settings_input_width"],
+            width=sm,
         )
         self._configure_setting_input(
             self.input_image_pixel_rerank_probe_mode,
-            width=COMPONENT_SIZES["settings_input_width"] + 36,
+            width=md,
         )
         self._configure_setting_input(
             self.input_image_pixel_rerank_time_window_sec,
-            width=COMPONENT_SIZES["settings_input_width"],
+            width=sm,
         )
         self._configure_setting_input(
             self.input_image_pixel_rerank_probe_step_sec,
-            width=COMPONENT_SIZES["settings_input_width"],
+            width=sm,
         )
         self._configure_setting_input(
             self.input_image_search_fetch_multiplier,
-            width=COMPONENT_SIZES["settings_input_width"],
+            width=sm,
         )
-        self._configure_setting_input(self.input_preview_seconds, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_thumb_width, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_thumb_height, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_embedding_batch_size, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_indexing_video_workers, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_preview_seconds, width=sm)
+        self._configure_setting_input(self.input_thumb_width, width=sm)
+        self._configure_setting_input(self.input_thumb_height, width=sm)
+        self._configure_setting_input(self.input_embedding_batch_size, width=sm)
+        self._configure_setting_input(self.input_indexing_video_workers, width=sm)
         self._configure_setting_input(
             self.input_chunk_policy,
-            width=COMPONENT_SIZES["settings_input_width"] + 36,
+            width=md,
         )
-        self._configure_setting_input(self.input_similarity_threshold, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_min_chunk_size, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_min_chunk_duration, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_prefer_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
-        self._configure_setting_input(self.input_inference_ep, width=COMPONENT_SIZES["settings_input_width"] + 36)
-        self._configure_setting_input(self.input_experimental_hw_decode, width=COMPONENT_SIZES["settings_input_width"] + 36)
-        self._configure_setting_input(self.input_gpu_probe_unknown_keep_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
-        self._configure_setting_input(self.input_auto_cleanup_missing_files, width=COMPONENT_SIZES["settings_input_width"] + 36)
-        self._configure_setting_input(self.input_close_window_action, width=COMPONENT_SIZES["settings_input_width"] + 36)
-        self._configure_setting_input(self.input_agent_api_enabled, width=COMPONENT_SIZES["settings_input_width"] + 36)
-        self._configure_setting_input(self.input_team_mode, width=COMPONENT_SIZES["settings_input_width"] + 120)
-        self._configure_setting_input(self.input_export_video_silent, width=COMPONENT_SIZES["settings_input_width"] + 36)
-        self._configure_setting_input(self.input_active_model_profile, width=COMPONENT_SIZES["settings_input_width"] + 120)
-        self._configure_setting_input(self.input_cloud_vl_enabled, width=COMPONENT_SIZES["settings_input_width"] + 36)
-        self._configure_setting_input(self.input_cloud_vl_api_key, width=COMPONENT_SIZES["settings_input_width"] + 120)
-        self._configure_setting_input(self.input_cloud_vl_dimension, width=COMPONENT_SIZES["settings_input_width"] + 36)
+        self._configure_setting_input(self.input_similarity_threshold, width=sm)
+        self._configure_setting_input(self.input_min_chunk_size, width=sm)
+        self._configure_setting_input(self.input_min_chunk_duration, width=sm)
+        self._configure_setting_input(self.input_prefer_gpu, width=md)
+        self._configure_setting_input(self.input_inference_ep, width=md)
+        self._configure_setting_input(self.input_experimental_hw_decode, width=md)
+        self._configure_setting_input(self.input_gpu_probe_unknown_keep_gpu, width=md)
+        self._configure_setting_input(self.input_auto_cleanup_missing_files, width=md)
+        self._configure_setting_input(self.input_close_window_action, width=md)
+        self._configure_setting_input(self.input_agent_api_enabled, width=md)
+        self._configure_setting_input(self.input_team_mode, width=md)
+        self._configure_setting_input(self.input_export_video_silent, width=md)
+        self._configure_setting_input(self.input_active_model_profile, width=md)
+        self._configure_setting_input(self.input_cloud_vl_enabled, width=md)
+        self._configure_setting_input(
+            self.input_cloud_vl_api_key,
+            width=COMPONENT_SIZES["settings_path_input_width"],
+            expanding=True,
+        )
+        self._configure_setting_input(self.input_cloud_vl_dimension, width=sm)
         self.btn_download_runtime_resources.setObjectName("AccentGhostButton")
         self.btn_download_runtime_resources.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_rediscover_models.setObjectName("AccentGhostButton")
@@ -907,7 +911,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         )
         self._configure_setting_input(
             self.input_chunk_policy,
-            width=COMPONENT_SIZES["settings_input_width"] + 36,
+            width=COMPONENT_SIZES["field_width_md"],
         )
         self._add_setting_row(
             self.section_indexing_form,
@@ -961,6 +965,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_team_mode,
             self.input_team_bundle,
             self.hint_team_mode,
+        )
+        self._add_setting_row(
+            self.section_general_form,
+            3,
+            self.label_mobile_bridge,
+            self.mobile_bridge_row,
+            self.hint_mobile_bridge,
         )
         self._add_setting_row(
             self.section_model_gpu_form,
@@ -1387,8 +1398,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_edit_team_client_url.setText(
             texts.get("setting_team_edit_client_url", "编辑服务地址")
         )
-        self.mobile_toggle_label.setText(texts.get("mobile_bridge_toggle_label", "手机上传"))
+        self.label_mobile_bridge.setText(texts.get("mobile_bridge_toggle_label", "手机上传"))
         self.btn_mobile_qr.setText(texts.get("mobile_bridge_qr", "二维码"))
+        self.hint_mobile_bridge.setText(texts.get("mobile_bridge_settings_hint", ""))
         self.mobile_bridge_row.setToolTip(texts.get("mobile_bridge_settings_hint", ""))
         current_agent_api_enabled = self.input_agent_api_enabled.currentData()
         self.input_agent_api_enabled.blockSignals(True)
@@ -1692,6 +1704,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_close_window_action,
             self.label_agent_api_enabled,
             self.label_team_mode,
+            self.label_mobile_bridge,
             self.label_active_model_profile,
             self.label_data_root,
             self.label_ffmpeg_path,

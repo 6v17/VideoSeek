@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ui.widgets.components import NoWheelComboBox, NoWheelDoubleSpinBox, NoWheelSpinBox
 from ui.widgets.flow_layout import FlowLayout
@@ -23,28 +23,6 @@ class DialogueLibraryPage(QWidget):
         self.header = self.scaffold.header
         page_body = self.scaffold.content_layout
 
-        self.shared_toolbar_card = VSCard(
-            variant="sub",
-            margins=(12, 8, 12, 8),
-            spacing=6,
-            object_name="LibrarySharedStrip",
-        )
-        shared_outer = self.shared_toolbar_card.content_layout
-        chrome_row = QHBoxLayout()
-        chrome_row.setContentsMargins(0, 0, 0, 0)
-        chrome_row.setSpacing(10)
-        chrome_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-
-        action_block = QVBoxLayout()
-        action_block.setContentsMargins(0, 0, 0, 0)
-        action_block.setSpacing(2)
-        self.lbl_action_caption = QLabel()
-        self.lbl_action_caption.setObjectName("LibraryChromeCaption")
-        action_block.addWidget(self.lbl_action_caption)
-
-        action_row = QHBoxLayout()
-        action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.setSpacing(8)
         self.btn_add_lib = QPushButton()
         self.btn_add_lib.setObjectName("SuccessGhostButton")
         self.btn_add_lib.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -52,22 +30,9 @@ class DialogueLibraryPage(QWidget):
         self.btn_remove_lib.setObjectName("DangerGhostButton")
         self.btn_remove_lib.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_remove_lib.setEnabled(False)
-        action_row.addWidget(self.btn_add_lib)
-        action_row.addWidget(self.btn_remove_lib)
-        action_block.addLayout(action_row)
-        chrome_row.addLayout(action_block, 0)
-        chrome_row.addStretch(1)
-        shared_outer.addLayout(chrome_row)
-
         self.lbl_shared_library_hint = QLabel()
         self.lbl_shared_library_hint.setObjectName("LibraryChromeHint")
-        self.lbl_shared_library_hint.setWordWrap(True)
-        self.lbl_shared_library_hint.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
-        )
         self.lbl_shared_library_hint.hide()
-        shared_outer.addWidget(self.lbl_shared_library_hint)
-        page_body.addWidget(self.shared_toolbar_card)
 
         body = QWidget()
         body_layout = QVBoxLayout(body)
@@ -143,6 +108,14 @@ class DialogueLibraryPage(QWidget):
         self.subtitle_video_tree.setMinimumHeight(280)
         self.dialogue_list = self.subtitle_video_tree
 
+        dialogue_toolbar.addWidget(self.btn_add_lib)
+        dialogue_toolbar.addWidget(self.btn_remove_lib)
+        action_divider = QFrame()
+        action_divider.setFrameShape(QFrame.Shape.VLine)
+        action_divider.setFrameShadow(QFrame.Shadow.Plain)
+        action_divider.setObjectName("ToolbarDivider")
+        action_divider.setFixedSize(1, 22)
+        dialogue_toolbar.addWidget(action_divider)
         dialogue_toolbar.addWidget(self.btn_build_dialogue_index)
         dialogue_toolbar.addWidget(self.btn_reembed_dialogue)
         dialogue_toolbar.addWidget(self.btn_clear_dialogue)

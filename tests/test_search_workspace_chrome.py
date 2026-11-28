@@ -342,9 +342,12 @@ class SearchWorkspaceChromeTests(unittest.TestCase):
         library = _show(LibraryPage())
         dialogue = _show(DialogueLibraryPage())
         gallery = _show(ImageGalleryPage())
-        self.assertEqual(_vgap(library.shared_toolbar_card, library.table_card), gap)
-        self.assertEqual(_vgap(dialogue.shared_toolbar_card, dialogue.dialogue_table_card), gap)
-        self.assertEqual(_vgap(gallery.shared_toolbar_card, gallery.table_card), gap)
+        self.assertFalse(hasattr(library, "shared_toolbar_card"))
+        self.assertFalse(hasattr(dialogue, "shared_toolbar_card"))
+        self.assertFalse(hasattr(gallery, "shared_toolbar_card"))
+        self.assertEqual(library.btn_add_lib.parent().objectName(), "LibraryToolbarFlow")
+        self.assertEqual(dialogue.btn_add_lib.parent().objectName(), "LibraryToolbarFlow")
+        self.assertEqual(gallery.btn_add_folder.parent().objectName(), "LibraryToolbarFlow")
         for widget in (page, library, dialogue, gallery):
             widget.hide()
 

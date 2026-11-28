@@ -24,8 +24,28 @@ def mark_form_field(widget) -> None:
     repolish_widget(widget)
 
 
-def configure_expanding_line(field: QLineEdit, *, min_width: int = 280) -> None:
+def configure_choice_field(widget) -> None:
+    """One width for provider / preset combos on the understanding forms."""
+    width = int(COMPONENT_SIZES["field_width_md"])
+    widget.setMinimumWidth(width)
+    widget.setMaximumWidth(width)
+    widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    mark_form_field(widget)
+
+
+def configure_number_field(widget) -> None:
+    """One width for small numeric fields, shared with settings."""
+    width = int(COMPONENT_SIZES["settings_input_width"])
+    widget.setMinimumWidth(width)
+    widget.setMaximumWidth(width)
+    widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    mark_form_field(widget)
+
+
+def configure_expanding_line(field: QLineEdit, *, min_width: int | None = None) -> None:
     """Let URL / key / model fields grow with the dialog instead of a fixed narrow box."""
+    if min_width is None:
+        min_width = int(COMPONENT_SIZES["field_width_md"])
     field.setMinimumWidth(int(min_width))
     field.setMaximumWidth(16777215)
     field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)

@@ -36,7 +36,7 @@ class SettingsFormMixin:
     def _configure_setting_label(self, label):
         label.setMinimumWidth(140)
         label.setMaximumWidth(210)
-        label.setMinimumHeight(40)
+        label.setMinimumHeight(COMPONENT_SIZES["form_field_height"])
         label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         label.setWordWrap(True)
         label.setProperty("settingLabel", True)
@@ -120,7 +120,7 @@ class SettingsFormMixin:
         block = QWidget()
         block.setObjectName("SettingLabelBlock")
         layout = QVBoxLayout(block)
-        layout.setContentsMargins(0, 8, 0, 8)
+        layout.setContentsMargins(0, 4, 0, 4)
         layout.setSpacing(0)
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)

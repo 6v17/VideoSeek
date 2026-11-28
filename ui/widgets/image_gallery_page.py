@@ -311,28 +311,6 @@ class ImageGalleryPage(QWidget):
         self.header = self.scaffold.header
         page_body = self.scaffold.content_layout
 
-        self.shared_toolbar_card = VSCard(
-            variant="sub",
-            margins=(12, 8, 12, 8),
-            spacing=6,
-            object_name="LibrarySharedStrip",
-        )
-        shared_outer = self.shared_toolbar_card.content_layout
-        chrome_row = QHBoxLayout()
-        chrome_row.setContentsMargins(0, 0, 0, 0)
-        chrome_row.setSpacing(10)
-        chrome_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-
-        action_block = QVBoxLayout()
-        action_block.setContentsMargins(0, 0, 0, 0)
-        action_block.setSpacing(2)
-        self.lbl_action_caption = QLabel()
-        self.lbl_action_caption.setObjectName("LibraryChromeCaption")
-        action_block.addWidget(self.lbl_action_caption)
-
-        action_row = QHBoxLayout()
-        action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.setSpacing(8)
         self.btn_add_folder = QPushButton()
         set_button_role(self.btn_add_folder, "SuccessGhostButton")
         self.btn_remove_folder = QPushButton()
@@ -340,12 +318,6 @@ class ImageGalleryPage(QWidget):
         self.btn_remove_folder.setEnabled(False)
         for button in (self.btn_add_folder, self.btn_remove_folder):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
-            action_row.addWidget(button)
-        action_block.addLayout(action_row)
-        chrome_row.addLayout(action_block, 0)
-        chrome_row.addStretch(1)
-        shared_outer.addLayout(chrome_row)
-        page_body.addWidget(self.shared_toolbar_card)
 
         self.table_card = VSCard(margins=(16, 14, 16, 14), spacing=12)
         table_layout = self.table_card.content_layout
@@ -364,6 +336,14 @@ class ImageGalleryPage(QWidget):
         self.folder_tree = LibraryGroupedVideoTree()
         self.folder_tree.setMinimumHeight(280)
         self.folder_tree.set_row_icon(_image_file_icon(self))
+        toolbar.addWidget(self.btn_add_folder)
+        toolbar.addWidget(self.btn_remove_folder)
+        action_divider = QFrame()
+        action_divider.setFrameShape(QFrame.Shape.VLine)
+        action_divider.setFrameShadow(QFrame.Shadow.Plain)
+        action_divider.setObjectName("ToolbarDivider")
+        action_divider.setFixedSize(1, 22)
+        toolbar.addWidget(action_divider)
         toolbar.addWidget(self.btn_sync)
         toolbar.addWidget(self.btn_refresh)
         toolbar.addWidget(self.folder_tree.find_bar)
@@ -387,7 +367,6 @@ class ImageGalleryPage(QWidget):
         self.header.title.setText(texts.get("gallery_page_title", "Gallery"))
         self.header.subtitle.setText(texts.get("gallery_page_desc", ""))
         self.header.subtitle.setVisible(bool(texts.get("gallery_page_desc", "")))
-        self.lbl_action_caption.setText(texts.get("library_action_caption", ""))
         self.btn_add_folder.setText(texts.get("gallery_add_folder", ""))
         self.btn_remove_folder.setText(texts.get("gallery_remove_folder", ""))
         self.table_title.setText(texts.get("gallery_folders_title", ""))

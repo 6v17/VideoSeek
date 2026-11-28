@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.widgets.components import NoWheelComboBox
-from ui.widgets.understanding_form_common import configure_expanding_line, field_label, mark_form_field
+from ui.widgets.understanding_form_common import configure_choice_field, configure_expanding_line, field_label
 
 
 class UnderstandingLlmForm(QWidget):
@@ -56,17 +56,13 @@ class UnderstandingLlmForm(QWidget):
         self.label_llm_provider_mode = field_label()
         self.input_llm_provider_mode = NoWheelComboBox()
         self.input_llm_provider_mode.setObjectName("SearchModeSelect")
-        self.input_llm_provider_mode.setMinimumWidth(180)
-        self.input_llm_provider_mode.setMaximumWidth(320)
-        mark_form_field(self.input_llm_provider_mode)
+        configure_choice_field(self.input_llm_provider_mode)
         config_form.addRow(self.label_llm_provider_mode, self.input_llm_provider_mode)
 
         self.label_llm_provider_preset = field_label()
         self.input_llm_provider_preset = NoWheelComboBox()
         self.input_llm_provider_preset.setObjectName("SearchModeSelect")
-        self.input_llm_provider_preset.setMinimumWidth(180)
-        self.input_llm_provider_preset.setMaximumWidth(360)
-        mark_form_field(self.input_llm_provider_preset)
+        configure_choice_field(self.input_llm_provider_preset)
         config_form.addRow(self.label_llm_provider_preset, self.input_llm_provider_preset)
 
         self.label_remote_llm_api_key = field_label()
@@ -88,7 +84,7 @@ class UnderstandingLlmForm(QWidget):
         self.input_remote_llm_model = QLineEdit()
         self.input_remote_llm_model.setObjectName("SearchInput")
         self.input_remote_llm_model.setPlaceholderText("text-model-id")
-        configure_expanding_line(self.input_remote_llm_model, min_width=220)
+        configure_expanding_line(self.input_remote_llm_model)
         config_form.addRow(self.label_remote_llm_model, self.input_remote_llm_model)
 
         inner_layout.addWidget(form_host)

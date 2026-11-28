@@ -1372,34 +1372,6 @@ class LibraryPage(QWidget):
             divider.setFixedSize(1, 22)
             return divider
 
-        # Chrome: mode switch + add/remove as one left-packed group, hint underneath
-        self.shared_toolbar_card = VSCard(
-            variant="sub",
-            margins=(12, 8, 12, 8),
-            spacing=6,
-            object_name="LibrarySharedStrip",
-        )
-        shared_outer = self.shared_toolbar_card.content_layout
-
-        chrome_row = QHBoxLayout()
-        chrome_row.setContentsMargins(0, 0, 0, 0)
-        chrome_row.setSpacing(10)
-        chrome_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-
-        action_block = QVBoxLayout()
-        action_block.setContentsMargins(0, 0, 0, 0)
-        action_block.setSpacing(2)
-        self.lbl_action_caption = QLabel()
-        self.lbl_action_caption.setObjectName("LibraryChromeCaption")
-        self.lbl_action_caption.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        action_block.addWidget(self.lbl_action_caption)
-
-        action_row = QHBoxLayout()
-        action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.setSpacing(8)
-        action_row.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.btn_add_lib = QPushButton()
         self.btn_add_lib.setObjectName("SuccessGhostButton")
         self.btn_add_lib.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1407,23 +1379,9 @@ class LibraryPage(QWidget):
         self.btn_remove_lib.setObjectName("DangerGhostButton")
         self.btn_remove_lib.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_remove_lib.setEnabled(False)
-        action_row.addWidget(self.btn_add_lib)
-        action_row.addWidget(self.btn_remove_lib)
-        action_block.addLayout(action_row)
-
-        chrome_row.addLayout(action_block, 0)
-        chrome_row.addStretch(1)
-        shared_outer.addLayout(chrome_row)
-
         self.lbl_shared_library_hint = QLabel()
         self.lbl_shared_library_hint.setObjectName("LibraryChromeHint")
-        self.lbl_shared_library_hint.setWordWrap(True)
-        self.lbl_shared_library_hint.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
-        )
         self.lbl_shared_library_hint.hide()
-        shared_outer.addWidget(self.lbl_shared_library_hint)
-        page_body.addWidget(self.shared_toolbar_card)
 
         # --- Panel: visual video library (one card: actions + tree) ---
         self.visual_tab = QWidget()
@@ -1478,6 +1436,9 @@ class LibraryPage(QWidget):
         self.library_list = self.visual_video_tree
         self.library_column_header_labels = []
 
+        toolbar.addWidget(self.btn_add_lib)
+        toolbar.addWidget(self.btn_remove_lib)
+        toolbar.addWidget(_toolbar_divider())
         toolbar.addWidget(self.btn_sync_db)
         toolbar.addWidget(self.btn_refresh_visual_library)
         self.visual_repair_divider = _toolbar_divider()
