@@ -2316,7 +2316,7 @@ class UnderstandingLlmGuiMixin:
 
     def _refresh_recap_prompt_editors_for_language(self) -> None:
         language = self._vlm_prompt_language() if hasattr(self, "_vlm_prompt_language") else "zh"
-        builtin_langs = ("zh", "en")
+        builtin_langs = ("zh", "en", "vi")
         for editor, getter in self._recap_prompt_getter_pairs():
             if editor is None:
                 continue
@@ -2353,6 +2353,6 @@ class UnderstandingLlmGuiMixin:
             if not body or stale_caption or stale_match:
                 editor.setPlainText(getter(language))
             elif any(
-                body == str(getter(item) or "").strip() for item in ("zh", "en")
+                body == str(getter(item) or "").strip() for item in ("zh", "en", "vi")
             ) and body != str(getter(language) or "").strip():
                 editor.setPlainText(getter(language))

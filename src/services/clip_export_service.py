@@ -6,10 +6,12 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 from typing import Any, Dict, List, Optional, Sequence
 
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
+from src.media.export_clip import remaining_export_seconds
 from src.services.search_scope import normalize_scope_path, video_path_under_library_root
 from src.utils import (
     EXPORT_ENCODE_MODE_COPY,
@@ -76,6 +78,8 @@ MAX_CONCURRENT_COPY_EXPORTS = 3
 
 _original_export_semaphore = threading.Semaphore(MAX_CONCURRENT_ORIGINAL_EXPORTS)
 _copy_export_semaphore = threading.Semaphore(MAX_CONCURRENT_COPY_EXPORTS)
+_destination_lock = threading.Lock()
+_active_destinations: set[str] = set()
 
 
 def _output_duration_sec(path: str) -> Optional[float]:
@@ -287,6 +291,8 @@ def execute_export_clip(
         raise ValueError("output_path must end with .mp4, .mkv, or .mov")
     if not output_path_allowed(destination, config=cfg):
         raise ValueError("output_path must not be inside an indexed library root.")
+    if os.path.exists(destination):
+        raise ValueError("output_path already exists; choose a new export destination.")
 
     start = float(start_sec)
     end = float(end_sec)
@@ -309,18 +315,29 @@ def execute_export_clip(
 
     started = time.perf_counter()
     semaphore = _export_semaphore_for_mode(encode_mode)
-    acquired = semaphore.acquire(timeout=EXPORT_CLIP_TIMEOUT_SEC)
+    acquired = semaphore.acquire(timeout=remaining_export_seconds(EXPORT_CLIP_TIMEOUT_SEC))
     if not acquired:
         raise RuntimeError("Clip export queue is busy. Retry shortly.")
     try:
-        result = export_original_clip(
-            source,
-            clip_start,
-            clip_duration,
-            destination,
-            silent=use_silent,
-            encode_mode=encode_mode,
-        )
+        key = _resolve_export_path(destination)
+        with _destination_lock:
+            if key in _active_destinations or os.path.exists(destination):
+                raise ValueError("output_path is already in use or exists.")
+            _active_destinations.add(key)
+        try:
+            result = export_original_clip(
+                source,
+                clip_start,
+                clip_duration,
+                destination,
+                silent=use_silent,
+                encode_mode=encode_mode,
+                timeout_sec=remaining_export_seconds(EXPORT_CLIP_TIMEOUT_SEC),
+                overwrite=False,
+            )
+        finally:
+            with _destination_lock:
+                _active_destinations.discard(key)
     finally:
         semaphore.release()
 
@@ -467,6 +484,11 @@ def execute_batch_export_clips(body) -> Dict[str, Any]:
         raise ValueError("Provide at least one entry in items.")
     if len(items) > MAX_BATCH_EXPORT_CLIPS:
         raise ValueError(f"Batch size exceeds limit ({MAX_BATCH_EXPORT_CLIPS}).")
+    destinations = [_resolve_export_path(getattr(item, "output_path", "")) for item in items]
+    if len(set(destinations)) != len(destinations):
+        raise ValueError("Batch items must have distinct output paths.")
+    if any(os.path.exists(path) for path in destinations):
+        raise ValueError("A batch output path already exists; choose new destinations.")
 
     cfg = load_config()
     default_encode_mode = normalize_export_encode_mode(
@@ -489,6 +511,7 @@ def execute_batch_export_clips(body) -> Dict[str, Any]:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 pool.submit(
+                    copy_context().run,
                     _run_batch_export_item,
                     item,
                     default_encode_mode=default_encode_mode,

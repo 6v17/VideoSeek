@@ -114,6 +114,7 @@ def recap_vo_polish_user_prompt(
     *,
     people: Sequence[Mapping[str, Any]] | None = None,
     prev_caption: str = "",
+    pack: Mapping[str, Any] | None = None,
 ) -> str:
     rows: list[dict[str, Any]] = []
     for index, clip in enumerate(clips, 1):
@@ -128,6 +129,15 @@ def recap_vo_polish_user_prompt(
             "vo": vo,
             "budget": tts_char_budget(dur),
         }
+        if pack is not None:
+            src_in = float(clip.get("src_in") or 0.0)
+            src_out = float(clip.get("src_out") or src_in)
+            evidence = _evidence_for_source_span(
+                pack, src_in, src_out, asr_limit=20, cap_limit=10,
+            )
+            row["source_t"] = [src_in, src_out]
+            row["asr"] = evidence.get("asr") or []
+            row["caps"] = evidence.get("caps") or []
         if vo:
             row["min_chars"] = max(8, int(round(dur * CHARS_PER_SEC * MIN_VO_FILL)))
         rows.append(row)

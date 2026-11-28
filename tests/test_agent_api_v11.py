@@ -237,9 +237,12 @@ class AgentClipServiceTests(unittest.TestCase):
             output = os.path.join(tmp, "out.mp4")
             with open(source, "wb") as handle:
                 handle.write(b"0")
-            with open(output, "wb") as handle:
-                handle.write(b"x" * 64)
-            mock_export.return_value = type("R", (), {"returncode": 0, "stderr": b""})()
+            def export(*args, **kwargs):
+                with open(output, "wb") as handle:
+                    handle.write(b"x" * 64)
+                return type("R", (), {"returncode": 0, "stderr": b""})()
+
+            mock_export.side_effect = export
             payload = execute_export_clip(
                 video_path=source,
                 start_sec=1300.0,

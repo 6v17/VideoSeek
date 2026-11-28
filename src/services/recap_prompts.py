@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from src.services.understanding_resource_service import (
     CAPTION_LANGUAGE_EN,
+    CAPTION_LANGUAGE_VI,
     CAPTION_LANGUAGE_ZH,
     normalize_caption_language,
 )
@@ -435,6 +436,23 @@ RECAP_GAP_LANGUAGE_PROMPTS = {
     CAPTION_LANGUAGE_ZH: RECAP_GAP_SYSTEM,
     CAPTION_LANGUAGE_EN: RECAP_GAP_SYSTEM_EN,
 }
+
+
+for _language_prompts in (
+    RECAP_PLAN_LANGUAGE_PROMPTS, RECAP_PLAN_ACT_LANGUAGE_PROMPTS,
+    RECAP_PLAN_STRUCTURE_LANGUAGE_PROMPTS, RECAP_MATCH_LANGUAGE_PROMPTS,
+    RECAP_VO_DRAFT_LANGUAGE_PROMPTS, RECAP_CAPTION_LANGUAGE_PROMPTS,
+    RECAP_POLISH_LANGUAGE_PROMPTS, RECAP_PLAN_HEAD_LANGUAGE_PROMPTS,
+    RECAP_PLAN_TAIL_LANGUAGE_PROMPTS, RECAP_PLAN_GAP_LANGUAGE_PROMPTS,
+    RECAP_GAP_LANGUAGE_PROMPTS,
+):
+    _language_prompts[CAPTION_LANGUAGE_VI] = _language_prompts[CAPTION_LANGUAGE_EN].replace(
+        "English", "Vietnamese",
+    ) + (
+        "\nNgôn ngữ đầu ra: tiếng Việt tự nhiên, có dấu. Viết tiêu đề, dàn ý, lời dẫn "
+        "và mô tả bằng tiếng Việt; giữ nguyên tên riêng, khóa JSON và các mã enum "
+        "evidence_required theo schema. Không dịch khóa hoặc tự đổi định dạng JSON."
+    )
 
 
 def default_recap_plan_prompt(language: str | None = None) -> str:

@@ -124,7 +124,7 @@ class AgentApiHelperTests(unittest.TestCase):
                     end_sec=20.0,
                 )
             self.assertTrue(out.startswith(tmp))
-            self.assertTrue(out.endswith("ep01_12s_20s.mp4"))
+            self.assertRegex(os.path.basename(out), r"^ep01_[0-9a-f]{12}_12500ms_20000ms_[0-9a-f]{32}\.mp4$")
 
     def test_filter_hits_min_score(self):
         hits = [

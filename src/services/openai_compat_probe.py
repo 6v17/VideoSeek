@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Mapping
@@ -134,6 +135,18 @@ def fetch_models_catalog(
     }
 
 
+def text_chat_generation_options(model, *, token_limit, temperature, reasoning_effort="none"):
+    """GPT-5.4 Chat Completions options; preserve other providers' wire format."""
+    if re.fullmatch(r"gpt-5\.4(?:-\d{4}-\d{2}-\d{2})?", str(model)):
+        if reasoning_effort not in {"none", "low", "medium", "high", "xhigh"}:
+            raise ValueError("Unsupported GPT-5.4 reasoning_effort.")
+        options = {"max_completion_tokens": token_limit, "reasoning_effort": reasoning_effort}
+        if reasoning_effort == "none":
+            options["temperature"] = float(temperature)
+        return options
+    return {"max_tokens": token_limit, "temperature": float(temperature)}
+
+
 def probe_minimal_text_chat(
     *,
     base_url: str,
@@ -145,8 +158,7 @@ def probe_minimal_text_chat(
     payload: dict[str, Any] = {
         "model": str(model or "").strip(),
         "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
-        "max_tokens": 8,
-        "temperature": 0.0,
+        **text_chat_generation_options(model, token_limit=8, temperature=0.0),
     }
     if payload_extra:
         payload.update(dict(payload_extra))
