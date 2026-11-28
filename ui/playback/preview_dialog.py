@@ -413,6 +413,7 @@ class PreviewDialog(QDialog):
         self.segment_end_sec = None
         self.slider.setValue(0)
         self.play_button.setEnabled(True)
+        self.replay_button.setEnabled(True)
         self.slider.setEnabled(True)
         self.set_start_button.setEnabled(True)
         self.set_end_button.setEnabled(True)

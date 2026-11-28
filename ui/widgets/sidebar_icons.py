@@ -58,8 +58,12 @@ def _icon_from_svg(svg: str, *, size: int = 20) -> QIcon:
     return QIcon(pixmap)
 
 
+def _toolbar_mark_color(*, is_dark: bool) -> str:
+    return "#e6edf3" if is_dark else "#1f2328"
+
+
 def github_toolbar_icon(*, is_dark: bool, size: int = 20) -> QIcon:
-    color = "#e6edf3" if is_dark else "#1f2328"
+    color = _toolbar_mark_color(is_dark=is_dark)
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">'
         f'<path fill="{color}" d="{_GITHUB_MARK_PATH}"/>'
@@ -68,19 +72,50 @@ def github_toolbar_icon(*, is_dark: bool, size: int = 20) -> QIcon:
     return _icon_from_svg(svg, size=size)
 
 
-def bilibili_toolbar_icon(*, size: int = 20) -> QIcon:
+def bilibili_toolbar_icon(*, is_dark: bool, size: int = 20) -> QIcon:
+    color = _toolbar_mark_color(is_dark=is_dark)
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-        f'<path fill="#00A1D6" d="{_BILIBILI_MARK_PATH}"/>'
+        f'<path fill="{color}" d="{_BILIBILI_MARK_PATH}"/>'
         f"</svg>"
     )
     return _icon_from_svg(svg, size=size)
 
 
-def qq_toolbar_icon(*, size: int = 20) -> QIcon:
+def qq_toolbar_icon(*, is_dark: bool, size: int = 20) -> QIcon:
+    color = _toolbar_mark_color(is_dark=is_dark)
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-        f'<path fill="#12B7F5" d="{_TENCENT_QQ_MARK_PATH}"/>'
+        f'<path fill="{color}" d="{_TENCENT_QQ_MARK_PATH}"/>'
+        f"</svg>"
+    )
+    return _icon_from_svg(svg, size=size)
+
+
+def theme_toolbar_icon(*, is_dark: bool, size: int = 20) -> QIcon:
+    """Sun while the app is dark (switch to light); moon while it is light."""
+    color = _toolbar_mark_color(is_dark=is_dark)
+    if is_dark:
+        body = (
+            f'<circle cx="12" cy="12" r="3.4" fill="none" stroke="{color}" stroke-width="1.6"/>'
+            f'<path stroke="{color}" stroke-width="1.6" stroke-linecap="round" '
+            f'd="M12 3.2v2.1M12 18.7v2.1M3.2 12h2.1M18.7 12h2.1'
+            f'M5.6 5.6l1.5 1.5M16.9 16.9l1.5 1.5M18.4 5.6l-1.5 1.5M7.1 16.9l-1.5 1.5"/>'
+        )
+    else:
+        body = (
+            f'<path fill="{color}" d="M15.2 3.4a7.6 7.6 0 1 0 5.4 12.6A8.4 8.4 0 0 1 15.2 3.4z"/>'
+        )
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">{body}</svg>'
+    return _icon_from_svg(svg, size=size)
+
+
+def donate_toolbar_icon(*, is_dark: bool, size: int = 20) -> QIcon:
+    color = _toolbar_mark_color(is_dark=is_dark)
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+        f'<path fill="none" stroke="{color}" stroke-width="1.6" stroke-linejoin="round" '
+        f'd="M12 19.2S5.8 15.4 5.8 11.1C5.8 8.6 7.6 7 9.7 7c1.2 0 2 .6 2.3 1.2C12.3 7.6 13.1 7 14.3 7c2.1 0 3.9 1.6 3.9 4.1 0 4.3-6.2 8.1-6.2 8.1z"/>'
         f"</svg>"
     )
     return _icon_from_svg(svg, size=size)

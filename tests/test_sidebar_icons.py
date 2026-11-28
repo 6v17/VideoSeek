@@ -2,7 +2,13 @@ import unittest
 
 from PySide6.QtWidgets import QApplication
 
-from ui.widgets.sidebar_icons import bilibili_toolbar_icon, github_toolbar_icon, qq_toolbar_icon
+from ui.widgets.sidebar_icons import (
+    bilibili_toolbar_icon,
+    donate_toolbar_icon,
+    github_toolbar_icon,
+    qq_toolbar_icon,
+    theme_toolbar_icon,
+)
 
 
 class SidebarIconsTests(unittest.TestCase):
@@ -14,8 +20,14 @@ class SidebarIconsTests(unittest.TestCase):
         for factory in (
             lambda: github_toolbar_icon(is_dark=True),
             lambda: github_toolbar_icon(is_dark=False),
-            bilibili_toolbar_icon,
-            qq_toolbar_icon,
+            lambda: bilibili_toolbar_icon(is_dark=True),
+            lambda: bilibili_toolbar_icon(is_dark=False),
+            lambda: qq_toolbar_icon(is_dark=True),
+            lambda: qq_toolbar_icon(is_dark=False),
+            lambda: theme_toolbar_icon(is_dark=True),
+            lambda: theme_toolbar_icon(is_dark=False),
+            lambda: donate_toolbar_icon(is_dark=True),
+            lambda: donate_toolbar_icon(is_dark=False),
         ):
             icon = factory()
             pixmap = icon.pixmap(20, 20)

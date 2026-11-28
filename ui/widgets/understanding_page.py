@@ -112,6 +112,7 @@ def _action_button(object_name: str, *, chrome: str = "") -> QPushButton:
 def _step_hint() -> QLabel:
     hint = QLabel()
     hint.setObjectName("CardHint")
+    hint.setProperty("role", "note")
     hint.setWordWrap(True)
     # Cap measure so long EN copy does not span ultrawide windows (UI review P2-1).
     hint.setMaximumWidth(860)

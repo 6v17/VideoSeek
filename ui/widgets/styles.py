@@ -176,6 +176,9 @@ QMenu::separator {
 #CardHint {
     line-height: 1.45em;
 }
+#CardHint[role="note"] {
+    font-size: __FS_XS__;
+}
 QRadioButton {
     color: __HEADLINE__;
     spacing: 10px;
@@ -1150,19 +1153,19 @@ QPushButton::menu-indicator {
     border-radius: __RADIUS_MD__;
     border: 1px solid __LINE_STRONG__;
     background: __PANEL__;
-    color: #e81123;
+    color: __HEADLINE__;
     font-weight: 700;
     padding: 0;
 }
 #SidebarDonateButton:hover {
     background: __BUTTON_SOFT_HOVER__;
-    border-color: #e81123;
-    color: #ff4d4f;
+    border-color: __LINE_STRONG__;
+    color: __HEADLINE__;
 }
 #SidebarDonateButton:pressed {
-    background: __BUTTON_SOFT__;
-    border-color: #e81123;
-    color: #c50f1f;
+    background: __TRACK__;
+    border-color: __LINE_STRONG__;
+    color: __HEADLINE__;
 }
 #DonateImageLabel {
     min-height: 380px;

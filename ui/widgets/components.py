@@ -1,6 +1,6 @@
 
 from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QSize, Signal
-from PySide6.QtGui import QColor, QFont, QPainter
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -234,13 +234,6 @@ class SettingDetailPopup(QFrame):
         super().closeEvent(event)
 
 
-def _apply_sidebar_icon_font(button: QToolButton, *, point_size: int = 14) -> None:
-    font = QFont(button.font())
-    font.setPointSize(point_size)
-    font.setBold(True)
-    button.setFont(font)
-
-
 def _apply_sidebar_footer_icon_size(button: QToolButton) -> None:
     height = COMPONENT_SIZES["sidebar_action_height"]
     button.setFixedHeight(height)
@@ -359,20 +352,8 @@ class NavigationSidebar(QWidget):
         footer_icon_layout.setContentsMargins(0, 0, 0, 0)
         footer_icon_layout.setSpacing(6)
 
-        self.btn_theme = QToolButton()
-        self.btn_theme.setObjectName("SidebarIconButton")
-        self.btn_theme.setText("☀")
-        self.btn_theme.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        _apply_sidebar_footer_icon_size(self.btn_theme)
-        _apply_sidebar_icon_font(self.btn_theme)
-
-        self.btn_donate = QToolButton()
-        self.btn_donate.setObjectName("SidebarDonateButton")
-        self.btn_donate.setText("❤")
-        self.btn_donate.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        _apply_sidebar_footer_icon_size(self.btn_donate)
-        _apply_sidebar_icon_font(self.btn_donate)
-
+        self.btn_theme = _make_sidebar_icon_button()
+        self.btn_donate = _make_sidebar_icon_button()
         self.btn_github = _make_sidebar_icon_button()
         self.btn_bilibili = _make_sidebar_icon_button()
         self.btn_qq = _make_sidebar_icon_button()

@@ -64,6 +64,39 @@ class SearchWorkspaceChromeTests(unittest.TestCase):
         self.assertEqual(panel.detail_name.toolTip(), "")
         self.assertIsNone(host._preview_detail_token)
 
+    def test_return_from_large_preview_keeps_the_clip(self):
+        from types import SimpleNamespace
+
+        from ui.windows.gui_preview import PreviewGuiMixin
+
+        page = SearchPage()
+        chrome = page.expanded_chrome
+        chrome.reset()
+        self.assertFalse(chrome.replay_button.isEnabled())
+        calls = []
+        host = PreviewGuiMixin()
+        host.search_page = page
+        host._sync_preview_chrome = lambda *args: calls.append(("chrome", args))
+        host._fill_search_preview_detail = lambda *args: calls.append(("detail", args))
+        host.preview_controller = SimpleNamespace(
+            vlc_player=None,
+            get_current_preview_context=lambda: {
+                "video_path": r"D:\videos\clip.mp4",
+                "start_sec": 12.0,
+                "end_sec": 18.0,
+                "suggested_sec": 13.0,
+            },
+            _set_preview_surface_idle=lambda idle: calls.append(("idle", idle)),
+        )
+
+        host._restore_docked_preview_after_layer()
+
+        self.assertEqual(calls[0], ("idle", False))
+        self.assertEqual(calls[1][0], "chrome")
+        self.assertEqual(calls[1][1][0], r"D:\videos\clip.mp4")
+        self.assertEqual(calls[1][1][1:], (12.0, 18.0, 13.0))
+        self.assertEqual(calls[2][0], "detail")
+
     def test_search_and_preview_cards_collapse_like_the_sidebar(self):
         page = SearchPage()
         page.resize(1400, 800)

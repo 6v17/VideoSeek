@@ -634,11 +634,45 @@ class PreviewGuiMixin:
             thread = getattr(self, "_same_video_thumb_thread", None)
             if thread is not None:
                 thread.stop()
+            self._restore_docked_preview_after_layer()
             self._sync_preview_layer_chrome()
         finally:
             self._end_preview_layout_transition(dialog, show_video=False)
         if return_page and return_page != "search" and hasattr(self, "switch_page"):
             self.switch_page(return_page)
+
+    def _restore_docked_preview_after_layer(self) -> None:
+        """Show the same paused clip in the result-list player after large preview."""
+        controller = getattr(self, "preview_controller", None)
+        if controller is None:
+            return
+        show_surface = getattr(controller, "_set_preview_surface_idle", None)
+        if callable(show_surface):
+            show_surface(False)
+        player = getattr(controller, "vlc_player", None)
+        page = getattr(self, "search_page", None)
+        chrome = getattr(page, "expanded_chrome", None)
+        ctx = {}
+        if hasattr(controller, "get_current_preview_context"):
+            ctx = controller.get_current_preview_context() or {}
+        path = str(ctx.get("video_path") or "").strip()
+        chrome_path = str(getattr(chrome, "video_path", "") or "").strip() if chrome is not None else ""
+        if chrome is not None and path and not chrome_path:
+            start = float(ctx.get("start_sec") or 0.0)
+            end = float(ctx.get("end_sec") or 0.0)
+            suggested = float(ctx.get("suggested_sec") if ctx.get("suggested_sec") is not None else start)
+            self._sync_preview_chrome(path, start, end, suggested)
+            self._fill_search_preview_detail(path, suggested)
+        elif chrome is not None and player is not None:
+            chrome.bind_player(player)
+            if getattr(chrome, "_playback_ready", False) and not chrome.update_timer.isActive():
+                chrome.update_timer.start()
+            if hasattr(chrome, "_sync_ui"):
+                chrome._sync_ui()
+            chrome.replay_button.setEnabled(bool(chrome_path or path))
+        if player is not None and hasattr(player, "rebind_output_window"):
+            QTimer.singleShot(0, player.rebind_output_window)
+            QTimer.singleShot(80, player.rebind_output_window)
 
     def _apply_search_preview_app_fill(self, active: bool) -> None:
         """Hide shell chrome so the in-page player can fill the software UI."""
@@ -1796,7 +1830,10 @@ class PreviewGuiMixin:
                 if hasattr(self, "_collapse_preview_maximize"):
                     self._collapse_preview_maximize()
                 self.preview_controller.suspend_for_dialog()
-                if hasattr(self, "_reset_preview_chrome"):
+                # The in-page player stays bound to this clip. Embedded large
+                # preview returns to the result list; wiping the chrome there
+                # left replay disabled and the detail card empty.
+                if not embedded and hasattr(self, "_reset_preview_chrome"):
                     self._reset_preview_chrome()
             except Exception as exc:
                 logger.debug("Pause main preview before floating dialog skipped: %s", exc)

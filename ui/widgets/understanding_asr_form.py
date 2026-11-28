@@ -39,6 +39,7 @@ class UnderstandingAsrForm(QWidget):
 
         self.hint_asr_body = QLabel()
         self.hint_asr_body.setObjectName("CardHint")
+        self.hint_asr_body.setProperty("role", "note")
         self.hint_asr_body.setWordWrap(True)
         inner_layout.addWidget(self.hint_asr_body)
 
@@ -93,6 +94,7 @@ class UnderstandingAsrForm(QWidget):
         inner_layout.addWidget(form_host)
         self.hint_asr_preset_summary = QLabel()
         self.hint_asr_preset_summary.setObjectName("CardHint")
+        self.hint_asr_preset_summary.setProperty("role", "note")
         self.hint_asr_preset_summary.setWordWrap(True)
         self.hint_asr_preset_summary.hide()
         inner_layout.addWidget(self.hint_asr_preset_summary)

@@ -61,7 +61,7 @@ class SettingsFormMixin:
         layout.addWidget(title_wrap)
         form = QGridLayout()
         # Indent rows under the section title so the title reads as the layer above.
-        form.setContentsMargins(28, 8, 16, 12)
+        form.setContentsMargins(16, 8, 16, 12)
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(0)
         # Keep label column modest so the page can shrink to the scroll viewport.

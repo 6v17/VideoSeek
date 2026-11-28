@@ -40,6 +40,7 @@ class UnderstandingServiceForm(QWidget):
 
         self.hint_vlm_body = QLabel()
         self.hint_vlm_body.setObjectName("CardHint")
+        self.hint_vlm_body.setProperty("role", "note")
         self.hint_vlm_body.setWordWrap(True)
         inner_layout.addWidget(self.hint_vlm_body)
 
@@ -75,6 +76,7 @@ class UnderstandingServiceForm(QWidget):
 
         self.hint_vlm_preset_summary = QLabel()
         self.hint_vlm_preset_summary.setObjectName("CardHint")
+        self.hint_vlm_preset_summary.setProperty("role", "note")
         self.hint_vlm_preset_summary.setWordWrap(True)
         self.hint_vlm_preset_summary.hide()
         config_form.addRow(self.hint_vlm_preset_summary)

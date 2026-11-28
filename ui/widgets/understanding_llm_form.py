@@ -39,6 +39,7 @@ class UnderstandingLlmForm(QWidget):
 
         self.hint_llm_body = QLabel()
         self.hint_llm_body.setObjectName("CardHint")
+        self.hint_llm_body.setProperty("role", "note")
         self.hint_llm_body.setWordWrap(True)
         inner_layout.addWidget(self.hint_llm_body)
 
@@ -93,6 +94,7 @@ class UnderstandingLlmForm(QWidget):
         inner_layout.addWidget(form_host)
         self.hint_llm_preset_summary = QLabel()
         self.hint_llm_preset_summary.setObjectName("CardHint")
+        self.hint_llm_preset_summary.setProperty("role", "note")
         self.hint_llm_preset_summary.setWordWrap(True)
         self.hint_llm_preset_summary.hide()
         inner_layout.addWidget(self.hint_llm_preset_summary)

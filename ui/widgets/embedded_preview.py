@@ -42,15 +42,10 @@ class EmbeddedPreviewLayer(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        back_row = QHBoxLayout()
-        back_row.setContentsMargins(0, 0, 0, 0)
-        back_row.setSpacing(8)
         self.btn_preview_back = QPushButton("返回")
         self.btn_preview_back.setObjectName("GhostButton")
         self.btn_preview_back.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_preview_back.setMinimumHeight(30)
-        back_row.addWidget(self.btn_preview_back, 0)
-
         self.btn_preview_shot_list = None
         self.btn_preview_export_tasks = None
         if self.show_actions:
@@ -62,10 +57,23 @@ class EmbeddedPreviewLayer(QWidget):
             self.btn_preview_export_tasks.setObjectName("GhostButton")
             self.btn_preview_export_tasks.setCursor(Qt.CursorShape.PointingHandCursor)
             self.btn_preview_export_tasks.setMinimumHeight(30)
-            back_row.addWidget(self.btn_preview_shot_list, 0)
-            back_row.addWidget(self.btn_preview_export_tasks, 0)
-        back_row.addStretch(1)
-        layout.addLayout(back_row)
+
+        # Search large preview puts these under the info card. Pages without
+        # that card keep a single back control above the player.
+        action_buttons = [self.btn_preview_back]
+        if self.btn_preview_shot_list is not None:
+            action_buttons.append(self.btn_preview_shot_list)
+        if self.btn_preview_export_tasks is not None:
+            action_buttons.append(self.btn_preview_export_tasks)
+        self._preview_action_buttons = action_buttons
+        if not self.show_detail:
+            back_row = QHBoxLayout()
+            back_row.setContentsMargins(0, 0, 0, 0)
+            back_row.setSpacing(8)
+            for button in action_buttons:
+                back_row.addWidget(button, 0)
+            back_row.addStretch(1)
+            layout.addLayout(back_row)
 
         stage = QWidget()
         stage.setObjectName("SearchPreviewStage")
@@ -106,7 +114,18 @@ class EmbeddedPreviewLayer(QWidget):
             detail_layout.addWidget(self.preview_detail_title)
             detail_layout.addWidget(self.preview_detail_name)
             detail_layout.addWidget(self.preview_detail_body, 0)
-            stage_row.addWidget(self.preview_detail, 0, Qt.AlignmentFlag.AlignTop)
+            side = QWidget()
+            side.setObjectName("SearchPreviewSide")
+            side.setFixedWidth(280)
+            side.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+            side_layout = QVBoxLayout(side)
+            side_layout.setContentsMargins(0, 0, 0, 0)
+            side_layout.setSpacing(8)
+            side_layout.addWidget(self.preview_detail, 0)
+            for button in self._preview_action_buttons:
+                side_layout.addWidget(button, 0)
+            side_layout.addStretch(1)
+            stage_row.addWidget(side, 0)
         layout.addWidget(stage, 1)
 
         self.preview_strip_wrap = QWidget()

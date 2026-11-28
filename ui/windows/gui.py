@@ -60,8 +60,10 @@ from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridge
 from ui.dialogs.html_links import open_html_link
 from ui.widgets.sidebar_icons import (
     bilibili_toolbar_icon,
+    donate_toolbar_icon,
     github_toolbar_icon,
     qq_toolbar_icon,
+    theme_toolbar_icon,
     sidebar_toolbar_icon_size,
 )
 from ui.controllers.indexing_controller import IndexingController
@@ -1413,25 +1415,30 @@ class MainWindow(
         t = texts or self.texts
         social = get_donate_payload()
         icon_size = sidebar_toolbar_icon_size()
-        self.sidebar.btn_theme.setText("☀" if self.is_dark_mode else "🌙")
+        dark = bool(self.is_dark_mode)
+        self.sidebar.btn_theme.setText("")
+        self.sidebar.btn_theme.setIcon(theme_toolbar_icon(is_dark=dark))
+        self.sidebar.btn_theme.setIconSize(icon_size)
         self.sidebar.btn_theme.setToolTip(
-            t["theme_switch_to_light"] if self.is_dark_mode else t["theme_switch_to_dark"]
+            t["theme_switch_to_light"] if dark else t["theme_switch_to_dark"]
         )
-        self.sidebar.btn_donate.setText("❤")
+        self.sidebar.btn_donate.setText("")
+        self.sidebar.btn_donate.setIcon(donate_toolbar_icon(is_dark=dark))
+        self.sidebar.btn_donate.setIconSize(icon_size)
         self.sidebar.btn_donate.setToolTip(t["donate_tooltip"])
-        self.sidebar.btn_github.setIcon(github_toolbar_icon(is_dark=self.is_dark_mode))
+        self.sidebar.btn_github.setIcon(github_toolbar_icon(is_dark=dark))
         self.sidebar.btn_github.setIconSize(icon_size)
         self.sidebar.btn_github.setToolTip(t["sidebar_github_tooltip"])
         self.sidebar.btn_github.setVisible(bool(social.get("github_url")))
 
         has_bilibili = bool(social.get("bilibili_url"))
-        self.sidebar.btn_bilibili.setIcon(bilibili_toolbar_icon())
+        self.sidebar.btn_bilibili.setIcon(bilibili_toolbar_icon(is_dark=dark))
         self.sidebar.btn_bilibili.setIconSize(icon_size)
         self.sidebar.btn_bilibili.setToolTip(t["sidebar_bilibili_tooltip"])
         self.sidebar.btn_bilibili.setVisible(has_bilibili)
 
         has_qq = bool(social.get("qq_url"))
-        self.sidebar.btn_qq.setIcon(qq_toolbar_icon())
+        self.sidebar.btn_qq.setIcon(qq_toolbar_icon(is_dark=dark))
         self.sidebar.btn_qq.setIconSize(icon_size)
         self.sidebar.btn_qq.setToolTip(t["sidebar_qq_tooltip"])
         self.sidebar.btn_qq.setVisible(has_qq)
@@ -2300,7 +2307,6 @@ class MainWindow(
     def apply_theme(self):
         self.theme_manager.apply(self.is_dark_mode)
         self.update()
-        self.sidebar.btn_theme.setText("☀" if self.is_dark_mode else "🌙")
         self._refresh_sidebar_icon_buttons()
         timeline = getattr(getattr(self, "understanding_page", None), "chunk_timeline", None)
         if timeline is not None:
