@@ -35,6 +35,35 @@ def normalize_scope_path(path: str) -> str:
     return canonicalize_library_path(path)
 
 
+def lookup_indexed_video_id(video_path: str) -> str:
+    """Indexed video_id for a local file, or empty when the path is not in the library."""
+    raw = str(video_path or "").strip()
+    if not raw or raw.lower().startswith(("http://", "https://")):
+        return ""
+    try:
+        from src.app.config import load_config
+        from src.storage.asset_store import load_model_metadata
+
+        target = normalize_scope_path(raw)
+        meta = load_model_metadata(config=load_config())
+        for abs_path, video_id, _info in iter_indexed_video_entries(meta):
+            if normalize_scope_path(abs_path) == target:
+                return str(video_id or "").strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def format_indexed_video_ids(paths) -> str:
+    """Comma-separated indexed ids for log lines. '-' when none resolve."""
+    found: list[str] = []
+    for raw in paths or []:
+        video_id = lookup_indexed_video_id(str(raw or ""))
+        if video_id and video_id not in found:
+            found.append(video_id)
+    return ",".join(found) if found else "-"
+
+
 def iter_indexed_video_entries(meta) -> Iterable[Tuple[str, str, dict]]:
     """Yield (abs_video_path, video_id, file_info) for entries under meta['libraries']."""
     libraries = meta.get("libraries", {}) if isinstance(meta, dict) else {}

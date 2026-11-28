@@ -122,7 +122,14 @@ def save_video_frame(video_path: str, time_sec: float, output_path: str) -> str:
             creationflags=0x08000000 if sys.platform == "win32" else 0,
         )
     except Exception as exc:
-        logger.warning("Frame export failed: %s", exc)
+        from src.services.search_scope import lookup_indexed_video_id
+
+        logger.warning(
+            "Frame export failed video_id=%s path=%s: %s",
+            lookup_indexed_video_id(source) or "-",
+            source,
+            exc,
+        )
         raise RuntimeError("frame export failed") from exc
     if not os.path.isfile(dest) or os.path.getsize(dest) <= 0:
         raise RuntimeError("frame export failed")

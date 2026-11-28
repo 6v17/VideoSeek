@@ -52,6 +52,20 @@ from .search import (
 
 logger = get_logger("agent_api")
 
+
+def _agent_scope_video_ids(body) -> str:
+    from src.services.search_scope import format_indexed_video_ids
+
+    scope = getattr(body, "scope", None)
+    paths = getattr(scope, "video_paths", None) if scope is not None else None
+    return format_indexed_video_ids(paths)
+
+
+def _video_id_for_log(path: str) -> str:
+    from src.services.search_scope import format_indexed_video_ids
+
+    return format_indexed_video_ids([path])
+
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
@@ -533,10 +547,16 @@ class AgentApiService:
         except ValueError as exc:
             raise_api_error(400, "invalid_request", str(exc))
         except RuntimeError as exc:
-            logger.exception("Agent search failed.")
+            logger.exception(
+                "Agent search failed. video_id=%s",
+                _agent_scope_video_ids(body),
+            )
             raise_api_error(422, "query_failed", str(exc))
         except Exception as exc:
-            logger.exception("Agent search failed.")
+            logger.exception(
+                "Agent search failed. video_id=%s",
+                _agent_scope_video_ids(body),
+            )
             raise_api_error(422, "query_failed", str(exc))
 
         payload.setdefault("meta", {})
@@ -714,10 +734,18 @@ class AgentApiService:
             message = str(exc)
             if "queue is busy" in message.lower():
                 raise_api_error(503, "engine_busy", message)
-            logger.exception("Agent clip export failed.")
+            logger.exception(
+                "Agent clip export failed. video_id=%s path=%s",
+                _video_id_for_log(body.video_path),
+                body.video_path,
+            )
             raise_api_error(422, "export_failed", message)
         except Exception as exc:
-            logger.exception("Agent clip export failed.")
+            logger.exception(
+                "Agent clip export failed. video_id=%s path=%s",
+                _video_id_for_log(body.video_path),
+                body.video_path,
+            )
             raise_api_error(422, "export_failed", str(exc))
 
         payload.setdefault("meta", {})
@@ -753,7 +781,14 @@ class AgentApiService:
                 raise_api_error(503, "engine_busy", message)
             raise_api_error(422, "export_failed", message)
         except Exception as exc:
-            logger.exception("Agent batch clip export failed.")
+            from src.services.search_scope import format_indexed_video_ids
+
+            logger.exception(
+                "Agent batch clip export failed. video_id=%s",
+                format_indexed_video_ids(
+                    str(getattr(item, "video_path", "") or "") for item in (body.items or [])
+                ),
+            )
             raise_api_error(422, "export_failed", str(exc))
 
         payload.setdefault("meta", {})

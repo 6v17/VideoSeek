@@ -150,6 +150,38 @@ def _browse_url_from_http_play_url(text: str) -> str:
     return parent + "/" if parent else text
 
 
+def resolve_team_file_play_url(
+    path_or_url: str,
+    *,
+    server_url: str = "",
+    api_port_default: int = 8765,
+) -> str:
+    """Share link for one file. A library folder has no listing, so it returns empty."""
+    text = str(path_or_url or "").strip()
+    if not text:
+        return ""
+    if text.lower().startswith(("http://", "https://")):
+        from src.services.team_media_map import share_file_url
+
+        return share_file_url(text, [], media_base_url="")
+    if not str(server_url or "").strip():
+        return ""
+    try:
+        from src.services.team_media_map import share_file_url
+
+        base, token = _team_endpoint(server_url, api_port_default=api_port_default)
+        health = _get_json(f"{base}/api/v1/health", timeout=8.0, token=token)
+        team = health.get("team") if isinstance(health.get("team"), dict) else {}
+        mounts = team.get("mounts") or []
+        media_base = str(team.get("media_base_url") or "").strip()
+        if not media_base or not isinstance(mounts, list):
+            return ""
+        return share_file_url(text, mounts, media_base_url=media_base)
+    except Exception:
+        logger.exception("resolve_team_file_play_url failed for %s", text)
+        return ""
+
+
 def resolve_team_library_browse_url(
     path_or_url: str,
     *,

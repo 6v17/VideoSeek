@@ -49,6 +49,28 @@ def build_media_mounts(library_paths: List[str]) -> List[Dict[str, str]]:
     return mounts
 
 
+def share_file_url(
+    path_or_url: str,
+    mounts: List[Dict[str, str]],
+    *,
+    media_base_url: str,
+) -> str:
+    """Direct file URL. Directory listings stay closed, so a folder path returns empty."""
+    text = str(path_or_url or "").strip()
+    if not text:
+        return ""
+    if text.lower().startswith(("http://", "https://")):
+        from urllib.parse import urlparse
+
+        parts = [part for part in urlparse(text).path.split("/") if part]
+        if len(parts) >= 3 and parts[0].lower() == "videos":
+            return text
+        return ""
+    if os.path.isdir(text):
+        return ""
+    return absolute_path_to_play_url(text, mounts, media_base_url=media_base_url)
+
+
 def absolute_path_to_play_url(
     video_path: str,
     mounts: List[Dict[str, str]],

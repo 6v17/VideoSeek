@@ -1202,7 +1202,7 @@ class LibraryIndexingGuiMixin:
         from src.services.team_mode_service import is_team_client_mode
 
         if is_team_client_mode():
-            # Shared mode: open the library folder via nginx autoindex in the browser.
+            # Shared mode has no directory listing. A folder falls through to the hint.
             if hasattr(self, "_open_team_result_in_browser"):
                 self._open_team_result_in_browser(path)
             else:

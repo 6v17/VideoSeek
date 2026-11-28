@@ -2249,12 +2249,12 @@ class MainWindow(
         open_in_explorer(target)
 
     def _open_team_result_in_browser(self, path_or_url: str) -> None:
-        """In shared mode, open the video's shared library folder in the system browser."""
+        """Open the shared file itself. Directory listings are off, so a folder shows the hint."""
         import webbrowser
 
         from src.app.config import load_config
-        from src.services.team_client_search import resolve_team_library_browse_url
-        from src.services.team_media_map import absolute_path_to_library_browse_url
+        from src.services.team_client_search import resolve_team_file_play_url
+        from src.services.team_media_map import share_file_url
         from src.services.team_mode_service import (
             get_active_media_base_url,
             get_active_media_mounts,
@@ -2266,7 +2266,7 @@ class MainWindow(
         if is_team_client_mode():
             try:
                 cfg = load_config()
-                browse_url = resolve_team_library_browse_url(
+                browse_url = resolve_team_file_play_url(
                     text,
                     server_url=str(cfg.get("team_server_url") or ""),
                     api_port_default=int(cfg.get("team_api_port", 8765) or 8765),
@@ -2277,13 +2277,11 @@ class MainWindow(
                 note_swallowed(exc, "ui/windows/gui.py:2344")
                 browse_url = ""
         if not browse_url:
-            browse_url = absolute_path_to_library_browse_url(
+            browse_url = share_file_url(
                 text,
                 get_active_media_mounts(),
                 media_base_url=get_active_media_base_url(),
             )
-        if not browse_url and text.lower().startswith(("http://", "https://")):
-            browse_url = text.rstrip("/").rsplit("/", 1)[0] + "/" if "/" in text.rstrip("/") else text
         if not browse_url:
             self.show_info_dialog(
                 self.texts.get("info_title", self.texts.get("success_title", "Info")),

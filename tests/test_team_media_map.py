@@ -88,6 +88,30 @@ class TeamMediaMapTests(unittest.TestCase):
             "src/services/team_media_map.py:rewrite_team_scope_video_paths",
         )
 
+    def test_nginx_videos_conf_does_not_list_directories(self):
+        from src.services.team_nginx_service import write_videos_conf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = os.path.join(tmp, "library")
+            os.makedirs(lib)
+            conf = os.path.join(tmp, "videos.conf")
+            with (
+                patch("src.services.team_nginx_service.get_nginx_videos_conf_path", return_value=conf),
+                patch("src.services.team_nginx_service.get_nginx_conf_d_dir", return_value=tmp),
+            ):
+                write_videos_conf(library_paths=[lib], listen_port=18080)
+            text = open(conf, encoding="utf-8").read()
+        self.assertIn("autoindex off;", text)
+        self.assertNotIn("autoindex on;", text)
+
+    def test_share_file_url_keeps_the_file_and_skips_a_folder(self):
+        from src.services.team_media_map import share_file_url
+
+        file_url = "http://192.168.1.5:18080/videos/libabc12345/sub/clip.mp4"
+        self.assertEqual(share_file_url(file_url, [], media_base_url=""), file_url)
+        folder_url = "http://192.168.1.5:18080/videos/libabc12345/"
+        self.assertEqual(share_file_url(folder_url, [], media_base_url=""), "")
+
     def test_library_browse_url_from_play_url(self):
         from src.services.team_media_map import absolute_path_to_library_browse_url
 

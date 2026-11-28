@@ -13,6 +13,7 @@ from src.services.search_request_service import (
     resolve_search_query_inputs,
 )
 from src.services.search_scope import (
+    format_indexed_video_ids,
     is_search_scoped,
     normalize_scope_path,
     per_library_indexes_ready,
@@ -488,7 +489,11 @@ def _enrich_hit_payload(
             if play_url:
                 payload["play_url"] = play_url
         except Exception:
-            logger.exception("Failed to build team play_url for %s", video_path)
+            logger.exception(
+                "Failed to build team play_url video_id=%s path=%s",
+                video_id or "-",
+                video_path,
+            )
     return payload
 
 
@@ -922,7 +927,10 @@ def _resolve_agent_search_inputs(
 
             scope_video_paths = rewrite_team_scope_video_paths(scope_video_paths)
         except Exception:
-            logger.exception("Failed to rewrite team play_url scope paths")
+            logger.exception(
+                "Failed to rewrite team play_url scope paths video_id=%s",
+                format_indexed_video_ids(scope_video_paths),
+            )
 
     team_play_urls = _resolve_team_play_urls(body, cfg)
 

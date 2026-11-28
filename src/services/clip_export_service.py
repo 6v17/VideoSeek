@@ -334,6 +334,13 @@ def execute_export_clip(
             note_swallowed(exc, "src/services/clip_export_service.py:ffmpeg_stderr")
             stderr = ""
         message = stderr or f"FFmpeg exited with code {result.returncode}"
+        from src.services.search_scope import lookup_indexed_video_id
+
+        logger.error(
+            "Clip export failed video_id=%s path=%s",
+            lookup_indexed_video_id(source) or "-",
+            source,
+        )
         raise RuntimeError(message[:2000])
 
     payload: Dict[str, Any] = {
