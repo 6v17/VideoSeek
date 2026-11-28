@@ -7,12 +7,11 @@ on expand.
 
 from __future__ import annotations
 
-import math
 import os
 from collections import defaultdict
 from typing import Any, Iterable
 
-from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QSize, QTimer, Signal
+from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QRectF, Qt, QSize, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -107,37 +106,30 @@ def _paint_library_glyph(painter: QPainter, rect, color: QColor, kind: str) -> N
     painter.setBrush(Qt.BrushStyle.NoBrush)
     center = rect.center()
     if kind == "refresh":
-        radius = 6.0
-        # Clockwise arc, open at the upper right. The arrow continues along that direction.
-        end_deg = 55
-        sweep_deg = 292
-        start_deg = end_deg + sweep_deg
-        painter.drawArc(
-            int(round(center.x() - radius)),
-            int(round(center.y() - radius)),
-            int(round(radius * 2)),
-            int(round(radius * 2)),
-            int(start_deg * 16),
-            int(-sweep_deg * 16),
-        )
-        end = math.radians(end_deg)
-        tangent_x = math.sin(end)
-        tangent_y = math.cos(end)
-        normal_x = -tangent_y
-        normal_y = tangent_x
-        tip_x = center.x() + radius * math.cos(end) + tangent_x * 3.2
-        tip_y = center.y() - radius * math.sin(end) + tangent_y * 3.2
-        base_x = center.x() + radius * math.cos(end) - tangent_x * 0.4
-        base_y = center.y() - radius * math.sin(end) - tangent_y * 0.4
-        wing = 2.6
-        head = QPainterPath()
-        head.moveTo(tip_x, tip_y)
-        head.lineTo(base_x + normal_x * wing, base_y + normal_y * wing)
-        head.lineTo(base_x - normal_x * wing, base_y - normal_y * wing)
-        head.closeSubpath()
+        # Same circular-arrow as the preview replay glyph: a wide gap plus a
+        # filled head. A near-full ring reads as an empty circle at toolbar size.
+        side = float(min(rect.width(), rect.height()))
+        scale = side / 28.0
+        cx = rect.x() + rect.width() / 2.0
+        cy = rect.y() + rect.height() / 2.0
+        radius = 5.2 * scale
+        pen = QPen(color, max(1.6, 1.7 * scale))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        box = QRectF(cx - radius, cy - radius, radius * 2.0, radius * 2.0)
+        ring = QPainterPath()
+        ring.arcMoveTo(box, 50)
+        ring.arcTo(box, 50, 268)
+        painter.strokePath(ring, pen)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(color)
-        painter.drawPath(head)
+        tip = QPainterPath()
+        tip.moveTo(cx + 0.2 * scale, cy - 7.0 * scale)
+        tip.lineTo(cx + 4.4 * scale, cy - 5.2 * scale)
+        tip.lineTo(cx + 0.2 * scale, cy - 3.4 * scale)
+        tip.closeSubpath()
+        painter.drawPath(tip)
     else:
         left = center.x() - 8
         top = center.y() - 6
@@ -213,6 +205,7 @@ class LibraryIconButton(QPushButton):
         option.text = ""
         option.icon = QIcon()
         self.style().drawControl(QStyle.ControlElement.CE_PushButton, option, painter, self)
+        painter.setClipping(False)
         _paint_library_glyph(painter, option.rect, _library_icon_ink(self, option), self._kind)
         painter.end()
 
@@ -611,13 +604,17 @@ class LibraryGroupedVideoTree(QWidget):
         self._vbox.setSpacing(0)
 
         self._empty_label = QLabel()
-        self._empty_label.setObjectName("CardHint")
+        self._empty_label.setObjectName("LibraryEmptyHint")
         self._empty_label.setWordWrap(True)
+        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self._empty_label.setVisible(False)
 
         self._scroll.setWidget(self._list_host)
         root.addWidget(self._column_header, 0)
-        root.addWidget(self._empty_label)
+        root.addWidget(self._empty_label, 1)
         root.addWidget(self._scroll, 1)
         self.selection_changed.connect(self._sync_select_all_checkbox)
 
@@ -709,6 +706,10 @@ class LibraryGroupedVideoTree(QWidget):
         if empty_text:
             self._empty_text = empty_text
             self._empty_label.setText(empty_text)
+            if not self._blocks:
+                self._empty_label.setVisible(True)
+                self._scroll.setVisible(False)
+                self._column_header.setVisible(False)
         self._sync_column_widths()
 
     def set_libraries_remote(self, enabled: bool) -> None:

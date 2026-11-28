@@ -31,12 +31,14 @@ from ui.widgets.components import NoWheelComboBox
 from ui.widgets.data_table import DataTable
 from ui.widgets.recap_review_delegate import RecapReviewItemDelegate
 from ui.widgets.button_roles import set_button_role
+from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.styles import repolish_widget
 from ui.widgets.scaffold import PageScaffold, VSCard, VSProgressStatusRow, make_runtime_banner
 from ui.widgets.searchable_id_combo import SearchableIdCombo
 from ui.widgets.table_specs import (
     UNDERSTANDING_DIALOGUE_TABLE_SPEC,
 )
+from ui.widgets.understanding_form_common import mark_form_field
 from ui.widgets.understanding_services_panel import UnderstandingServicesPanel
 from ui.widgets.vertical_stretch import add_filling_widget, add_vertically_stretchable
 
@@ -205,7 +207,7 @@ class UnderstandingEvidencePage(QWidget):
 
         self.understanding_notice, self.understanding_notice_text = make_runtime_banner()
         self.btn_understanding_setup = _action_button("GhostButton")
-        self.btn_understanding_setup.setMinimumHeight(30)
+        self.btn_understanding_setup.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.understanding_notice.layout().addWidget(self.btn_understanding_setup, 0)
         self.understanding_notice.hide()
         page_body.addWidget(self.understanding_notice)
@@ -264,8 +266,6 @@ class UnderstandingEvidencePage(QWidget):
             self.recap_review_hint,
         ):
             hint.hide()
-        if hasattr(self.header, "subtitle"):
-            self.header.subtitle.hide()
 
     def show_embedded_preview(self) -> None:
         stack = getattr(self, "content_stack", None)
@@ -645,6 +645,13 @@ class UnderstandingEvidencePage(QWidget):
         self.input_understanding_mode = NoWheelComboBox()
         self.input_understanding_mode.setObjectName("SearchModeSelect")
         self.input_understanding_mode.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        for field in (
+            self.scope_combo,
+            self.video_combo,
+            self.input_caption_language,
+            self.input_understanding_mode,
+        ):
+            mark_form_field(field)
 
         grid.addWidget(_stack_field(self.scope_label, self.scope_combo), 0, 0)
         grid.addWidget(_stack_field(self.video_label, self.video_combo), 0, 1)

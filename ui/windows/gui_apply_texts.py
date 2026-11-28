@@ -32,6 +32,12 @@ class ApplyTextsGuiMixin:
         current = str(getattr(view, "_empty_message", "") or "").strip()
         if current in known:
             view.set_empty_message(idle)
+        if hasattr(view, "set_empty_examples"):
+            examples = [
+                str((t or {}).get(key) or "").strip()
+                for key in ("search_example_1", "search_example_2", "search_example_3")
+            ]
+            view.set_empty_examples([item for item in examples if item])
 
     def _apply_texts_chrome(self, t):
         self.setWindowTitle(f"{t['app_name']} v{get_app_version()}")
@@ -81,7 +87,8 @@ class ApplyTextsGuiMixin:
 
     def _apply_texts_search_page(self, t):
         self.search_page.header.title.setText(t["search_page_title"])
-        self.search_page.header.subtitle.hide()
+        self.search_page.header.subtitle.setText(t.get("search_page_desc", ""))
+        self.search_page.header.subtitle.setVisible(bool(t.get("search_page_desc", "")))
         self.search_page.indexing_notice_text.setText(t.get("search_during_indexing_hint", ""))
         self._refresh_search_panel_state()
         self.search_page.preview_title.setText(t["preview_panel"])
@@ -157,11 +164,13 @@ class ApplyTextsGuiMixin:
 
     def _apply_texts_library_page(self, t):
         self.library_page.header.title.setText(t["library_page_title"])
-        self.library_page.header.subtitle.hide()
+        self.library_page.header.subtitle.setText(t.get("library_page_desc", ""))
+        self.library_page.header.subtitle.setVisible(bool(t.get("library_page_desc", "")))
         dialogue = getattr(self, "dialogue_page", None)
         if dialogue is not None:
             dialogue.header.title.setText(t.get("nav_dialogue", "Subtitles"))
-            dialogue.header.subtitle.hide()
+            dialogue.header.subtitle.setText(t.get("dialogue_page_desc", ""))
+            dialogue.header.subtitle.setVisible(bool(t.get("dialogue_page_desc", "")))
             caption = getattr(dialogue, "lbl_action_caption", None)
             if caption is not None:
                 caption.setText(t.get("library_action_caption", ""))
@@ -341,7 +350,13 @@ class ApplyTextsGuiMixin:
                 "Test feature: APIs and storage may still change.",
             )
         )
-        self.understanding_page.header.subtitle.hide()
+        desc_key = (
+            "understanding_page_desc_motion"
+            if getattr(self.understanding_page, "_include_motion_steps", False)
+            else "understanding_page_desc"
+        )
+        self.understanding_page.header.subtitle.setText(t.get(desc_key, ""))
+        self.understanding_page.header.subtitle.setVisible(bool(t.get(desc_key, "")))
         self.understanding_page.workspace_title.setText(t["understanding_workspace_title"])
         if hasattr(self.understanding_page, "apply_wizard_texts"):
             self.understanding_page.apply_wizard_texts(t)

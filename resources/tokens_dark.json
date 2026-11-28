@@ -2,9 +2,9 @@
   "videoseek": {
     "theme": {
       "color": {
-        "window": "#181818",
-        "sidebar": "#121212",
-        "panel": "#2e2e2e",
+        "window": "#141414",
+        "sidebar": "#0a0a0a",
+        "panel": "#323232",
         "field": "#242424",
         "headline": "#ffffff",
         "text": "#e5e5e5",
@@ -23,9 +23,9 @@
         "hero-line": "#454545",
         "line": "#454545",
         "line-strong": "#525252",
-        "button-soft": "#3a3a3a",
+        "button-soft": "#3e3e3e",
         "button-soft-hover": "#4a4a4a",
-        "button-soft-pressed": "#323232",
+        "button-soft-pressed": "#2a2a2a",
         "accent-soft-hover": "#2a5080",
         "danger-soft-hover": "#6b2a2a",
         "success-soft-hover": "#165c3e",

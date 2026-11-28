@@ -2766,7 +2766,6 @@ class LibraryIndexingGuiMixin:
 
             if not self.check_runtime_resources():
                 set_index_prepare_running(False)
-                self.library_page.lbl_status.setText(self.texts["model_features_disabled"])
                 return False
             if not getattr(self, "_runtime_warmup_ready", False):
                 self.ensure_runtime_warmup(

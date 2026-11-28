@@ -718,7 +718,7 @@ class SearchPanel(VSCard):
         self.btn_save_preset.setObjectName("GhostButton")
         self.btn_save_preset.setFixedHeight(32)
         self.btn_clear = QPushButton()
-        self.btn_clear.setObjectName("DangerGhostButton")
+        set_button_role(self.btn_clear, "GhostButton")
         self.btn_clear.setFixedHeight(32)
         self.btn_filters = QPushButton("高级参数")
         set_button_role(self.btn_filters, "GhostButton", chrome="filterToggle")

@@ -69,7 +69,7 @@ class PreviewPanel(VSCard):
     MAXIMIZED_MIN_HEIGHT = 640
 
     def __init__(self, parent=None):
-        super().__init__(margins=(14, 12, 14, 12), spacing=6, parent=parent)
+        super().__init__(margins=(14, 12, 14, 12), spacing=6, parent=parent, object_name="PreviewPanel")
         layout = self.content_layout
         self._maximized = False
         self._panel_height = compare_row_card_height()

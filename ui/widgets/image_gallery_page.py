@@ -345,11 +345,6 @@ class ImageGalleryPage(QWidget):
         chrome_row.addLayout(action_block, 0)
         chrome_row.addStretch(1)
         shared_outer.addLayout(chrome_row)
-
-        self.lbl_search_hint = QLabel()
-        self.lbl_search_hint.setObjectName("LibraryChromeHint")
-        self.lbl_search_hint.setWordWrap(True)
-        shared_outer.addWidget(self.lbl_search_hint)
         page_body.addWidget(self.shared_toolbar_card)
 
         self.table_card = VSCard(margins=(16, 14, 16, 14), spacing=12)
@@ -390,7 +385,8 @@ class ImageGalleryPage(QWidget):
 
     def apply_texts(self, texts: dict) -> None:
         self.header.title.setText(texts.get("gallery_page_title", "Gallery"))
-        self.header.subtitle.hide()
+        self.header.subtitle.setText(texts.get("gallery_page_desc", ""))
+        self.header.subtitle.setVisible(bool(texts.get("gallery_page_desc", "")))
         self.lbl_action_caption.setText(texts.get("library_action_caption", ""))
         self.btn_add_folder.setText(texts.get("gallery_add_folder", ""))
         self.btn_remove_folder.setText(texts.get("gallery_remove_folder", ""))
@@ -401,7 +397,6 @@ class ImageGalleryPage(QWidget):
         self.btn_refresh.setText("")
         self.btn_refresh.setAccessibleName(texts.get("gallery_refresh", ""))
         self.btn_refresh.setToolTip(texts.get("gallery_refresh_hint", ""))
-        self.lbl_search_hint.setText(texts.get("gallery_search_elsewhere", ""))
         find = list_find_text_kwargs(texts)
         find["find_placeholder"] = texts.get("gallery_find_placeholder", find.get("find_placeholder", ""))
         self.folder_tree.set_action_texts(

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.app.i18n import get_texts
+from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.understanding_asr_form import UnderstandingAsrForm
 from ui.widgets.understanding_llm_form import UnderstandingLlmForm
 from ui.widgets.understanding_service_form import UnderstandingServiceForm
@@ -74,7 +75,7 @@ class UnderstandingServicesPanel(QWidget):
         self.pages.addWidget(self.llm_form)
         self.pages.addWidget(self.asr_form)
 
-        split_layout.addWidget(self.nav, 0)
+        split_layout.addWidget(self.nav, 0, Qt.AlignmentFlag.AlignVCenter)
         split_layout.addWidget(self.pages, 1)
         root.addWidget(split, 1)
 
@@ -86,9 +87,9 @@ class UnderstandingServicesPanel(QWidget):
         actions.setSpacing(8)
         actions.addStretch(1)
         self.btn_test_vlm_connection = _action_button("GhostButton")
-        self.btn_save_config = _action_button("PrimaryButton")
+        self.btn_save_config = _action_button("AccentGhostButton")
         for button in (self.btn_test_vlm_connection, self.btn_save_config):
-            button.setMinimumHeight(32)
+            button.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
             button.setMinimumWidth(96)
             button.setEnabled(True)
         actions.addWidget(self.btn_test_vlm_connection, 0)
@@ -127,6 +128,14 @@ class UnderstandingServicesPanel(QWidget):
                 restore = index
         self.nav.setCurrentRow(restore)
         self.nav.blockSignals(False)
+        self._fit_nav_height()
+
+    def _fit_nav_height(self) -> None:
+        """Keep the three service names as a short list, centered beside the form."""
+        height = self.nav.frameWidth() * 2
+        for row in range(self.nav.count()):
+            height += max(28, self.nav.sizeHintForRow(row))
+        self.nav.setFixedHeight(max(height, 36))
 
     def _on_nav_changed(self, row: int) -> None:
         item = self.nav.item(max(0, row))

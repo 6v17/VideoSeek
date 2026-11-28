@@ -88,7 +88,7 @@ class DialogueLibraryPage(QWidget):
         self.btn_build_dialogue_index = QPushButton()
         self.btn_build_dialogue_index.setObjectName("PrimaryButton")
         self.btn_reembed_dialogue = QPushButton()
-        self.btn_reembed_dialogue.setObjectName("AccentGhostButton")
+        self.btn_reembed_dialogue.setObjectName("GhostButton")
         self.btn_clear_dialogue = QPushButton()
         self.btn_clear_dialogue.setObjectName("GhostButton")
         self.btn_import_subtitle_srt = QPushButton()

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.widgets.components import NoWheelComboBox
-from ui.widgets.understanding_form_common import configure_expanding_line, field_label
+from ui.widgets.understanding_form_common import configure_expanding_line, field_label, mark_form_field
 
 
 class UnderstandingServiceForm(QWidget):
@@ -62,6 +62,7 @@ class UnderstandingServiceForm(QWidget):
         self.input_vlm_provider_mode.setObjectName("SearchModeSelect")
         self.input_vlm_provider_mode.setMinimumWidth(180)
         self.input_vlm_provider_mode.setMaximumWidth(320)
+        mark_form_field(self.input_vlm_provider_mode)
         config_form.addRow(self.label_vlm_provider_mode, self.input_vlm_provider_mode)
 
         self.label_vlm_provider_preset = field_label()
@@ -69,6 +70,7 @@ class UnderstandingServiceForm(QWidget):
         self.input_vlm_provider_preset.setObjectName("SearchModeSelect")
         self.input_vlm_provider_preset.setMinimumWidth(220)
         self.input_vlm_provider_preset.setMaximumWidth(360)
+        mark_form_field(self.input_vlm_provider_preset)
         config_form.addRow(self.label_vlm_provider_preset, self.input_vlm_provider_preset)
 
         self.hint_vlm_preset_summary = QLabel()
@@ -106,6 +108,7 @@ class UnderstandingServiceForm(QWidget):
         self.input_caption_concurrency.setMaximum(4)
         self.input_caption_concurrency.setMinimumWidth(80)
         self.input_caption_concurrency.setMaximumWidth(120)
+        mark_form_field(self.input_caption_concurrency)
         config_form.addRow(self.label_caption_concurrency, self.input_caption_concurrency)
 
         inner_layout.addWidget(form_host)

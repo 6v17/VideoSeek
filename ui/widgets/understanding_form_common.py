@@ -17,11 +17,19 @@ def field_label(text: str = "") -> QLabel:
     return label
 
 
+def mark_form_field(widget) -> None:
+    """Use the shared form-field height. Search-toolbar controls do not call this."""
+    widget.setProperty("formField", True)
+    widget.setMinimumHeight(int(COMPONENT_SIZES["form_field_height"]))
+    repolish_widget(widget)
+
+
 def configure_expanding_line(field: QLineEdit, *, min_width: int = 280) -> None:
     """Let URL / key / model fields grow with the dialog instead of a fixed narrow box."""
     field.setMinimumWidth(int(min_width))
     field.setMaximumWidth(16777215)
     field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    mark_form_field(field)
 
 
 def set_status_hint(label: QLabel | None, text: str, *, state: str = "neutral") -> None:

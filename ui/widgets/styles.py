@@ -285,6 +285,15 @@ QCheckBox:disabled {
 #StatusHint[state="neutral"] {
     color: __MUTED__;
 }
+#SettingsActionStatus {
+    color: __TEXT__;
+    font-size: __FS_XS__;
+    font-weight: 600;
+    background: transparent;
+    border: none;
+    padding: 0 __SPACE_2__;
+    min-height: 0;
+}
 #StatusLabel {
     color: __HEADLINE__;
     font-size: __FS_XS__;
@@ -716,6 +725,16 @@ QPushButton::menu-indicator {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __ACCENT__;
 }
+#GhostButton[chrome="exampleChip"] {
+    border-radius: __RADIUS_PILL__;
+    padding: __SPACE_1__ __SPACE_3__;
+    min-height: 28px;
+    font-weight: 600;
+}
+#GhostButton[chrome="exampleChip"]:hover {
+    border-color: __ACCENT__;
+    color: __ACCENT__;
+}
 #GhostButton {
     background: __BUTTON_SOFT__;
     border-color: __LINE_STRONG__;
@@ -779,7 +798,7 @@ QPushButton::menu-indicator {
     margin: 6px 0;
     border: none;
     border-radius: 2px;
-    background: __LINE_STRONG__;
+    background: __MUTED__;
 }
 #PreviewTransportSlider::sub-page:horizontal {
     height: 4px;
@@ -794,20 +813,20 @@ QPushButton::menu-indicator {
     margin: -4px 0;
     border-radius: 6px;
     background: __ACCENT__;
-    border: 2px solid __WINDOW__;
+    border: 2px solid __PANEL__;
 }
 #PreviewTransportSlider::handle:horizontal:hover {
     background: __ACCENT_HOVER__;
 }
 #PreviewTransportSlider::groove:horizontal:disabled {
-    background: __LINE__;
+    background: __MUTED__;
 }
 #PreviewTransportSlider::sub-page:horizontal:disabled {
-    background: __LINE__;
+    background: __MUTED__;
 }
 #PreviewTransportSlider::handle:horizontal:disabled {
-    background: __MUTED__;
-    border-color: __LINE__;
+    background: __PANEL__;
+    border: 2px solid __MUTED__;
 }
 #SearchScoreSlider,
 #ResultSizeSlider {
@@ -1193,6 +1212,16 @@ QTextEdit#SearchInput:focus, QPlainTextEdit#SearchInput:focus {
     width: 0px;
     height: 0px;
 }
+/* Understanding / service forms share the settings field height. Search-toolbar
+   combos stay on the shorter #SearchModeSelect rule above. */
+#SearchModeSelect[formField="true"],
+QLineEdit#SearchInput[formField="true"] {
+    min-height: __H_FIELD__;
+    padding: 0 __SPACE_3__;
+}
+#SearchableIdCombo[formField="true"] #SearchableIdComboFace {
+    min-height: __H_FIELD__;
+}
 #SearchModeSelect QAbstractItemView {
     background: __PANEL__;
     color: __HEADLINE__;
@@ -1391,8 +1420,8 @@ QSpinBox[settingField="true"], QDoubleSpinBox[settingField="true"], QComboBox[se
     background: __FIELD__;
     border: 1px solid __LINE__;
     border-radius: __RADIUS_MD__;
-    padding: __SPACE_2__ __SPACE_3__;
-    min-height: 32px;
+    padding: 0 __SPACE_3__;
+    min-height: __H_FIELD__;
     color: __HEADLINE__;
 }
 QSpinBox[settingField="true"]:hover, QDoubleSpinBox[settingField="true"]:hover, QComboBox[settingField="true"]:hover, QLineEdit[settingField="true"]:hover {
@@ -1550,7 +1579,7 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 /* Same family as 添加库 / 删除库; never set max-height (clips bottom borders). */
 #LibrarySharedStrip #SuccessGhostButton,
 #LibrarySharedStrip #DangerGhostButton {
-    min-height: 28px;
+    min-height: __H_BUTTON__;
     padding: __SPACE_1__ __SPACE_3__;
     border-radius: __RADIUS_MD__;
 }
@@ -2019,6 +2048,11 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
     background: __VIDEO_BG__;
     border: 1px solid __LINE__;
     border-radius: __RADIUS_MD__;
+}
+#PreviewPanel {
+    background: __WINDOW__;
+    border: none;
+    border-radius: __RADIUS_LG__;
 }
 #PreviewHost, #PreviewVideoSurface, #GalleryBoardWell {
     background: __VIDEO_BG__;
@@ -3462,6 +3496,11 @@ _SPACE_TOKENS = {
     "SPACE_5": "24px",
     "SPACE_6": "32px",
 }
+# Text buttons and form fields. Do not apply these to icon, nav, or progress chrome.
+_CONTROL_TOKENS = {
+    "H_BUTTON": "34px",
+    "H_FIELD": "32px",
+}
 
 
 def font_scale_for_screen(screen=None) -> float:
@@ -3499,6 +3538,7 @@ def build_style(colors, font_scale: float = 1.0):
     style = _replace_tokens(style, _font_size_tokens(font_scale))
     style = _replace_tokens(style, _RADIUS_TOKENS)
     style = _replace_tokens(style, _SPACE_TOKENS)
+    style = _replace_tokens(style, _CONTROL_TOKENS)
     check_icon = _qss_url(get_resource_path("resources/icons/check.png"))
     partial_icon = _qss_url(get_resource_path("resources/icons/check_partial.png"))
     style = style.replace("__CHECK_ICON__", check_icon)
@@ -3510,7 +3550,7 @@ from ui.widgets.theme_tokens import load_merged_theme_colors
 
 THEME_COLORS_DARK_BASE = {
     # Win11-like neutral layers (less cold blue-black).
-    "WINDOW": "#181818",
+    "WINDOW": "#141414",
     "TEXT": "#e5e5e5",
     "HEADLINE": "#ffffff",
     "MUTED": "#a3a3a3",
@@ -3524,18 +3564,18 @@ THEME_COLORS_DARK_BASE = {
     "WARN_SOFT": "#4a3510",
     "DANGER": "#f87171",
     "DANGER_SOFT": "#4c1d1d",
-    "SIDEBAR": "#121212",
-    "PANEL": "#2e2e2e",
+    "SIDEBAR": "#0a0a0a",
+    "PANEL": "#323232",
     "FIELD": "#242424",
-    "HERO": "#262626",
+    "HERO": "#222222",
     "HERO_LINE": "#454545",
     "LINE": "#454545",
     "LINE_STRONG": "#525252",
     "TRACK": "#2f2f2f",
     "SCROLL": "#6b6b6b",
-    "BUTTON_SOFT": "#3a3a3a",
+    "BUTTON_SOFT": "#3e3e3e",
     "BUTTON_SOFT_HOVER": "#4a4a4a",
-    "BUTTON_SOFT_PRESSED": "#323232",
+    "BUTTON_SOFT_PRESSED": "#2a2a2a",
     "ACCENT_SOFT_HOVER": "#2a5080",
     "DANGER_SOFT_HOVER": "#6b2a2a",
     "SUCCESS_SOFT_HOVER": "#165c3e",
@@ -3554,7 +3594,7 @@ THEME_COLORS_DARK_BASE = {
 
 THEME_COLORS_LIGHT_BASE = {
     # Win11-like gray shell; accent stays product blue.
-    "WINDOW": "#e8e8e8",
+    "WINDOW": "#d4d4d4",
     "TEXT": "#2b2b2b",
     "HEADLINE": "#1a1a1a",
     "MUTED": "#6b6b6b",
@@ -3568,10 +3608,10 @@ THEME_COLORS_LIGHT_BASE = {
     "WARN_SOFT": "#fff4ce",
     "DANGER": "#c42b1c",
     "DANGER_SOFT": "#fde7e9",
-    "SIDEBAR": "#f2f2f2",
+    "SIDEBAR": "#eeeeee",
     "PANEL": "#ffffff",
-    "FIELD": "#f6f6f6",
-    "HERO": "#e8e8e8",
+    "FIELD": "#e7e7e7",
+    "HERO": "#f7f7f7",
     "HERO_LINE": "#d4d4d4",
     "LINE": "#d4d4d4",
     "LINE_STRONG": "#bdbdbd",

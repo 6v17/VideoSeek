@@ -693,20 +693,27 @@ class RuntimeGuiMixin:
         self.library_page.btn_sync_db.setEnabled(resources_ready)
         self.library_page.btn_refresh_visual_library.setEnabled(resources_ready)
         # CLIP/ONNX warmup is deferred until first visual search or library sync.
-        disabled_text = self.texts.get("model_features_disabled", "")
+        disabled_text = str(self.texts.get("model_features_disabled", "") or "")
+        ready_text = str(self.texts.get("ready", "") or "")
+        library_label = getattr(self.library_page, "lbl_status", None)
         if not resources_ready:
-            status_text = disabled_text
-            # Visual sync still needs CLIP+ffmpeg; do not freeze the
-            # search status bar (subtitle search remains usable).
-            self.library_page.lbl_status.setText(status_text)
+            # The tip above the pages already says resources are missing.
+            # Leave a real indexing message alone; drop only the duplicate warning.
+            if library_label is not None and library_label.text().strip() in {
+                "",
+                disabled_text.strip(),
+                ready_text.strip(),
+            }:
+                library_label.setText("")
         elif disabled_text:
-            ready_text = self.texts.get("ready", "")
             for label in (
                 getattr(self.search_page, "lbl_status", None),
-                getattr(self.library_page, "lbl_status", None),
+                library_label,
             ):
                 if label is not None and label.text().strip() == disabled_text.strip():
                     label.setText(ready_text)
+            if library_label is not None and not library_label.text().strip():
+                library_label.setText(ready_text)
         self._update_runtime_banner(status)
 
     def _update_runtime_banner(self, status):

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QLabel, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
+
+from ui.widgets.button_roles import set_button_role
 
 from ui.widgets.result_grid import RESULT_SCALE_DEFAULT, ResultGrid, clamp_result_scale_percent, grid_thumb_pixel_size
 from ui.widgets.result_table import ResultTable
@@ -46,6 +48,7 @@ class ResultView(QWidget):
     """Wraps result table/grid; controllers call populate / set_thumbnail instead of setCellWidget."""
 
     view_mode_changed = Signal(str)
+    example_clicked = Signal(str)
     group_back_clicked = Signal()
 
     def __init__(
@@ -89,6 +92,14 @@ class ResultView(QWidget):
         self.empty_hint.setWordWrap(True)
         empty_layout.addStretch(1)
         empty_layout.addWidget(self.empty_hint)
+        self.example_row = QWidget()
+        self.example_layout = QHBoxLayout(self.example_row)
+        self.example_layout.setContentsMargins(0, 8, 0, 0)
+        self.example_layout.setSpacing(8)
+        self.example_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._example_buttons: list[QPushButton] = []
+        self.example_row.hide()
+        empty_layout.addWidget(self.example_row)
         empty_layout.addStretch(1)
 
         self.stack.addWidget(self.content_stack)
@@ -145,6 +156,25 @@ class ResultView(QWidget):
     def set_empty_message(self, text: str) -> None:
         self._empty_message = str(text or "").strip()
         self.empty_hint.setText(self._empty_message)
+
+    def set_empty_examples(self, examples: list[str]) -> None:
+        """Clickable sample queries shown under the idle empty line."""
+        while self.example_layout.count():
+            item = self.example_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._example_buttons.clear()
+        labels = [str(item or "").strip() for item in examples or []]
+        labels = [item for item in labels if item]
+        for label in labels:
+            button = QPushButton(label)
+            set_button_role(button, "GhostButton", chrome="exampleChip")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _checked=False, value=label: self.example_clicked.emit(value))
+            self.example_layout.addWidget(button)
+            self._example_buttons.append(button)
+        self.example_row.setVisible(bool(labels))
 
     def set_busy(self, busy: bool) -> None:
         self._busy = bool(busy)

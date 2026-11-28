@@ -88,6 +88,17 @@ class SearchPanelStateMixin:
         if tabs.currentIndex() != target:
             tabs.setCurrentIndex(target)
 
+    def _run_search_example(self, text: str) -> None:
+        query = str(text or "").strip()
+        if not query or not hasattr(self, "search_page"):
+            return
+        self._set_search_query_tab(self.SEARCH_TAB_TEXT)
+        editor = getattr(self.search_page.search_panel, "text_search", None)
+        if editor is None:
+            return
+        editor.setPlainText(query)
+        self.start_search()
+
     def _search_input_world(self) -> str:
         tab = self._search_active_tab()
         if tab == self.SEARCH_TAB_TEXT:

@@ -390,6 +390,8 @@ class MainWindow(
         self.sidebar.btn_notice.clicked.connect(self.show_notice)
 
         self.search_page.btn_search.clicked.connect(self.start_search)
+        if hasattr(self.search_page, "result_view"):
+            self.search_page.result_view.example_clicked.connect(self._run_search_example)
         self.search_page.btn_save_preset.clicked.connect(self.save_compose_as_preset)
         self.search_page.btn_clear.clicked.connect(self.clear_all_content)
         self.search_page._results_view_group.idClicked.connect(self._on_results_view_mode_clicked)

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.widgets.components import NoWheelComboBox
-from ui.widgets.understanding_form_common import configure_expanding_line, field_label
+from ui.widgets.understanding_form_common import configure_expanding_line, field_label, mark_form_field
 
 
 class UnderstandingAsrForm(QWidget):
@@ -57,6 +57,7 @@ class UnderstandingAsrForm(QWidget):
         self.input_asr_provider_mode.setObjectName("SearchModeSelect")
         self.input_asr_provider_mode.setMinimumWidth(180)
         self.input_asr_provider_mode.setMaximumWidth(320)
+        mark_form_field(self.input_asr_provider_mode)
         config_form.addRow(self.label_asr_provider_mode, self.input_asr_provider_mode)
 
         self.label_asr_provider_preset = field_label()
@@ -64,6 +65,7 @@ class UnderstandingAsrForm(QWidget):
         self.input_asr_provider_preset.setObjectName("SearchModeSelect")
         self.input_asr_provider_preset.setMinimumWidth(180)
         self.input_asr_provider_preset.setMaximumWidth(360)
+        mark_form_field(self.input_asr_provider_preset)
         config_form.addRow(self.label_asr_provider_preset, self.input_asr_provider_preset)
 
         self.label_remote_asr_api_key = field_label()

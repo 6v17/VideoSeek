@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.styles import repolish_widget
 
 
@@ -28,7 +29,7 @@ class SettingsFormMixin:
         else:
             widget.setMinimumWidth(width)
             widget.setMaximumWidth(width + 44)
-        widget.setMinimumHeight(32)
+        widget.setMinimumHeight(COMPONENT_SIZES["form_field_height"])
         widget.setSizePolicy(QSizePolicy.Expanding if expanding else QSizePolicy.Fixed, QSizePolicy.Fixed)
         widget.setProperty("settingField", True)
 

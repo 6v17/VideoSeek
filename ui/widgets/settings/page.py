@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -31,6 +31,120 @@ from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.scaffold import PageScaffold, VSCard
 from ui.widgets.settings.form import SettingsFormMixin
 from ui.widgets.styles import repolish_widget
+
+
+class _SettingsStatusLabel(QLabel):
+    """One line beside Save. Long messages elide; the tooltip keeps the full text."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SettingsActionStatus")
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(22)
+        self.setMinimumWidth(0)
+        self._full = ""
+        self.hide()
+
+    def sizeHint(self) -> QSize:  # noqa: N802 — Qt API
+        return QSize(160, 22)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 — Qt API
+        return QSize(0, 22)
+
+    def setText(self, text: str) -> None:  # noqa: N802 — Qt API
+        self._full = str(text or "")
+        self.setToolTip(self._full)
+        self.setVisible(bool(self._full))
+        self.updateGeometry()
+        self._elide()
+
+    def text(self) -> str:  # noqa: N802 — Qt API
+        return self._full
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        width = max(0, int(self.width()) - 8)
+        if width <= 1:
+            super().setText(self._full)
+            return
+        shown = self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, width)
+        super().setText(shown)
+
+
+class ElidedPathEdit(QLineEdit):
+    """Show a long path with a middle ellipsis. ``text()`` stays the full path."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._full = ""
+        self._applying = False
+        self.textChanged.connect(self._remember_edit)
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        new = "" if text is None else str(text)
+        changed = new != self._full
+        self._full = new
+        self.setToolTip(self._full)
+        self._applying = True
+        self.blockSignals(True)
+        if self.hasFocus():
+            super().setText(self._full)
+        else:
+            self._paint_elided()
+        self.blockSignals(False)
+        self._applying = False
+        if changed:
+            self.textChanged.emit(self._full)
+
+    def text(self) -> str:  # noqa: N802
+        if self.hasFocus():
+            return super().text()
+        return self._full
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if not self.hasFocus():
+            self._paint_elided()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if not self.hasFocus():
+            self._paint_elided()
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        self._applying = True
+        self.blockSignals(True)
+        super().setText(self._full)
+        self.blockSignals(False)
+        self._applying = False
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        self._full = super().text()
+        self.setToolTip(self._full)
+        super().focusOutEvent(event)
+        self._paint_elided()
+
+    def _remember_edit(self, value: str) -> None:
+        if self._applying or not self.hasFocus():
+            return
+        self._full = value
+        self.setToolTip(self._full)
+
+    def _paint_elided(self) -> None:
+        width = max(48, self.contentsRect().width() - 8)
+        shown = self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideMiddle, width)
+        if super().text() == shown:
+            return
+        self._applying = True
+        self.blockSignals(True)
+        super().setText(shown)
+        self.blockSignals(False)
+        self._applying = False
 
 
 class _ViewportWidthScrollArea(QScrollArea):
@@ -119,13 +233,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.runtime_status_backend.setOpenExternalLinks(True)
         self.btn_show_runtime_diagnostics = QPushButton()
         self.btn_show_runtime_diagnostics.setObjectName("AccentGhostButton")
-        self.btn_show_runtime_diagnostics.setMinimumHeight(30)
+        self.btn_show_runtime_diagnostics.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_show_runtime_diagnostics.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
         )
         self.btn_export_logs = QPushButton()
         self.btn_export_logs.setObjectName("AccentGhostButton")
-        self.btn_export_logs.setMinimumHeight(30)
+        self.btn_export_logs.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_export_logs.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
         )
@@ -156,7 +270,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         search_telemetry_header_layout.setSpacing(8)
         self.btn_refresh_search_telemetry = QPushButton()
         self.btn_refresh_search_telemetry.setObjectName("AccentGhostButton")
-        self.btn_refresh_search_telemetry.setMinimumHeight(30)
+        self.btn_refresh_search_telemetry.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_refresh_search_telemetry.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
         )
@@ -244,13 +358,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.lbl_agent_api_status.hide()
         self.btn_copy_agent_api_url = QPushButton()
         self.btn_copy_agent_api_url.setObjectName("AccentGhostButton")
-        self.btn_copy_agent_api_url.setMinimumHeight(34)
+        self.btn_copy_agent_api_url.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_copy_agent_starter = QPushButton()
         self.btn_copy_agent_starter.setObjectName("SuccessGhostButton")
-        self.btn_copy_agent_starter.setMinimumHeight(34)
+        self.btn_copy_agent_starter.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_copy_mcp_config = QPushButton()
         self.btn_copy_mcp_config.setObjectName("AccentGhostButton")
-        self.btn_copy_mcp_config.setMinimumHeight(34)
+        self.btn_copy_mcp_config.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.input_agent_api_bundle = QWidget(self)
         self.input_agent_api_bundle.hide()
         self.input_team_mode = NoWheelComboBox()
@@ -282,7 +396,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_team_share_url.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.btn_copy_team_share_url = QPushButton()
         self.btn_copy_team_share_url.setObjectName("AccentGhostButton")
-        self.btn_copy_team_share_url.setMinimumHeight(34)
+        self.btn_copy_team_share_url.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         server_panel_layout.addWidget(self.input_team_share_url, 1)
         server_panel_layout.addWidget(self.btn_copy_team_share_url, 0)
         self.share_client_panel = QWidget()
@@ -295,7 +409,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.lbl_team_client_url.setMinimumWidth(120)
         self.btn_edit_team_client_url = QPushButton()
         self.btn_edit_team_client_url.setObjectName("AccentGhostButton")
-        self.btn_edit_team_client_url.setMinimumHeight(34)
+        self.btn_edit_team_client_url.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         client_panel_layout.addWidget(self.lbl_team_client_url, 1)
         client_panel_layout.addWidget(self.btn_edit_team_client_url, 0)
         self.input_team_bundle = QWidget()
@@ -348,11 +462,11 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_rediscover_models = QPushButton()
         self.btn_download_runtime_resources = QPushButton()
         self.btn_remove_model_profile = QPushButton()
-        self.input_data_root = QLineEdit()
+        self.input_data_root = ElidedPathEdit()
         self.btn_browse_data_root = QPushButton()
-        self.input_ffmpeg_path = QLineEdit()
+        self.input_ffmpeg_path = ElidedPathEdit()
         self.btn_browse_ffmpeg_path = QPushButton()
-        self.input_model_dir = QLineEdit()
+        self.input_model_dir = ElidedPathEdit()
         self.btn_browse_model_dir = QPushButton()
         self.btn_migrate_model_dir = QPushButton()
         self.label_legacy_migration = ClickableLabel()
@@ -533,30 +647,30 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_cloud_vl_api_key, width=COMPONENT_SIZES["settings_input_width"] + 120)
         self._configure_setting_input(self.input_cloud_vl_dimension, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self.btn_download_runtime_resources.setObjectName("AccentGhostButton")
-        self.btn_download_runtime_resources.setMinimumHeight(34)
+        self.btn_download_runtime_resources.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_rediscover_models.setObjectName("AccentGhostButton")
-        self.btn_rediscover_models.setMinimumHeight(34)
+        self.btn_rediscover_models.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_remove_model_profile.setObjectName("DangerGhostButton")
-        self.btn_remove_model_profile.setMinimumHeight(34)
+        self.btn_remove_model_profile.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self._configure_setting_input(self.input_data_root, width=COMPONENT_SIZES["settings_path_input_width"], expanding=True)
         self._configure_setting_input(self.input_ffmpeg_path, width=COMPONENT_SIZES["settings_path_input_width"], expanding=True)
         self._configure_setting_input(self.input_model_dir, width=COMPONENT_SIZES["settings_path_input_width"], expanding=True)
         self.btn_browse_data_root.setObjectName("AccentGhostButton")
-        self.btn_browse_data_root.setMinimumHeight(34)
+        self.btn_browse_data_root.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_browse_ffmpeg_path.setObjectName("AccentGhostButton")
-        self.btn_browse_ffmpeg_path.setMinimumHeight(34)
+        self.btn_browse_ffmpeg_path.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_browse_model_dir.setObjectName("SuccessGhostButton")
-        self.btn_browse_model_dir.setMinimumHeight(34)
+        self.btn_browse_model_dir.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_migrate_model_dir.setObjectName("AccentGhostButton")
-        self.btn_migrate_model_dir.setMinimumHeight(34)
+        self.btn_migrate_model_dir.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_migrate_legacy_index.setObjectName("AccentGhostButton")
-        self.btn_migrate_legacy_index.setMinimumHeight(34)
+        self.btn_migrate_legacy_index.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.lbl_legacy_migration_status.setObjectName("StatusHint")
         self.lbl_legacy_migration_status.setWordWrap(True)
         self.btn_export_pc_migrate.setObjectName("AccentGhostButton")
-        self.btn_export_pc_migrate.setMinimumHeight(34)
+        self.btn_export_pc_migrate.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.btn_import_pc_migrate.setObjectName("AccentGhostButton")
-        self.btn_import_pc_migrate.setMinimumHeight(34)
+        self.btn_import_pc_migrate.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
         self.hint_pc_migrate.setObjectName("StatusHint")
         self.hint_pc_migrate.setWordWrap(True)
 
@@ -1022,9 +1136,10 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_save.setObjectName("PrimaryButton")
         self.btn_reset = QPushButton()
         self.btn_reset.setObjectName("GhostButton")
+        self.lbl_status = _SettingsStatusLabel()
         action_primary_row.addWidget(self.btn_save)
         action_primary_row.addWidget(self.btn_reset)
-        action_primary_row.addStretch()
+        action_primary_row.addWidget(self.lbl_status, 1)
         action_card_layout.addLayout(action_primary_row)
 
         action_cleanup_row = QHBoxLayout()
@@ -1039,11 +1154,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         action_cleanup_row.addWidget(self.btn_cleanup_old_model_dir)
         action_cleanup_row.addStretch()
         action_card_layout.addLayout(action_cleanup_row)
-
-        self.lbl_status = QLabel()
-        self.lbl_status.setObjectName("StatusLabel")
-        self.lbl_status.setWordWrap(True)
-        action_card_layout.addWidget(self.lbl_status)
         shell_layout.addWidget(self.action_card, 0)
         self.input_sampling_fps_mode.currentIndexChanged.connect(self._handle_sampling_mode_changed)
         self.input_frame_neighbor_rerank_enabled.currentIndexChanged.connect(
@@ -1618,6 +1728,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
     def _set_search_telemetry_expanded(self, expanded: bool) -> None:
         self._search_telemetry_expanded = bool(expanded)
         self.search_telemetry_body_widget.setVisible(self._search_telemetry_expanded)
+        self.btn_refresh_search_telemetry.setVisible(self._search_telemetry_expanded)
         self.btn_search_telemetry_collapse.setArrowType(
             Qt.ArrowType.DownArrow if self._search_telemetry_expanded else Qt.ArrowType.RightArrow
         )

@@ -54,6 +54,15 @@ class VSCard(QFrame):
         return self._layout
 
 
+class _CollapsingStatusLabel(QLabel):
+    """Status chip that disappears when the text is blank, so an empty blue bar does not remain."""
+
+    def setText(self, text) -> None:  # noqa: N802
+        value = "" if text is None else str(text)
+        super().setText(value)
+        self.setVisible(bool(value.strip()))
+
+
 class VSProgressStatusRow(QWidget):
     """Horizontal progress bar + status label (library indexing, link build, etc.)."""
 
@@ -69,9 +78,10 @@ class VSProgressStatusRow(QWidget):
         self.progress_bar.setFixedHeight(COMPONENT_SIZES["progress_bar_height"])
         self.progress_bar.setMinimumWidth(COMPONENT_SIZES["progress_bar_min_width"])
 
-        self.status_label = QLabel()
+        self.status_label = _CollapsingStatusLabel()
         self.status_label.setObjectName("StatusLabel")
         self.status_label.setWordWrap(True)
+        self.status_label.setText("")
 
         row.addWidget(self.progress_bar, 1)
         row.addWidget(self.status_label, 1)

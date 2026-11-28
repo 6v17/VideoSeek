@@ -80,6 +80,10 @@ COMPONENT_SIZES = {
     "progress_bar_height": 18,
     "progress_bar_min_width": 260,
     "settings_input_width": 116,
+    # One height for text buttons and one for form fields. Icon, nav, and
+    # search-toolbar controls keep their own sizes.
+    "text_button_height": 34,
+    "form_field_height": 32,
     "search_option_combo_width": 96,
     "search_scope_select_width": 92,
     "mobile_bridge_qr_width": 56,
