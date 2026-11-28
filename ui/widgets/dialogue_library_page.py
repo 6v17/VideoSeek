@@ -106,6 +106,7 @@ class DialogueLibraryPage(QWidget):
 
         self.subtitle_video_tree = LibraryGroupedVideoTree()
         self.subtitle_video_tree.setMinimumHeight(280)
+        self.subtitle_video_tree.bind_empty_action(self.btn_add_lib)
         self.dialogue_list = self.subtitle_video_tree
 
         dialogue_toolbar.addWidget(self.btn_add_lib)

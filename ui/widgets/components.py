@@ -1433,6 +1433,7 @@ class LibraryPage(QWidget):
 
         self.visual_video_tree = LibraryGroupedVideoTree()
         self.visual_video_tree.setMinimumHeight(280)
+        self.visual_video_tree.bind_empty_action(self.btn_add_lib)
         self.library_list = self.visual_video_tree
         self.library_column_header_labels = []
 

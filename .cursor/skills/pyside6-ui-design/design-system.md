@@ -46,7 +46,7 @@ Special chrome (nav, wizard steps, mode segments, toggles) keeps the role object
 | `sidebarFooter` / `sidebarFooterGhost` | GhostButton | Sidebar bottom text actions |
 | `mobileToggle` / `mobileQr` | Ghost / AccentGhost | Settings mobile bridge |
 | Settings Save | PrimaryButton | Stays primary when clean; dirty only enables it |
-| Understanding model test/save | Ghost / Primary | Inside the select-step card, not beside 下一步 |
+| Understanding model test/save | Ghost / Ghost | Left side of the select-step card; 下一步 stays the only primary |
 | Sidebar icon tools | `SidebarIconButton` / `SidebarDonateButton` | `QToolButton`, not a QPushButton role |
 | Line-edit clear | `FieldClearButton` | Qt clear `QToolButton` after `setClearButtonEnabled` |
 | Table corner | `TableCornerButton` | Bare `QAbstractButton` on `QTableWidget` |

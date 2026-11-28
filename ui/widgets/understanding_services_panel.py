@@ -85,15 +85,15 @@ class UnderstandingServicesPanel(QWidget):
         actions = QHBoxLayout(self.actions_bar)
         actions.setContentsMargins(0, 4, 0, 0)
         actions.setSpacing(8)
-        actions.addStretch(1)
         self.btn_test_vlm_connection = _action_button("GhostButton")
-        self.btn_save_config = _action_button("AccentGhostButton")
+        self.btn_save_config = _action_button("GhostButton")
         for button in (self.btn_test_vlm_connection, self.btn_save_config):
             button.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
             button.setMinimumWidth(96)
             button.setEnabled(True)
         actions.addWidget(self.btn_test_vlm_connection, 0)
         actions.addWidget(self.btn_save_config, 0)
+        actions.addStretch(1)
         root.addWidget(self.actions_bar, 0)
 
         self.nav.currentRowChanged.connect(self._on_nav_changed)

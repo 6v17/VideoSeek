@@ -12,7 +12,7 @@ from ui.widgets.styles import repolish_widget
 def field_label(text: str = "") -> QLabel:
     label = QLabel(text)
     label.setObjectName("CardHint")
-    label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     label.setFixedWidth(COMPONENT_SIZES.get("understanding_form_label_width", 96))
     return label
 

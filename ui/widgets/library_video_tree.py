@@ -12,7 +12,7 @@ from collections import defaultdict
 from typing import Any, Iterable
 
 from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QRectF, Qt, QSize, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -31,6 +31,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.button_roles import set_button_role
+from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.list_find_bar import (
     ListFindBar,
     ListFindHit,
@@ -46,6 +48,98 @@ _COUNT_BADGE_CHROME = 22
 _STATUS_BADGE_CHROME = 20
 _ACTION_COL_MIN = 56
 _ROW_HEIGHT = 30
+
+
+class LibraryEmptyState(QWidget):
+    """Icon, one sentence, and the same add action as the toolbar."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("LibraryEmptyState")
+        self._target: QPushButton | None = None
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 28, 24, 28)
+        layout.setSpacing(12)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.mark = QLabel()
+        self.mark.setObjectName("LibraryEmptyMark")
+        self.mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hint = QLabel()
+        self.hint.setObjectName("LibraryEmptyHint")
+        self.hint.setWordWrap(True)
+        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.action = QPushButton()
+        set_button_role(self.action, "SuccessGhostButton")
+        self.action.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.action.setMinimumHeight(COMPONENT_SIZES["text_button_height"])
+        self.action.setMinimumWidth(120)
+        self.action.hide()
+        self.action.clicked.connect(self._activate_target)
+
+        layout.addStretch(1)
+        layout.addWidget(self.mark, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.hint, 0)
+        layout.addWidget(self.action, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addStretch(1)
+
+    def set_message(self, text: str) -> None:
+        self.hint.setText(text or "")
+
+    def set_action_text(self, text: str) -> None:
+        label = str(text or "").strip()
+        self.action.setText(label)
+        self.action.setVisible(bool(label))
+
+    def bind_target(self, button: QPushButton) -> None:
+        if self._target is not None:
+            self._target.removeEventFilter(self)
+        self._target = button
+        button.installEventFilter(self)
+        self.action.setEnabled(button.isEnabled())
+
+    def eventFilter(self, watched, event):  # noqa: N802 — Qt API
+        if watched is self._target and event.type() == QEvent.Type.EnabledChange:
+            self.action.setEnabled(self._target.isEnabled())
+        return super().eventFilter(watched, event)
+
+    def showEvent(self, event):  # noqa: N802 — Qt API
+        self._paint_mark()
+        super().showEvent(event)
+
+    def changeEvent(self, event):  # noqa: N802 — Qt API
+        if event.type() in (QEvent.Type.StyleChange, QEvent.Type.PaletteChange):
+            self._paint_mark()
+        super().changeEvent(event)
+
+    def _activate_target(self) -> None:
+        target = self._target
+        if target is None or not target.isEnabled():
+            return
+        target.click()
+
+    def _paint_mark(self) -> None:
+        window = self.window()
+        is_dark = bool(getattr(window, "is_dark_mode", True))
+        color = QColor("#e6edf3" if is_dark else "#1f2328")
+        pixmap = QPixmap(36, 36)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(color, 1.6))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        path = QPainterPath()
+        path.moveTo(6, 13)
+        path.lineTo(6, 28)
+        path.lineTo(30, 28)
+        path.lineTo(30, 15)
+        path.lineTo(16, 15)
+        path.lineTo(13, 11)
+        path.lineTo(6, 11)
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.end()
+        self.mark.setPixmap(pixmap)
 # Before the pane has a height, never stretch a long library to one widget per row.
 _UNSIZED_LIST_CAP = _ROW_HEIGHT * 16
 _STATUS_READY = QColor("#2ec27e")
@@ -603,24 +697,30 @@ class LibraryGroupedVideoTree(QWidget):
         self._vbox.setContentsMargins(0, 0, 0, 0)
         self._vbox.setSpacing(0)
 
-        self._empty_label = QLabel()
-        self._empty_label.setObjectName("LibraryEmptyHint")
-        self._empty_label.setWordWrap(True)
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        self._empty_label.setVisible(False)
+        self._empty_state = LibraryEmptyState()
+        self._empty_label = self._empty_state.hint
+        self._empty_state.setVisible(False)
 
         self._scroll.setWidget(self._list_host)
         root.addWidget(self._column_header, 0)
-        root.addWidget(self._empty_label, 1)
+        root.addWidget(self._empty_state, 1)
         root.addWidget(self._scroll, 1)
         self.selection_changed.connect(self._sync_select_all_checkbox)
 
     @property
     def find_bar(self) -> ListFindBar:
         return self._find_bar
+
+    def bind_empty_action(self, button: QPushButton) -> None:
+        """The empty-state button runs the same add control as the toolbar."""
+        self._empty_state.bind_target(button)
+
+    def _show_empty(self, visible: bool) -> None:
+        self._empty_state.setVisible(visible)
+        self._empty_label.setVisible(visible)
+        if visible:
+            self._scroll.setVisible(False)
+            self._column_header.setVisible(False)
 
     def set_row_icon(self, icon: QIcon) -> None:
         """Row decoration. Video libraries keep the theme video icon when this is empty."""
@@ -646,6 +746,7 @@ class LibraryGroupedVideoTree(QWidget):
         find_none: str = "",
         find_prev_tip: str = "",
         find_next_tip: str = "",
+        empty_action: str = "",
     ) -> None:
         del remove_text  # legacy keyword kept for call-site compatibility
         if open_text:
@@ -703,13 +804,13 @@ class LibraryGroupedVideoTree(QWidget):
             # Fallback: use the open-button label as the action column title.
             self._header_action = open_text
             self._header_action_label.setText(open_text)
+        if empty_action:
+            self._empty_state.set_action_text(empty_action)
         if empty_text:
             self._empty_text = empty_text
-            self._empty_label.setText(empty_text)
+            self._empty_state.set_message(empty_text)
             if not self._blocks:
-                self._empty_label.setVisible(True)
-                self._scroll.setVisible(False)
-                self._column_header.setVisible(False)
+                self._show_empty(True)
         self._sync_column_widths()
 
     def set_libraries_remote(self, enabled: bool) -> None:
@@ -948,15 +1049,13 @@ class LibraryGroupedVideoTree(QWidget):
                 all_libs.add(text)
 
         if not all_libs:
-            self._empty_label.setVisible(True)
-            self._empty_label.setText(self._empty_text or "")
-            self._scroll.setVisible(False)
-            self._column_header.setVisible(False)
+            self._empty_state.set_message(self._empty_text or "")
+            self._show_empty(True)
             self._sync_select_all_checkbox()
             self._rebuild_find_hits(reveal=False)
             return
 
-        self._empty_label.setVisible(False)
+        self._show_empty(False)
         self._scroll.setVisible(True)
         self._column_header.setVisible(True)
         self._header_video_label.setText(self._header_video or "")

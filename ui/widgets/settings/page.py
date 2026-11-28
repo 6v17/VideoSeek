@@ -806,10 +806,10 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.section_paths_card, self.section_paths_form = self._create_settings_section(self.section_paths_title)
         self.section_general_form_host = QWidget()
         self.section_general_form = QGridLayout(self.section_general_form_host)
-        self.section_general_form.setContentsMargins(28, 8, 16, 12)
+        self.section_general_form.setContentsMargins(16, 8, 16, 12)
         self.section_general_form.setHorizontalSpacing(16)
         self.section_general_form.setVerticalSpacing(0)
-        self.section_general_form.setColumnMinimumWidth(0, 248)
+        self.section_general_form.setColumnMinimumWidth(0, 200)
         self.section_general_form.setColumnStretch(0, 0)
         self.section_general_form.setColumnStretch(1, 1)
         self._add_setting_row(

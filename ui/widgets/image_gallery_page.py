@@ -335,6 +335,7 @@ class ImageGalleryPage(QWidget):
         set_button_role(self.btn_refresh, "GhostButton")
         self.folder_tree = LibraryGroupedVideoTree()
         self.folder_tree.setMinimumHeight(280)
+        self.folder_tree.bind_empty_action(self.btn_add_folder)
         self.folder_tree.set_row_icon(_image_file_icon(self))
         toolbar.addWidget(self.btn_add_folder)
         toolbar.addWidget(self.btn_remove_folder)
@@ -381,6 +382,7 @@ class ImageGalleryPage(QWidget):
         self.folder_tree.set_action_texts(
             open_text=texts.get("open_folder", "Open"),
             empty_text=texts.get("gallery_list_empty", ""),
+            empty_action=texts.get("gallery_add_folder", ""),
             status_template=texts.get("gallery_folder_status", "{ready}/{total}"),
             offline_status_text=texts.get("library_path_missing_status", ""),
             header_video=texts.get("gallery_col_file", ""),

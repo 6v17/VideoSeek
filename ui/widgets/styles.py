@@ -2553,11 +2553,14 @@ QWidget[strongJumpRow="true"] {
     font-size: __FS_XS__;
     font-weight: 500;
 }
+#LibraryEmptyState {
+    background: transparent;
+}
 #LibraryEmptyHint {
     color: __MUTED__;
     font-size: __FS_SM__;
     font-weight: 600;
-    padding: __SPACE_6__ __SPACE_4__;
+    padding: 0 __SPACE_4__;
 }
 /* --- Dialog & popup chrome (object names + theme tokens) --- */
 QDialog#VSDialogShell,

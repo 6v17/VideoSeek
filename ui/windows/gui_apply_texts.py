@@ -215,6 +215,7 @@ class ApplyTextsGuiMixin:
         self.library_page.visual_video_tree.set_action_texts(
             open_text=t.get("open_folder", "Open"),
             empty_text=t.get("library_list_empty", ""),
+            empty_action=t.get("add_folder", "Add Library"),
             status_template=t.get("library_sync_status", "{ready}/{total} synced"),
             offline_status_text=t.get(
                 "library_path_missing_status",
@@ -231,6 +232,7 @@ class ApplyTextsGuiMixin:
         self.library_page.subtitle_video_tree.set_action_texts(
             open_text=t.get("open_folder", "Open"),
             empty_text=t.get("dialogue_library_empty", ""),
+            empty_action=t.get("add_folder", "Add Library"),
             status_template=t.get("library_extract_status", "{ready}/{total} extracted"),
             offline_status_text=t.get(
                 "library_path_missing_status",
